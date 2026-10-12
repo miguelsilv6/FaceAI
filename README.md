@@ -41,7 +41,11 @@ Vídeo ──► frames a N fps ──► detetor ──► embedding de cada fa
 
 ---
 
-## Instalação (desenvolvimento)
+## Instalação
+
+📄 **Guia completo:** [`docs/INSTALACAO.md`](docs/INSTALACAO.md). Inclui os requisitos da VM, a instalação nativa passo a passo, o Docker, a GPU, um posto offline, o serviço systemd e a resolução de problemas.
+
+### Resumo (desenvolvimento)
 
 Requisitos: Python 3.11+, Node 20+, `ffmpeg` (opcional mas recomendado) e as bibliotecas do WeasyPrint (Pango).
 

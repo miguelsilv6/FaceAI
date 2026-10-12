@@ -71,8 +71,8 @@ class DeepFaceEngine:
         for r in results:
             area = r.get("facial_area") or {}
             x, y, w, h = (int(area.get(k, 0)) for k in ("x", "y", "w", "h"))
-            # Sem deteção, o DeepFace devolve a imagem inteira com confiança 0.
-            if (x, y, w, h) == (0, 0, width, height) or w <= 0 or h <= 0:
+            confidence = float(r.get("face_confidence") or 0.0)
+            if w <= 0 or h <= 0 or _is_no_detection(x, y, w, h, confidence, width, height):
                 continue
             faces.append(
                 FaceObservation(
@@ -80,7 +80,7 @@ class DeepFaceEngine:
                     y=int(round(y / scale)),
                     w=int(round(w / scale)),
                     h=int(round(h / scale)),
-                    confidence=float(r.get("face_confidence") or 0.0),
+                    confidence=confidence,
                     embedding=np.asarray(r["embedding"], dtype=np.float32),
                 )
             )
@@ -88,6 +88,12 @@ class DeepFaceEngine:
 
     def environment(self) -> dict[str, Any]:
         return _environment()
+
+
+def _is_no_detection(x: int, y: int, w: int, h: int, confidence: float, width: int, height: int) -> bool:
+    """Sem faces, o DeepFace (enforce_detection=False) devolve a imagem inteira (às vezes com 1 px a menos)
+    e confiança 0. Isso não é uma face."""
+    return confidence <= 0.0 and x <= 1 and y <= 1 and w >= width - 2 and h >= height - 2
 
 
 @lru_cache(maxsize=1)
