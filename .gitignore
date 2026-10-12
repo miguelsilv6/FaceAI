@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Dados de casos (evidências, base de dados, recortes, auditoria) — nunca versionar
+data/
+backend/data/
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+
+# Diversos
+.DS_Store
+*.log
