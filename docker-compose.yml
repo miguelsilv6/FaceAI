@@ -1,0 +1,33 @@
+services:
+  faceai:
+    build:
+      context: .
+      args:
+        TF_EXTRA: cpu
+    ports:
+      - "127.0.0.1:8000:8000"   # só acessível localmente
+    volumes:
+      - ./data:/data            # casos, evidências, resultados e auditoria
+      - faceai-models:/models   # pesos dos modelos DeepFace (descarregados na 1.ª utilização)
+
+  faceai-gpu:
+    profiles: ["gpu"]
+    build:
+      context: .
+      args:
+        TF_EXTRA: gpu
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data
+      - faceai-models:/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+volumes:
+  faceai-models:

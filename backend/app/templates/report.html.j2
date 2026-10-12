@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="pt">
+<head>
+<meta charset="utf-8">
+<title>Relatório FaceAI — {{ case.name if case else "Caso" }} — Análise #{{ job.id }}</title>
+<style>
+  @page { size: A4; margin: 16mm 14mm; @bottom-right { content: "Página " counter(page) " de " counter(pages); font-size: 8pt; color: #666; } }
+  body { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 9.5pt; color: #1b1b1b; line-height: 1.4; max-width: 1100px; margin: 0 auto; padding: 16px; }
+  h1 { font-size: 17pt; margin: 0 0 4px; }
+  h2 { font-size: 12.5pt; border-bottom: 2px solid #1c3d5a; padding-bottom: 3px; margin-top: 22px; color: #1c3d5a; }
+  .muted { color: #666; }
+  table { border-collapse: collapse; width: 100%; margin: 6px 0; }
+  th, td { border: 1px solid #ccc; padding: 4px 6px; text-align: left; vertical-align: top; }
+  th { background: #eef2f6; font-weight: 600; }
+  table.kv th { width: 30%; }
+  .refs { display: flex; flex-wrap: wrap; gap: 10px; }
+  .refs figure { margin: 0; width: 120px; text-align: center; font-size: 8pt; }
+  .refs img { width: 120px; height: 120px; object-fit: cover; border: 1px solid #999; }
+  .seg { page-break-inside: avoid; border: 1px solid #ccc; padding: 8px; margin: 8px 0; display: flex; gap: 10px; }
+  .seg img.frame { max-width: 360px; max-height: 220px; }
+  .seg img.crop { width: 110px; height: 110px; object-fit: cover; }
+  td img { width: 56px; height: 56px; object-fit: cover; }
+  .warn { background: #fff4e5; border: 1px solid #f0b46c; padding: 8px 10px; margin: 10px 0; }
+  .ok { color: #1a7f37; font-weight: 600; } .bad { color: #b42318; font-weight: 600; } .pend { color: #946200; }
+  code { font-size: 8.5pt; }
+  tr { page-break-inside: avoid; }
+  table.det { font-size: 8pt; table-layout: fixed; }
+  table.det td, table.det th { overflow-wrap: anywhere; padding: 3px 4px; }
+</style>
+</head>
+<body>
+<h1>Relatório de análise facial em vídeo</h1>
+<div class="muted">FaceAI v{{ version }} · Gerado em {{ generated_at.strftime("%Y-%m-%d %H:%M:%S") }} UTC</div>
+
+<div class="warn"><strong>Aviso:</strong> os resultados são produzidos por um sistema automático de reconhecimento facial
+e são <em>indicativos</em>. Não constituem, por si só, uma identificação conclusiva e têm de ser validados por um
+perito, tendo em conta a qualidade das imagens, a iluminação, o ângulo, as oclusões e a possibilidade de falsos positivos e negativos.</div>
+
+<h2>1. Caso</h2>
+<table class="kv">
+  <tr><th>Caso</th><td>#{{ case.id }} — {{ case.name }}</td></tr>
+  <tr><th>Descrição</th><td>{{ case.description or "—" }}</td></tr>
+  <tr><th>Analista</th><td>{{ job.created_by or case.analyst or "—" }}</td></tr>
+  <tr><th>Análise</th><td>#{{ job.id }} · estado: {{ {"completed": "concluída", "failed": "falhou", "cancelled": "cancelada", "running": "a decorrer", "queued": "em fila"}.get(job.status.value, job.status.value) }}</td></tr>
+  <tr><th>Início / fim (UTC)</th><td>{{ job.started_at.strftime("%Y-%m-%d %H:%M:%S") if job.started_at else "—" }} / {{ job.finished_at.strftime("%Y-%m-%d %H:%M:%S") if job.finished_at else "—" }}</td></tr>
+  <tr><th>Resumo</th><td>{{ job.message }}</td></tr>
+</table>
+
+<h2>2. Imagens de referência</h2>
+<div class="refs">
+{% for r in references %}
+  <figure>{% if r.img %}<img src="{{ r.img }}" alt="">{% endif %}
+    <figcaption>#{{ r.ref.id }} {{ r.ref.filename }}<br>{{ r.ref.width }}×{{ r.ref.height }} px</figcaption></figure>
+{% endfor %}
+</div>
+
+<h2>3. Vídeos analisados</h2>
+<table>
+  <tr><th>#</th><th>Ficheiro</th><th>Tamanho</th><th>Duração</th><th>FPS</th><th>Resolução</th><th>Codec</th></tr>
+  {% for v in videos %}
+  <tr><td>{{ v.id }}</td><td>{{ v.filename }}</td><td>{{ "{:,}".format(v.size_bytes) }} B</td>
+      <td>{{ v.duration_s | ts }}</td><td>{{ "%.2f"|format(v.fps) }}</td><td>{{ v.width }}×{{ v.height }}</td><td>{{ v.codec or "—" }}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>4. Parâmetros e ambiente</h2>
+<table class="kv">
+  <tr><th>Modelo de reconhecimento</th><td>{{ job.params.model }}</td></tr>
+  <tr><th>Detetor facial</th><td>{{ job.params.detector }}</td></tr>
+  <tr><th>Métrica / limiar</th><td>distância de cosseno ≤ {{ job.params.threshold }} (candidatos até {{ "%.3f"|format(job.params.threshold + job.params.candidate_margin) }})</td></tr>
+  <tr><th>Amostragem</th><td>{{ job.params.sample_fps }} frames/s · ampliação ×{{ job.params.upscale }}</td></tr>
+  <tr><th>Filtros</th><td>face ≥ {{ job.params.min_face_size }} px · confiança do detetor ≥ {{ job.params.min_confidence }}</td></tr>
+  <tr><th>Agrupamento em segmentos</th><td>intervalo ≤ {{ job.params.segment_gap_s }} s</td></tr>
+  <tr><th>Estatísticas</th><td>{{ job.frames_processed }} frames analisados · {{ job.faces_detected }} faces válidas · {{ job.matches }} correspondências · {{ candidates }} candidatos abaixo do limiar de revisão</td></tr>
+  <tr><th>Ambiente</th><td>{% for k, v in job.environment.items() %}<code>{{ k }}={{ v }}</code>{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>
+</table>
+
+<h2>5. Segmentos de aparição</h2>
+{% if not segments %}<p><strong>Não foram encontradas correspondências acima do limiar definido.</strong></p>{% endif %}
+{% for s in segments %}
+<div class="seg">
+  {% if s.frame_img %}<img class="frame" src="{{ s.frame_img }}" alt="">{% endif %}
+  <div>
+    {% if s.crop_img %}<img class="crop" src="{{ s.crop_img }}" alt=""><br>{% endif %}
+    <strong>{{ s.video.filename if s.video else "vídeo #" ~ s.video_id }}</strong><br>
+    {{ s.start_s | ts }} → {{ s.end_s | ts }} ({{ "%.1f"|format(s.duration_s) }} s)<br>
+    {{ s.count }} deteção(ões) · melhor similaridade {{ "%.3f"|format(s.best_similarity) }} (distância {{ "%.3f"|format(s.best_distance) }})
+  </div>
+</div>
+{% endfor %}
+
+<h2>6. Correspondências detalhadas</h2>
+<p class="muted">Revisão humana: <span class="ok">{{ review_counts.confirmed }} confirmadas</span> ·
+  <span class="bad">{{ review_counts.rejected }} rejeitadas</span> · <span class="pend">{{ review_counts.pending }} por rever</span>.
+  {% if rows|length > max_images %}Só os primeiros {{ max_images }} recortes estão incluídos como imagem.{% endif %}</p>
+<table class="det">
+  <colgroup><col style="width:62px"><col style="width:6%"><col><col style="width:13%"><col style="width:7%"><col style="width:10%"><col style="width:9%"><col style="width:13%"><col style="width:13%"></colgroup>
+  <tr><th>Face</th><th>#</th><th>Vídeo</th><th>Tempo</th><th>Frame</th><th>Similaridade</th><th>Distância</th><th>Referência</th><th>Revisão</th></tr>
+  {% for r in rows %}
+  <tr><td>{% if r.crop_img %}<img src="{{ r.crop_img }}" alt="">{% endif %}</td><td>{{ r.detection_id }}</td><td>{{ r.video_filename }}</td>
+      <td>{{ r.timestamp }}</td><td>{{ r.frame_index }}</td><td>{{ "%.3f"|format(r.similarity) }}</td><td>{{ "%.3f"|format(r.distance) }}</td>
+      <td>{{ r.reference_filename }}</td>
+      <td class="{{ {'confirmed':'ok','rejected':'bad'}.get(r.review_status, 'pend') }}">{{ {'confirmed':'Confirmada','rejected':'Rejeitada'}.get(r.review_status, 'Por rever') }}
+        {% if r.reviewed_by %}<br><span class="muted">{{ r.reviewed_by }}</span>{% endif %}{% if r.review_note %}<br>{{ r.review_note }}{% endif %}</td></tr>
+  {% endfor %}
+</table>
+
+<h2>7. Registo de auditoria do caso</h2>
+<table>
+  <tr><th>#</th><th>Data/hora (UTC)</th><th>Utilizador</th><th>Ação</th><th>Detalhes</th></tr>
+  {% for e in audit %}
+  <tr><td>{{ e.id }}</td><td>{{ e.timestamp.strftime("%Y-%m-%d %H:%M:%S") }}</td><td>{{ e.actor }}</td><td>{{ e.action }}</td>
+      <td><code>{{ e.details | tojson }}</code></td></tr>
+  {% endfor %}
+</table>
+</body>
+</html>
