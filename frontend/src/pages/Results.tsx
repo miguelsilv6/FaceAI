@@ -44,6 +44,7 @@ export default function Results() {
   const [frameDet, setFrameDet] = useState<Detection | null>(null);
   const [frameVariant, setFrameVariant] = useState<"annotated" | "original">("annotated");
   const [deleting, setDeleting] = useState(false);
+  const [playError, setPlayError] = useState<number | null>(null); // id do vídeo que o browser não reproduziu
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -87,6 +88,24 @@ export default function Results() {
   }, [running, jobId, loadResults]);
 
   const video = videos.find((v) => v.id === videoId) ?? null;
+  const converting = video?.playback_status === "pending" || video?.playback_status === "running";
+  useEffect(() => {
+    if (!converting || !job) return;
+    const t = setInterval(() => {
+      api.videos(job.case_id).then((vs) => setVideos(vs.filter((v) => job.video_ids.includes(v.id))));
+    }, 3000);
+    return () => clearInterval(t);
+  }, [converting, job]);
+  const createPlaybackCopy = async () => {
+    if (!video) return;
+    try {
+      const updated = await api.createPlaybackCopy(video.id);
+      setVideos((vs) => vs.map((v) => (v.id === updated.id ? updated : v)));
+      setPlayError(null);
+    } catch (e) {
+      notifyError(e);
+    }
+  };
   const discover = job?.params.mode === "discover";
   const trackById = useMemo(() => new Map(tracks.map((t) => [t.id, t])), [tracks]);
   const personOf = (d: Detection) => (d.track_id != null ? trackById.get(d.track_id)?.person_id ?? null : null);
@@ -281,12 +300,39 @@ export default function Results() {
             )}
             {video && (
               <>
-                <video ref={videoRef} key={video.id} src={api.videoUrl(video.id)} controls preload="metadata"
-                  style={{ width: "100%", maxHeight: 420, background: "#000", borderRadius: 6 }}
-                  onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)} />
-                <Text size="xs" c="dimmed">
-                  Se o navegador não reproduzir este codec, use as imagens dos frames (botão 🔍 nas deteções) ou converta o vídeo para H.264/MP4.
-                </Text>
+                {converting ? (
+                  <Alert color="blue" icon={<IconInfoCircle size={18} />}>
+                    O browser não reproduz o formato original deste vídeo ({video.codec || "codec desconhecido"}). A criar uma
+                    cópia H.264 só para visualização:{" "}
+                    {video.playback_status === "running" ? `${Math.round(video.playback_progress * 100)}%` : "em fila"}.
+                    A análise e os resultados usam sempre o original.
+                    <Progress mt="xs" value={video.playback_progress * 100} animated striped />
+                  </Alert>
+                ) : (
+                  <video ref={videoRef} key={`${video.id}-${video.playback_status}`} src={api.videoUrl(video.id)} controls
+                    preload="metadata" style={{ width: "100%", maxHeight: 420, background: "#000", borderRadius: 6 }}
+                    onError={() => setPlayError(video.id)} onLoadedData={() => setPlayError(null)}
+                    onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)} />
+                )}
+                {!converting && (playError === video.id || video.playback_status === "failed"
+                  || video.playback_status === "unavailable") ? (
+                  <Alert color="orange" icon={<IconAlertTriangle size={18} />}>
+                    {video.playback_status === "failed" ? `A conversão para o browser falhou: ${video.playback_error}. `
+                      : video.playback_status === "unavailable" ? `${video.playback_error} `
+                        : "O browser não consegue reproduzir este vídeo. "}
+                    Pode criar uma cópia H.264 só para visualização; entretanto use os frames (botão 🔍 nas deteções).
+                    {video.playback_status !== "unavailable" && (
+                      <Button size="compact-xs" ml="xs" variant="light" onClick={createPlaybackCopy}>
+                        Criar cópia de reprodução
+                      </Button>
+                    )}
+                  </Alert>
+                ) : (
+                  <Text size="xs" c="dimmed">
+                    {video.playback_status === "ready" ? "Reprodução a partir de uma cópia H.264 (só visualização). " : ""}
+                    Também pode ver os frames de cada deteção (botão 🔍).
+                  </Text>
+                )}
                 <Timeline duration={video.duration_s} segments={videoSegments}
                   detections={discover ? videoDets.filter(inPerson) : videoDets.filter(isEffectiveMatch)}
                   realTime={video.dvr_start ? (sec) => realTime(video, sec) : undefined}

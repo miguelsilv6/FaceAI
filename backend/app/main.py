@@ -17,6 +17,7 @@ from .config import settings
 from .db import init_db
 from .services.face_engine import preload_models
 from .services.jobs import recover_interrupted_jobs, runner
+from .services.transcode import resume_pending_copies
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 # O WeasyPrint/fontTools registam centenas de linhas INFO por cada PDF gerado.
@@ -30,6 +31,7 @@ async def lifespan(_: FastAPI):
     init_db()
     recover_interrupted_jobs()
     cleanup_stale_uploads()
+    resume_pending_copies()
     preload_models()
     yield
     runner.shutdown()

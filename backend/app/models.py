@@ -64,6 +64,10 @@ class Video(SQLModel, table=True):
     height: int = 0
     codec: str = ""
     playback_path: str | None = None  # cópia H.264 só para visualização no navegador
+    # "" (por avaliar) | not_needed | pending | running | ready | failed | unavailable (sem ffmpeg)
+    playback_status: str = ""
+    playback_progress: float = 0.0
+    playback_error: str = ""
     # Hora real (relógio do DVR): hora_real(t) = dvr_start + t × dvr_rate + clock_offset_s
     dvr_start: str | None = None  # ISO 8601 sem fuso: hora "de parede" do DVR (não é convertida para UTC)
     dvr_rate: float = 1.0
