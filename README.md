@@ -3,7 +3,9 @@
 Aplicação web local para apoio à investigação forense digital. A partir de uma ou mais **imagens de referência** da face de uma pessoa, analisa **vídeos de CCTV** importados e indica **se** essa pessoa aparece, **quando** (timestamps e intervalos) e **com que grau de semelhança**.
 
 Inclui ainda:
-- tracking de faces e revisão humana dos resultados (por track ou por deteção);
+- **modo descoberta**, para quando não há amostra: todas as faces são detetadas e agrupadas em **pessoas distintas**, e qualquer uma pode depois servir de amostra;
+- tracking de faces e revisão humana dos resultados (por pessoa, por track ou por deteção);
+- **download do frame** de cada deteção, com marcação (JPEG) ou **original sem marcação** (PNG extraído do vídeo), registado na auditoria com SHA-256;
 - **hora real** do CCTV, por OCR da data/hora gravada na imagem, acerto manual e desvio do relógio do DVR;
 - score de qualidade de cada face;
 - relatório PDF/HTML e exportação CSV/JSON/ZIP;
@@ -111,13 +113,42 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 1. **Novo caso:** indica o nome ou referência do processo e o teu nome de analista (no cabeçalho).
 2. **Referências:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
 3. **Vídeos:** arrasta os ficheiros de CCTV. O envio é **em blocos e retomável**: se a ligação cair, volta a largar o mesmo ficheiro e o upload continua de onde parou, mesmo depois de recarregar a página. Os metadados são extraídos automaticamente. Se o codec não for reproduzível no browser e houver `ffmpeg`, é criada uma **cópia H.264 só para visualização**. A análise usa sempre o original.
-4. **Análises:** escolhe vídeos, referências, modelo, fps e limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo.
+4. **Análises:** escolhe o modo (**procurar uma pessoa** com amostra, ou **descobrir todas as faces** sem amostra), os vídeos, as referências, o modelo, os fps e o limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo.
 5. **Resultados:**
    - player com linha temporal e tabela de segmentos;
    - **vista por tracks**: um cartão por pessoa ou trajetória, com revisão do track inteiro;
    - **vista por deteções**, ordenável por tempo, semelhança ou **qualidade**;
-   - frame completo anotado.
+   - **frame completo** (botão 🔍): com marcação ou original, e download de qualquer um deles. Ver [Download do frame](#download-do-frame).
 6. **Exportar:** relatório PDF ou HTML, com estatísticas, parâmetros, tracks e qualidade; CSV; JSON; ou ZIP.
+
+### Modo descoberta (sem amostra)
+
+Quando não há nenhuma fotografia da pessoa (por exemplo, para saber *quem* passou por uma câmara), escolhe-se **Descobrir todas as faces** em *Nova análise*. Se o caso não tiver amostras válidas, este é o modo por omissão.
+
+1. Todas as faces que passam os filtros (tamanho, confiança, qualidade) são seguidas entre frames (o **tracking é obrigatório** neste modo). De cada track guarda-se a primeira face, as que melhoram a qualidade e uma a cada 10 s.
+2. Cada track é representado pela média, ponderada pela qualidade, das suas 5 melhores faces.
+3. No fim, os tracks de todos os vídeos são **agrupados em pessoas** por centróides: cada track junta-se ao grupo cujo centro está a uma distância de cosseno ≤ **limiar de agrupamento**, ou abre um grupo novo. Depois, grupos cujos centros convergiram são fundidos. Ao contrário do *single linkage*, um track intermédio não encadeia duas pessoas diferentes. A pessoa #1 é a que mais aparece.
+4. Nos resultados, a vista **Pessoas** mostra um cartão por pessoa com a melhor face, os tracks, as faces, os vídeos e a primeira aparição. Selecionar uma pessoa filtra a linha temporal, as aparições, os tracks e as faces.
+5. **Correção do agrupamento,** que fica registada na auditoria:
+   - **juntar** duas pessoas que são a mesma;
+   - **mover** um track para outra pessoa ou para uma pessoa nova;
+   - **confirmar** ou **rejeitar** uma pessoa inteira (por exemplo, uma falsa deteção).
+6. **Amostra:** o recorte de qualquer face (ampliado se for pequeno) pode ser adicionado às imagens de referência do caso. A partir daí, uma análise normal procura essa pessoa noutros vídeos.
+
+Os embeddings dos tracks ficam em `jobs/job_NNNNN/track_embeddings.npz`. O relatório, o CSV (`person_id`) e o JSON (`persons`, com as aparições e a hora real) incluem as pessoas.
+
+> O agrupamento é uma ferramenta de **triagem**. A mesma pessoa pode surgir em mais de um grupo (ângulos, iluminação, oclusões) e pessoas parecidas podem ficar juntas. Um limiar mais baixo separa mais.
+
+### Download do frame
+
+No frame completo de uma deteção (🔍) há dois downloads:
+- **Frame com marcação (JPEG):** o frame guardado na análise, com a caixa e a etiqueta.
+- **Frame original (PNG):** o frame extraído do vídeo analisado, sem marcações e sem perdas em relação ao frame descodificado. Para garantir que é o mesmo frame que a análise viu, é comparado com o recorte da face guardado na análise:
+  - o salto direto (*seek*) é aceite se o recorte coincidir;
+  - senão, procura-se um vizinho que seja o único a coincidir;
+  - senão, o vídeo é lido sequencialmente até ao frame N, como na análise. É exato, mas mais lento em vídeos longos.
+
+O nome do ficheiro identifica o caso, a análise, o vídeo, o frame, o tempo e a deteção. Cada download fica na auditoria com o **SHA-256** do ficheiro entregue e o método de extração.
 
 ### Hora real do CCTV
 
@@ -173,13 +204,15 @@ backend/
       motion.py             pré-filtro de movimento
       quality.py            score de qualidade da face
       tracking.py           tracker IoU + embedding
+      clustering.py, persons.py   modo descoberta: agrupamento de tracks em pessoas
+      frames.py             extração verificada do frame original para download
       jobs.py               pipeline de análise em background (movimento → cascata → deteção → qualidade → tracking)
       matcher.py, segments.py, references.py, video_processor.py, reports.py, transcode.py, audit.py
     templates/report.html.j2
   tests/                    pytest (motor falso + testes com modelos reais)
 frontend/src/
   pages/                    CaseList, CaseView, Results
-  components/               JobsPanel, TrackCard, DetectionCard, QualityBadge, Timeline, ...
+  components/               JobsPanel, PersonCard, TrackCard, DetectionCard, QualityBadge, Timeline, ...
 ```
 
 ## Testes
@@ -194,6 +227,5 @@ FACEAI_E2E_DATASET=/caminho/deepface/tests/unit/dataset pytest -m e2e   # modelo
 
 - Hash SHA-256 das evidências na importação e log de auditoria encadeado.
 - Identidade do analista a partir do Cloudflare Access.
-- Pesquisa "inversa": agrupar (clustering) as faces de um vídeo sem referência.
+- Comparar pessoas descobertas entre análises diferentes (os embeddings já ficam guardados).
 - Várias pessoas por caso numa única passagem pelo vídeo.
-- Timestamp real do CCTV (OCR da data/hora gravada na imagem).

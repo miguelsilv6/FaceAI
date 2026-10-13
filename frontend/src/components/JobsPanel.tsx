@@ -1,14 +1,14 @@
 import {
-  Accordion, Button, Card, Group, MultiSelect, NumberInput, Progress, Select, SimpleGrid, Stack, Switch, Table, Text,
-  Title,
+  Accordion, Alert, Button, Card, Group, MultiSelect, NumberInput, Progress, SegmentedControl, Select, SimpleGrid, Stack,
+  Switch, Table, Text, Title,
 } from "@mantine/core";
-import { IconPlayerPlay } from "@tabler/icons-react";
+import { IconInfoCircle, IconPlayerPlay } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api, formatDate } from "../api";
 import { notifyError } from "../notify";
-import type { Job, JobParams, ReferenceImage, SystemInfo, Video } from "../types";
+import type { Job, JobMode, JobParams, ReferenceImage, SystemInfo, Video } from "../types";
 import JobStatusBadge from "./JobStatusBadge";
 
 interface Props {
@@ -37,6 +37,12 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
   }, []);
   useEffect(() => setVideoIds(videos.map((v) => String(v.id))), [videos]);
   useEffect(() => setRefIds(validRefs.map((r) => String(r.id))), [validRefs]);
+  // Sem nenhuma amostra válida, o modo por omissão é a descoberta de todas as faces.
+  const [modeTouched, setModeTouched] = useState(false);
+  useEffect(() => {
+    if (!modeTouched) setParams((p) => (p ? { ...p, mode: validRefs.length ? "match" : "discover" } : p));
+  }, [validRefs, modeTouched, system]);
+  const discover = params?.mode === "discover";
 
   // Atualiza a lista enquanto houver análises a decorrer.
   const active = jobs.some((j) => j.status === "running" || j.status === "queued");
@@ -52,7 +58,7 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
     if (!params) return;
     setSubmitting(true);
     try {
-      const job = await api.createJob(caseId, params, videoIds.map(Number), refIds.map(Number));
+      const job = await api.createJob(caseId, params, videoIds.map(Number), discover ? [] : refIds.map(Number));
       navigate(`/jobs/${job.id}`);
     } catch (e) {
       notifyError(e, "Não foi possível iniciar a análise");
@@ -71,12 +77,26 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
           <Text c="dimmed">A carregar configuração…</Text>
         ) : (
           <Stack>
-            <SimpleGrid cols={{ base: 1, md: 2 }}>
+            <SegmentedControl value={params.mode} fullWidth
+              onChange={(m) => { setModeTouched(true); set("mode", m as JobMode); }}
+              data={[{ value: "match", label: "Procurar uma pessoa (com amostra)" },
+                { value: "discover", label: "Descobrir todas as faces (sem amostra)" }]} />
+            {discover && (
+              <Alert color="blue" icon={<IconInfoCircle size={18} />}>
+                Todas as faces detetadas são seguidas e agrupadas automaticamente em <b>pessoas distintas</b>. No fim
+                pode rever cada pessoa, juntar ou separar grupos e usar uma face como amostra para procurar essa pessoa
+                noutros vídeos.
+              </Alert>
+            )}
+            <SimpleGrid cols={{ base: 1, md: discover ? 1 : 2 }}>
               <MultiSelect label="Vídeos" data={videos.map((v) => ({ value: String(v.id), label: `#${v.id} ${v.filename}` }))}
                 value={videoIds} onChange={setVideoIds} placeholder="Selecione os vídeos" />
-              <MultiSelect label="Imagens de referência (válidas)"
-                data={validRefs.map((r) => ({ value: String(r.id), label: `#${r.id} ${r.filename}` }))}
-                value={refIds} onChange={setRefIds} placeholder="Selecione as referências" />
+              {!discover && (
+                <MultiSelect label="Imagens de referência (válidas)"
+                  data={validRefs.map((r) => ({ value: String(r.id), label: `#${r.id} ${r.filename}` }))}
+                  value={refIds} onChange={setRefIds}
+                  placeholder={validRefs.length ? "Selecione as referências" : "Sem amostras válidas — use o modo de descoberta"} />
+              )}
             </SimpleGrid>
             <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }}>
               <Select label="Modelo de reconhecimento" value={params.model} allowDeselect={false}
@@ -87,8 +107,9 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                 onChange={(d) => d && set("detector", d)} />
               <NumberInput label="Frames analisados por segundo" min={0.1} max={60} step={0.5} decimalScale={2}
                 value={params.sample_fps} onChange={(v) => set("sample_fps", num(v, 2))} />
-              <NumberInput label="Limiar (distância de cosseno)" min={0.01} max={1.99} step={0.01} decimalScale={3}
-                description="Menor = mais restritivo" value={params.threshold ?? ""}
+              <NumberInput label={discover ? "Limiar de agrupamento" : "Limiar (distância de cosseno)"}
+                min={0.01} max={1.99} step={0.01} decimalScale={3}
+                description={discover ? "Menor = separa mais pessoas" : "Menor = mais restritivo"} value={params.threshold ?? ""}
                 onChange={(v) => set("threshold", num(v, 0.68))} />
             </SimpleGrid>
             <SimpleGrid cols={{ base: 1, sm: 3 }}>
@@ -96,8 +117,10 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                 checked={params.motion_filter} onChange={(e) => set("motion_filter", e.currentTarget.checked)} />
               <Switch label="Cascata de deteção" description="Detetor rápido primeiro; o principal só se houver faces"
                 checked={params.cascade} onChange={(e) => set("cascade", e.currentTarget.checked)} />
-              <Switch label="Tracking de faces" description="Agrupa a mesma face entre frames"
-                checked={params.tracking} onChange={(e) => set("tracking", e.currentTarget.checked)} />
+              <Switch label="Tracking de faces"
+                description={discover ? "Obrigatório na descoberta" : "Agrupa a mesma face entre frames"}
+                checked={params.tracking || discover} disabled={discover}
+                onChange={(e) => set("tracking", e.currentTarget.checked)} />
             </SimpleGrid>
             <Accordion variant="contained">
               <Accordion.Item value="adv">
@@ -106,7 +129,7 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                   <Stack>
                     <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }}>
                       <NumberInput label="Margem de candidatos" description="Guardar para revisão até limiar + margem"
-                        min={0} max={0.5} step={0.01} decimalScale={3} value={params.candidate_margin}
+                        disabled={discover} min={0} max={0.5} step={0.01} decimalScale={3} value={params.candidate_margin}
                         onChange={(v) => set("candidate_margin", num(v, 0.08))} />
                       <NumberInput label="Tamanho mínimo da face (px)" min={0} value={params.min_face_size}
                         onChange={(v) => set("min_face_size", num(v, 20))} />
@@ -129,7 +152,7 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                       <Select label="Detetor rápido (cascata)" disabled={!params.cascade} data={system.detectors}
                         value={params.fast_detector} allowDeselect={false}
                         onChange={(d) => d && set("fast_detector", d)} />
-                      <NumberInput label="Intervalo máx. no track (s)" disabled={!params.tracking} min={0} step={0.5}
+                      <NumberInput label="Intervalo máx. no track (s)" disabled={!params.tracking && !discover} min={0} step={0.5}
                         decimalScale={1} value={params.track_gap_s} onChange={(v) => set("track_gap_s", num(v, 2))} />
                       <NumberInput label="Intervalo máx. no segmento (s)" min={0} step={0.5} decimalScale={1}
                         value={params.segment_gap_s} onChange={(v) => set("segment_gap_s", num(v, 2))} />
@@ -140,7 +163,7 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
             </Accordion>
             <Group justify="flex-end">
               <Button leftSection={<IconPlayerPlay size={18} />} onClick={start} loading={submitting}
-                disabled={!videoIds.length || !refIds.length}>
+                disabled={!videoIds.length || (!discover && !refIds.length)}>
                 Iniciar análise
               </Button>
             </Group>
@@ -156,7 +179,7 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
             <Table highlightOnHover>
               <Table.Thead>
                 <Table.Tr><Table.Th>#</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Progresso</Table.Th>
-                  <Table.Th>Modelo / detetor</Table.Th><Table.Th>Correspondências</Table.Th><Table.Th>Criada</Table.Th>
+                  <Table.Th>Modelo / detetor</Table.Th><Table.Th>Resultado</Table.Th><Table.Th>Criada</Table.Th>
                   <Table.Th>Analista</Table.Th></Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -166,7 +189,7 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                     <Table.Td><JobStatusBadge status={j.status} /></Table.Td>
                     <Table.Td w={160}><Progress value={j.progress * 100} animated={j.status === "running"} /></Table.Td>
                     <Table.Td>{j.params.model} / {j.params.detector}</Table.Td>
-                    <Table.Td>{j.matches}</Table.Td>
+                    <Table.Td>{j.params.mode === "discover" ? `${j.persons} pessoas (descoberta)` : j.matches}</Table.Td>
                     <Table.Td>{formatDate(j.created_at)}</Table.Td>
                     <Table.Td>{j.created_by}</Table.Td>
                   </Table.Tr>

@@ -29,14 +29,16 @@
 </style>
 </head>
 <body>
-<h1>Relatório de análise facial em vídeo</h1>
+{% set sec = namespace(n=0) %}
+{% macro h(title) %}{% set sec.n = sec.n + 1 %}<h2>{{ sec.n }}. {{ title }}</h2>{% endmacro %}
+<h1>Relatório de análise facial em vídeo{% if discover %} — descoberta de pessoas{% endif %}</h1>
 <div class="muted">FaceAI v{{ version }} · Gerado em {{ generated_at.strftime("%Y-%m-%d %H:%M:%S") }} UTC</div>
 
 <div class="warn"><strong>Aviso:</strong> os resultados são produzidos por um sistema automático de reconhecimento facial
 e são <em>indicativos</em>. Não constituem, por si só, uma identificação conclusiva e têm de ser validados por um
 perito, tendo em conta a qualidade das imagens, a iluminação, o ângulo, as oclusões e a possibilidade de falsos positivos e negativos.</div>
 
-<h2>1. Caso</h2>
+{{ h("Caso") }}
 <table class="kv">
   <tr><th>Caso</th><td>#{{ case.id }} — {{ case.name }}</td></tr>
   <tr><th>Descrição</th><td>{{ case.description or "—" }}</td></tr>
@@ -46,15 +48,24 @@ perito, tendo em conta a qualidade das imagens, a iluminação, o ângulo, as oc
   <tr><th>Resumo</th><td>{{ job.message }}</td></tr>
 </table>
 
-<h2>2. Imagens de referência</h2>
+{% if discover %}
+{{ h("Modo de análise") }}
+<p><strong>Descoberta, sem imagem de referência.</strong> Todas as faces detetadas foram seguidas entre frames (tracks)
+e os tracks foram agrupados automaticamente em pessoas distintas pela semelhança dos embeddings faciais (distância de
+cosseno ao centro do grupo ≤ {{ job.params.threshold }}). O agrupamento é uma ferramenta de triagem: a mesma pessoa
+pode surgir em mais de um grupo (ângulos, iluminação, oclusões) e pessoas semelhantes podem ficar juntas. Os grupos
+foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_changed"]) | list %} corrigidos manualmente (ver auditoria) e{% endif %} revistos conforme indicado.</p>
+{% else %}
+{{ h("Imagens de referência") }}
 <div class="refs">
 {% for r in references %}
   <figure>{% if r.img %}<img src="{{ r.img }}" alt="">{% endif %}
     <figcaption>#{{ r.ref.id }} {{ r.ref.filename }}<br>{{ r.ref.width }}×{{ r.ref.height }} px</figcaption></figure>
 {% endfor %}
 </div>
+{% endif %}
 
-<h2>3. Vídeos analisados</h2>
+{{ h("Vídeos analisados") }}
 <table>
   <tr><th>#</th><th>Ficheiro</th><th>Tamanho</th><th>Duração</th><th>FPS</th><th>Resolução</th><th>Codec</th></tr>
   {% for v in videos %}
@@ -78,22 +89,44 @@ perito, tendo em conta a qualidade das imagens, a iluminação, o ângulo, as oc
 </table>
 {% if videos | selectattr("dvr_start") | list %}<p class="muted">Hora real = relógio do DVR no instante do vídeo (calibrado por OCR da data/hora impressa ou acerto manual) + desvio indicado. Precisão típica: ±1 s. A hora do DVR não é verificada de forma independente.</p>{% endif %}
 
-<h2>4. Parâmetros e ambiente</h2>
+{{ h("Parâmetros e ambiente") }}
 <table class="kv">
   <tr><th>Modelo de reconhecimento</th><td>{{ job.params.model }}</td></tr>
   <tr><th>Detetor facial</th><td>{{ job.params.detector }}</td></tr>
+  {% if discover %}
+  <tr><th>Agrupamento em pessoas</th><td>distância de cosseno ao centro do grupo ≤ {{ job.params.threshold }} · embedding do track = média ponderada pela qualidade das suas 5 melhores faces</td></tr>
+  {% else %}
   <tr><th>Métrica / limiar</th><td>distância de cosseno ≤ {{ job.params.threshold }} (candidatos até {{ "%.3f"|format(job.params.threshold + job.params.candidate_margin) }})</td></tr>
+  {% endif %}
   <tr><th>Amostragem</th><td>{{ job.params.sample_fps }} frames/s · ampliação ×{{ job.params.upscale }}</td></tr>
   <tr><th>Filtros</th><td>face ≥ {{ job.params.min_face_size }} px · confiança do detetor ≥ {{ job.params.min_confidence }} · qualidade ≥ {{ job.params.get("min_quality", 0) }}</td></tr>
   <tr><th>Pré-filtro de movimento</th><td>{% if job.params.get("motion_filter") %}ativo · limiar {{ job.params.motion_threshold }} (fração de píxeis alterados) · frame-chave a cada {{ job.params.keyframe_interval_s }} s{% else %}desativado{% endif %}</td></tr>
   <tr><th>Cascata de deteção</th><td>{% if job.params.get("cascade") and job.params.get("fast_detector") %}1.ª passagem com {{ job.params.fast_detector }}, deteção completa com {{ job.params.detector }} só quando há faces{% else %}desativada{% endif %}</td></tr>
-  <tr><th>Tracking</th><td>{% if job.params.get("tracking") %}ativo · intervalo máx. {{ job.params.track_gap_s }} s · match do track pela média das 3 melhores distâncias{% else %}desativado{% endif %}</td></tr>
+  <tr><th>Tracking</th><td>{% if job.params.get("tracking") %}ativo · intervalo máx. {{ job.params.track_gap_s }} s · {% if discover %}obrigatório no modo descoberta{% else %}match do track pela média das 3 melhores distâncias{% endif %}{% else %}desativado{% endif %}</td></tr>
   <tr><th>Agrupamento em segmentos</th><td>intervalo ≤ {{ job.params.segment_gap_s }} s</td></tr>
-  <tr><th>Estatísticas</th><td>{{ job.frames_sampled }} frames amostrados · {{ job.frames_skipped_motion }} saltados (sem movimento) · {{ job.frames_skipped_noface }} saltados (sem faces na 1.ª passagem) · {{ job.frames_processed }} com deteção completa · {{ job.faces_detected }} faces válidas · {{ job.matches }} correspondências em frames · {{ tracks|length }} tracks com correspondência · {{ candidates }} candidatos/continuações</td></tr>
+  <tr><th>Estatísticas</th><td>{{ job.frames_sampled }} frames amostrados · {{ job.frames_skipped_motion }} saltados (sem movimento) · {{ job.frames_skipped_noface }} saltados (sem faces na 1.ª passagem) · {{ job.frames_processed }} com deteção completa · {{ job.faces_detected }} faces válidas · {% if discover %}{{ job.tracks }} tracks · {{ persons|length }} pessoas distintas · {{ rows|length }} faces guardadas{% else %}{{ job.matches }} correspondências em frames · {{ tracks|length }} tracks com correspondência · {{ candidates }} candidatos/continuações{% endif %}</td></tr>
   <tr><th>Ambiente</th><td>{% for k, v in job.environment.items() %}<code>{{ k }}={{ v }}</code>{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>
 </table>
 
-<h2>5. Segmentos de aparição</h2>
+{% if discover %}
+{{ h("Pessoas distintas") }}
+{% if not persons %}<p><strong>Não foram detetadas faces que cumprissem os filtros definidos.</strong></p>{% endif %}
+{% for p in persons %}
+<div class="seg">
+  {% if p.frame_img %}<img class="frame" src="{{ p.frame_img }}" alt="">{% endif %}
+  <div>
+    {% if p.crop_img %}<img class="crop" src="{{ p.crop_img }}" alt=""><br>{% endif %}
+    <strong>Pessoa #{{ p.person_id }}</strong> ·
+    <span class="{{ {'confirmed':'ok','rejected':'bad'}.get(p.review_status, 'pend') }}">{{ {'confirmed':'Confirmada','rejected':'Rejeitada','mixed':'Revisão parcial'}.get(p.review_status, 'Por rever') }}</span><br>
+    {{ p.n_tracks }} track(s) · {{ p.n_faces }} faces · {{ p.video_ids|length }} vídeo(s) · tempo visível ≈ {{ "%.1f"|format(p.duration_s) }} s · coesão: dist. máx. ao centro {{ "%.3f"|format(p.max_distance) }}<br>
+    {% for a in p.appearances %}
+      {{ a.video_filename or "vídeo #" ~ a.video_id }}: {{ a.start_s | ts }} → {{ a.end_s | ts }}{% if a.real_start %} · <strong>{{ a.real_start }} → {{ a.real_end }}</strong>{% endif %}<br>
+    {% endfor %}
+  </div>
+</div>
+{% endfor %}
+{% else %}
+{{ h("Segmentos de aparição") }}
 {% if not segments %}<p><strong>Não foram encontradas correspondências acima do limiar definido.</strong></p>{% endif %}
 {% for s in segments %}
 <div class="seg">
@@ -107,16 +140,17 @@ perito, tendo em conta a qualidade das imagens, a iluminação, o ângulo, as oc
   </div>
 </div>
 {% endfor %}
+{% endif %}
 
 {% if job.params.get("tracking") %}
-<h2>6. Tracks com correspondência</h2>
-<p class="muted">Um track agrupa as deteções da mesma face em frames consecutivos. A decisão usa a média das (até) 3 melhores distâncias do track.</p>
-{% if not tracks %}<p>Nenhum track com correspondência.</p>{% else %}
+{{ h("Tracks" if discover else "Tracks com correspondência") }}
+<p class="muted">Um track agrupa as deteções da mesma face em frames consecutivos. {% if discover %}A distância é a do track ao centro do grupo da sua pessoa.{% else %}A decisão usa a média das (até) 3 melhores distâncias do track.{% endif %}</p>
+{% if not tracks %}<p>Nenhum track{% if not discover %} com correspondência{% endif %}.</p>{% else %}
 <table class="det">
   <colgroup><col style="width:62px"><col style="width:7%"><col><col style="width:14%"><col style="width:14%"><col style="width:8%"><col style="width:11%"><col style="width:9%"><col style="width:12%"></colgroup>
-  <tr><th>Face</th><th>Track</th><th>Vídeo</th><th>Início</th><th>Fim</th><th>Faces</th><th>Dist. track</th><th>Qualid.</th><th>Revisão</th></tr>
+  <tr><th>Face</th><th>Track</th><th>Vídeo</th><th>Início</th><th>Fim</th><th>Faces</th><th>{{ "Dist. ao centro" if discover else "Dist. track" }}</th><th>Qualid.</th><th>Revisão</th></tr>
   {% for x in tracks %}
-  <tr><td>{% if x.crop_img %}<img src="{{ x.crop_img }}" alt="">{% endif %}</td><td>#{{ x.t.id }}</td><td>{{ x.video.filename if x.video else x.t.video_id }}</td>
+  <tr><td>{% if x.crop_img %}<img src="{{ x.crop_img }}" alt="">{% endif %}</td><td>#{{ x.t.id }}{% if x.t.person_id %}<br>P{{ x.t.person_id }}{% endif %}</td><td>{{ x.video.filename if x.video else x.t.video_id }}</td>
       <td>{{ x.t.start_s | ts }}{% if x.real_start %}<br><strong>{{ x.real_start }}</strong>{% endif %}</td><td>{{ x.t.end_s | ts }}{% if x.real_end %}<br><strong>{{ x.real_end }}</strong>{% endif %}</td><td>{{ x.t.n_faces }}</td><td>{{ "%.3f"|format(x.t.track_distance) }}</td><td>{{ "%.2f"|format(x.t.best_quality) }}</td>
       <td class="{{ {'confirmed':'ok','rejected':'bad'}.get(x.t.review_status.value, 'pend') }}">{{ {'confirmed':'Confirmado','rejected':'Rejeitado'}.get(x.t.review_status.value, 'Por rever') }}</td></tr>
   {% endfor %}
@@ -124,23 +158,23 @@ perito, tendo em conta a qualidade das imagens, a iluminação, o ângulo, as oc
 {% endif %}
 {% endif %}
 
-<h2>{{ 7 if job.params.get("tracking") else 6 }}. Correspondências detalhadas</h2>
+{{ h("Faces guardadas" if discover else "Correspondências detalhadas") }}
 <p class="muted">Revisão humana: <span class="ok">{{ review_counts.confirmed }} confirmadas</span> ·
   <span class="bad">{{ review_counts.rejected }} rejeitadas</span> · <span class="pend">{{ review_counts.pending }} por rever</span>.
   {% if rows|length > max_images %}Só os primeiros {{ max_images }} recortes estão incluídos como imagem.{% endif %}</p>
 <table class="det">
   <colgroup><col style="width:62px"><col style="width:6%"><col><col style="width:14%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:7%"><col style="width:7%"><col style="width:12%"></colgroup>
-  <tr><th>Face</th><th>#</th><th>Vídeo</th><th>Tempo</th><th>Frame</th><th>Simil.</th><th>Dist.</th><th>Q</th><th>Track</th><th>Revisão</th></tr>
+  <tr><th>Face</th><th>#</th><th>Vídeo</th><th>Tempo</th><th>Frame</th><th>{{ "Pessoa" if discover else "Simil." }}</th><th>Dist.{% if discover %} centro{% endif %}</th><th>Q</th><th>Track</th><th>Revisão</th></tr>
   {% for r in rows %}
   <tr><td>{% if r.crop_img %}<img src="{{ r.crop_img }}" alt="">{% endif %}</td><td>{{ r.detection_id }}</td><td>{{ r.video_filename }}</td>
-      <td>{{ r.timestamp }}{% if r.real_time %}<br><strong>{{ r.real_time }}</strong>{% endif %}</td><td>{{ r.frame_index }}</td><td>{{ "%.3f"|format(r.similarity) }}</td><td>{{ "%.3f"|format(r.distance) }}</td>
+      <td>{{ r.timestamp }}{% if r.real_time %}<br><strong>{{ r.real_time }}</strong>{% endif %}</td><td>{{ r.frame_index }}</td><td>{% if discover %}{{ ("#" ~ r.person_id) if r.person_id != "" else "—" }}{% else %}{{ "%.3f"|format(r.similarity) }}{% endif %}</td><td>{{ "%.3f"|format(r.distance) }}</td>
       <td>{{ "%.2f"|format(r.quality) }}</td><td>{{ ("#" ~ r.track_id) if r.track_id != "" else "—" }}</td>
       <td class="{{ {'confirmed':'ok','rejected':'bad'}.get(r.review_status, 'pend') }}">{{ {'confirmed':'Confirmada','rejected':'Rejeitada'}.get(r.review_status, 'Por rever') }}
         {% if r.reviewed_by %}<br><span class="muted">{{ r.reviewed_by }}</span>{% endif %}{% if r.review_note %}<br>{{ r.review_note }}{% endif %}</td></tr>
   {% endfor %}
 </table>
 
-<h2>{{ 8 if job.params.get("tracking") else 7 }}. Registo de auditoria do caso</h2>
+{{ h("Registo de auditoria do caso") }}
 <table>
   <tr><th>#</th><th>Data/hora (UTC)</th><th>Utilizador</th><th>Ação</th><th>Detalhes</th></tr>
   {% for e in audit %}

@@ -16,6 +16,9 @@ class CaseCreate(BaseModel):
 
 
 class JobParams(BaseModel):
+    # "match": procurar a pessoa das imagens de referência; "discover": sem referência, agrupar todas as faces
+    # em pessoas distintas (o limiar passa a ser o de agrupamento e o tracking é obrigatório).
+    mode: str = Field("match", pattern="^(match|discover)$")
     # Modelo/detetor do motor ativo; vazios = valores por omissão do motor.
     model: str | None = None
     detector: str | None = None
@@ -50,6 +53,14 @@ class JobCreate(BaseModel):
 class ReviewUpdate(BaseModel):
     status: ReviewStatus
     note: str = ""
+
+
+class PersonMerge(BaseModel):
+    person_ids: list[int] = Field(min_length=2, description="Pessoas a juntar; ficam com o menor número")
+
+
+class TrackPerson(BaseModel):
+    person_id: int | None = Field(None, ge=1, description="Pessoa de destino; vazio = nova pessoa")
 
 
 class UploadCreate(BaseModel):

@@ -91,6 +91,7 @@ class Job(SQLModel, table=True):
     frames_skipped_motion: int = 0
     frames_skipped_noface: int = 0
     tracks: int = 0
+    persons: int = 0  # modo descoberta: pessoas distintas (grupos de tracks)
     message: str = ""
     created_by: str = ""
     created_at: datetime = Field(default_factory=utcnow)
@@ -99,12 +100,15 @@ class Job(SQLModel, table=True):
 
 
 class Detection(SQLModel, table=True):
-    """Face detetada num frame cuja distância a uma referência ficou abaixo do limiar de candidato."""
+    """Face detetada num frame cuja distância a uma referência ficou abaixo do limiar de candidato.
+
+    No modo descoberta (sem referência) `reference_id` é nulo e a distância é ao centro do grupo da pessoa.
+    """
 
     id: int | None = Field(default=None, primary_key=True)
     job_id: int = Field(foreign_key="job.id", index=True)
     video_id: int = Field(foreign_key="video.id", index=True)
-    reference_id: int = Field(foreign_key="referenceimage.id")
+    reference_id: int | None = Field(default=None, foreign_key="referenceimage.id")
     frame_index: int
     timestamp_s: float
     x: int
@@ -135,6 +139,7 @@ class Track(SQLModel, table=True):
     job_id: int = Field(foreign_key="job.id", index=True)
     video_id: int = Field(foreign_key="video.id", index=True)
     reference_id: int | None = Field(default=None, foreign_key="referenceimage.id")
+    person_id: int | None = Field(default=None, index=True)  # modo descoberta: n.º da pessoa nesta análise
     start_s: float
     end_s: float
     n_faces: int = 0  # faces associadas ao track (incluindo as não guardadas)

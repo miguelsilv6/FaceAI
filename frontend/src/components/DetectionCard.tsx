@@ -11,6 +11,7 @@ interface Props {
   onReview: (det: Detection, status: ReviewStatus) => void;
   onOpenFrame: (det: Detection) => void;
   realTime?: string;
+  personId?: number | null;
 }
 
 const REVIEW: Record<ReviewStatus, [string, string]> = {
@@ -19,14 +20,16 @@ const REVIEW: Record<ReviewStatus, [string, string]> = {
   rejected: ["Rejeitada", "red"],
 };
 
-export default function DetectionCard({ det, onSeek, onReview, onOpenFrame, realTime }: Props) {
+export default function DetectionCard({ det, onSeek, onReview, onOpenFrame, realTime, personId }: Props) {
   const [label, color] = REVIEW[det.review_status];
   return (
     <Card withBorder padding="xs" style={{ opacity: det.review_status === "rejected" ? 0.55 : 1 }}>
       <Card.Section style={{ cursor: "pointer" }} onClick={() => onSeek(det)}>
         <Group gap={0} wrap="nowrap" grow>
           <Image src={api.detectionImageUrl(det.id, "crop")} h={120} fit="cover" alt={`Deteção ${det.id}`} />
-          <Image src={api.referenceImageUrl(det.reference_id, true)} h={120} fit="cover" alt="Referência" />
+          {det.reference_id != null && (
+            <Image src={api.referenceImageUrl(det.reference_id, true)} h={120} fit="cover" alt="Referência" />
+          )}
         </Group>
       </Card.Section>
       <Stack gap={4} mt={6}>
@@ -34,16 +37,20 @@ export default function DetectionCard({ det, onSeek, onReview, onOpenFrame, real
           <Text size="sm" fw={600} ff="monospace" title={realTime ? `Tempo no vídeo: ${formatTime(det.timestamp_s)}` : undefined}>
             {realTime ? realTime.slice(11) : formatTime(det.timestamp_s)}
           </Text>
-          <Badge color={det.is_match ? "red" : "orange"} variant="filled" size="sm">
-            {(det.similarity * 100).toFixed(1)}%
-          </Badge>
+          {det.reference_id == null ? (
+            <Badge color="blue" variant="filled" size="sm" style={{ flexShrink: 0 }}>{personId != null ? `P#${personId}` : "—"}</Badge>
+          ) : (
+            <Badge color={det.is_match ? "red" : "orange"} variant="filled" size="sm">
+              {(det.similarity * 100).toFixed(1)}%
+            </Badge>
+          )}
         </Group>
         {realTime && <Text size="xs" c="dimmed" ff="monospace">{realTime.slice(0, 10)} · vídeo {formatTime(det.timestamp_s)}</Text>}
         <Group gap={6} wrap="nowrap">
           <QualityBadge quality={det.quality} sharpness={det.sharpness} sizeScore={det.size_score} frontal={det.frontal} />
           <Text size="xs" c="dimmed" truncate>
             fr. {det.frame_index} · d {det.distance.toFixed(3)}{det.track_id != null ? ` · T${det.track_id}` : ""}
-            {det.is_match ? "" : " · cand."}
+            {det.is_match || det.reference_id == null ? "" : " · cand."}
           </Text>
         </Group>
         <Group justify="space-between" wrap="nowrap">

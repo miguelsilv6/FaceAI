@@ -18,6 +18,7 @@ from .. import __version__
 from ..config import settings
 from ..models import AuditEvent, Case, Detection, Job, ReferenceImage, ReviewStatus, Track, Video
 from .clock import format_real, real_time
+from .persons import person_segments, summarize_persons
 from .segments import Interval, merge_intervals
 from .video_processor import format_timestamp
 
@@ -30,8 +31,8 @@ _TEMPLATES.filters["ts"] = format_timestamp
 CSV_FIELDS = [
     "detection_id", "video_id", "video_filename", "frame_index", "timestamp_s", "timestamp",
     "real_time", "x", "y", "w", "h", "face_confidence", "reference_id", "reference_filename",
-    "distance", "similarity", "is_match", "track_id", "track_is_match", "quality", "sharpness", "size_score",
-    "frontal", "review_status", "reviewed_by", "reviewed_at", "review_note", "crop_file", "frame_file",
+    "distance", "similarity", "is_match", "track_id", "track_is_match", "person_id", "quality", "sharpness",
+    "size_score", "frontal", "review_status", "reviewed_by", "reviewed_at", "review_note", "crop_file", "frame_file",
 ]
 
 
@@ -95,8 +96,16 @@ def video_real_time(v: Video | None, video_s: float) -> str:
 _TEMPLATES.globals["real_at"] = lambda v, t: video_real_time(v, t)
 
 
+def is_discover(job: Job) -> bool:
+    return job.params.get("mode") == "discover"
+
+
 def segments_for(data: dict[str, Any]) -> list[dict[str, Any]]:
-    segs = match_segments(data["detections"], data["job"].params.get("segment_gap_s", 2.0), data.get("tracks"))
+    gap = data["job"].params.get("segment_gap_s", 2.0)
+    if is_discover(data["job"]):
+        segs = person_segments(list(data.get("tracks", {}).values()), None, gap)
+    else:
+        segs = match_segments(data["detections"], gap, data.get("tracks"))
     for seg in segs:
         v = data["videos"].get(seg["video_id"])
         seg["real_start"] = video_real_time(v, seg["start_s"])
@@ -120,7 +129,8 @@ def detection_row(d: Detection, data: dict[str, Any]) -> dict[str, Any]:
         "reference_id": d.reference_id, "reference_filename": r.filename if r else "",
         "distance": d.distance, "similarity": d.similarity, "is_match": d.is_match,
         "track_id": d.track_id if d.track_id is not None else "",
-        "track_is_match": bool(t and t.is_match), "quality": d.quality, "sharpness": d.sharpness,
+        "track_is_match": bool(t and t.is_match), "person_id": t.person_id if t and t.person_id else "",
+        "quality": d.quality, "sharpness": d.sharpness,
         "size_score": d.size_score, "frontal": "" if d.frontal is None else d.frontal,
         "review_status": d.review_status.value, "reviewed_by": d.reviewed_by,
         "reviewed_at": d.reviewed_at.isoformat() if d.reviewed_at else "", "review_note": d.review_note,
@@ -152,6 +162,7 @@ def to_json(data: dict[str, Any]) -> str:
             r.model_dump(mode="json", exclude={"stored_path", "face_crop_path"}) for r in data["references"].values()
         ],
         "segments": segments_for(data),
+        "persons": persons_for(data),
         "tracks": [{**t.model_dump(mode="json"),
                     "real_start": video_real_time(data["videos"].get(t.video_id), t.start_s),
                     "real_end": video_real_time(data["videos"].get(t.video_id), t.end_s)}
@@ -159,6 +170,25 @@ def to_json(data: dict[str, Any]) -> str:
         "detections": [detection_row(d, data) for d in data["detections"]],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+
+
+def persons_for(data: dict[str, Any]) -> list[dict[str, Any]]:
+    """Modo descoberta: resumo de cada pessoa com as aparições (hora no vídeo e hora real)."""
+    if not is_discover(data["job"]):
+        return []
+    tracks = list(data.get("tracks", {}).values())
+    gap = data["job"].params.get("segment_gap_s", 2.0)
+    persons = summarize_persons(tracks)
+    for person in persons:
+        person["appearances"] = []
+        for seg in person_segments(tracks, person["person_id"], gap):
+            v = data["videos"].get(seg["video_id"])
+            person["appearances"].append({
+                "video_id": seg["video_id"], "video_filename": v.filename if v else "",
+                "start_s": seg["start_s"], "end_s": seg["end_s"], "duration_s": seg["duration_s"],
+                "real_start": video_real_time(v, seg["start_s"]), "real_end": video_real_time(v, seg["end_s"]),
+            })
+    return persons
 
 
 def audit_jsonl(data: dict[str, Any]) -> str:
@@ -183,15 +213,22 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
         seg["frame_img"] = _img_data_uri(best.frame_path if best else None)
         seg["crop_img"] = _img_data_uri(best.crop_path if best else None)
         seg["video"] = data["videos"].get(seg["video_id"])
-    matches = [d for d in detections if effective_match(d, data)]
+    discover = is_discover(job)
+    # No modo descoberta todas as faces guardadas são resultado; no modo de procura, só as correspondências.
+    matches = detections if discover else [d for d in detections if effective_match(d, data)]
     rows = []
     for i, d in enumerate(matches):
         row = detection_row(d, data)
         row["crop_img"] = _img_data_uri(d.crop_path) if i < max_images else ""
         rows.append(row)
+    persons = persons_for(data)
+    for person in persons:
+        best = by_id.get(person["best_detection_id"])
+        person["crop_img"] = _img_data_uri(best.crop_path if best else None)
+        person["frame_img"] = _img_data_uri(best.frame_path if best else None)
     tracks = []
     for t in data.get("tracks", {}).values():
-        if not t.is_match:
+        if not t.is_match and not discover:
             continue
         best = by_id.get(t.best_detection_id)
         tv = data["videos"].get(t.video_id)
@@ -213,7 +250,9 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
         segments=segments,
         rows=rows,
         tracks=tracks,
-        candidates=sum(1 for d in detections if not effective_match(d, data)),
+        candidates=0 if discover else sum(1 for d in detections if not effective_match(d, data)),
+        discover=discover,
+        persons=persons,
         review_counts=review_counts,
         audit=data["audit"],
         max_images=max_images,
