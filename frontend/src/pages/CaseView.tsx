@@ -37,6 +37,9 @@ export default function CaseView() {
       })
       .catch(notifyError);
   }, [caseId]);
+  const reloadVideos = useCallback(() => {
+    api.videos(caseId).then(setVideos).catch(() => undefined);
+  }, [caseId]);
   const reloadJobs = useCallback(() => {
     api.jobs(caseId).then(setJobs).catch(() => undefined);
   }, [caseId]);
@@ -114,7 +117,7 @@ export default function CaseView() {
           <ReferencesPanel caseId={caseId} references={references} onChange={reload} />
         </Tabs.Panel>
         <Tabs.Panel value="videos" pt="md">
-          <VideosPanel caseId={caseId} videos={videos} onChange={reload} />
+          <VideosPanel caseId={caseId} videos={videos} onChange={reloadVideos} />
         </Tabs.Panel>
         <Tabs.Panel value="jobs" pt="md">
           <JobsPanel caseId={caseId} jobs={jobs} videos={videos} references={references} onChange={reloadJobs} />

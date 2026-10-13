@@ -1,11 +1,12 @@
 import { Badge, Button, Card, Stack, Table, Text } from "@mantine/core";
 import { IconClock, IconMovie } from "@tabler/icons-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { api, formatBytes, formatTime, realTime } from "../api";
 import { notifyError, notifyOk } from "../notify";
 import type { Video } from "../types";
 import ClockModal from "./ClockModal";
+import PlaybackBadge from "./PlaybackBadge";
 import UploadZone from "./UploadZone";
 
 const VIDEO_ACCEPT = {
@@ -22,6 +23,24 @@ interface Props {
 export default function VideosPanel({ caseId, videos, onChange }: Props) {
   const [progress, setProgress] = useState<number | null>(null);
   const [clockVideo, setClockVideo] = useState<Video | null>(null);
+
+  // Atualiza o estado das conversões para o browser enquanto houver alguma na fila ou a decorrer.
+  const converting = videos.some((v) => v.playback_status === "pending" || v.playback_status === "running");
+  useEffect(() => {
+    if (!converting) return;
+    const t = setInterval(onChange, 3000);
+    return () => clearInterval(t);
+  }, [converting, onChange]);
+
+  const createCopy = async (v: Video) => {
+    try {
+      await api.createPlaybackCopy(v.id);
+      notifyOk(`Cópia de reprodução do vídeo #${v.id} na fila.`);
+      onChange();
+    } catch (e) {
+      notifyError(e);
+    }
+  };
 
   const upload = async (files: File[]) => {
     if (!files.length) return;
@@ -51,7 +70,7 @@ export default function VideosPanel({ caseId, videos, onChange }: Props) {
             <Table>
               <Table.Thead>
                 <Table.Tr><Table.Th>#</Table.Th><Table.Th>Ficheiro</Table.Th><Table.Th>Tamanho</Table.Th>
-                  <Table.Th>Duração</Table.Th><Table.Th>FPS</Table.Th><Table.Th>Resolução</Table.Th><Table.Th>Codec</Table.Th><Table.Th>Hora real</Table.Th></Table.Tr>
+                  <Table.Th>Duração</Table.Th><Table.Th>FPS</Table.Th><Table.Th>Resolução</Table.Th><Table.Th>Codec</Table.Th><Table.Th>Reprodução no browser</Table.Th><Table.Th>Hora real</Table.Th></Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {videos.map((v) => (
@@ -59,6 +78,7 @@ export default function VideosPanel({ caseId, videos, onChange }: Props) {
                     <Table.Td>{v.id}</Table.Td><Table.Td>{v.filename}</Table.Td><Table.Td>{formatBytes(v.size_bytes)}</Table.Td>
                     <Table.Td>{formatTime(v.duration_s)}</Table.Td><Table.Td>{v.fps.toFixed(2)}</Table.Td>
                     <Table.Td>{v.width}×{v.height}</Table.Td><Table.Td>{v.codec || "—"}</Table.Td>
+                    <Table.Td><PlaybackBadge video={v} onCreate={createCopy} /></Table.Td>
                     <Table.Td>
                       {v.dvr_start ? (
                         <Stack gap={2}>

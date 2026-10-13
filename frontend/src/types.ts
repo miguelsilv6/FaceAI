@@ -32,6 +32,9 @@ export interface Video {
   height: number;
   codec: string;
   uploaded_at: string;
+  playback_status: "" | "not_needed" | "pending" | "running" | "ready" | "failed" | "unavailable";
+  playback_progress: number;
+  playback_error: string;
   dvr_start: string | null;
   dvr_rate: number;
   clock_offset_s: number;

@@ -16,7 +16,7 @@ from ..schemas import CaseCreate, CaseUpdate
 from ..services.audit import log_event
 from ..services.face_engine import get_engine
 from ..services.references import validate_reference
-from ..services.transcode import schedule_playback_copy
+from ..services.transcode import READY, request_playback_copy
 from ..services.video_processor import probe
 from .deps import ActorDep, SessionDep, get_case_or_404
 
@@ -77,10 +77,7 @@ def register_video(session, case_id: int, path: Path, filename: str, size: int, 
     session.refresh(video)
     log_event(session, "video.uploaded", case_id=case_id, actor=actor,
               details=video.model_dump(mode="json", exclude={"stored_path", "playback_path"}))
-    if schedule_playback_copy(video):
-        log_event(session, "video.playback_copy_requested", case_id=case_id, actor="sistema",
-                  details={"video_id": video.id,
-                           "note": "cópia H.264 apenas para visualização; o original é o analisado"})
+    request_playback_copy(session, video)
     return video
 
 
@@ -198,5 +195,17 @@ def stream_video(video_id: int, session: SessionDep) -> FileResponse:
     video = session.get(Video, video_id)
     if video is None:
         raise HTTPException(404, "Vídeo não encontrado.")
-    path = video.playback_path if video.playback_path and Path(video.playback_path).exists() else video.stored_path
-    return FileResponse(path, filename=video.filename, content_disposition_type="inline")
+    if video.playback_status == READY and video.playback_path and Path(video.playback_path).exists():
+        return FileResponse(video.playback_path, media_type="video/mp4", content_disposition_type="inline")
+    return FileResponse(video.stored_path, filename=video.filename, content_disposition_type="inline")
+
+
+@router.post("/videos/{video_id}/playback", response_model=Video)
+def create_playback_copy(video_id: int, session: SessionDep, actor: ActorDep) -> Video:
+    """(Re)cria a cópia H.264 de visualização, ex.: quando o browser não reproduz o original ou a conversão falhou."""
+    video = session.get(Video, video_id)
+    if video is None:
+        raise HTTPException(404, "Vídeo não encontrado.")
+    request_playback_copy(session, video, force=True, actor=actor)
+    session.refresh(video)
+    return video

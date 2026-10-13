@@ -174,6 +174,7 @@ export const api = {
   uploadVideos: (caseId: number, files: File[], onProgress?: (f: number) => void) =>
     uploadMany<Video>(caseId, "video", files, onProgress),
   videoUrl: (id: number) => `/api/videos/${id}/stream`,
+  createPlaybackCopy: (id: number) => request<Video>("POST", `/api/videos/${id}/playback`),
   videoFrameUrl: (id: number, t: number) => `/api/videos/${id}/frame?t=${t.toFixed(2)}`,
   clockOcrTest: (id: number, body: { roi: number[] | null; t: number; date_order: string }) =>
     request<OcrTest>("POST", `/api/videos/${id}/clock/ocr-test`, body),

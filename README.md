@@ -112,7 +112,11 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 
 1. **Novo caso:** indica o nome ou referência do processo e o teu nome de analista (no cabeçalho). O nome e a descrição podem ser editados depois (✏️ ao lado do nome do caso). Os valores anteriores ficam na auditoria.
 2. **Referências:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
-3. **Vídeos:** arrasta os ficheiros de CCTV. O envio é **em blocos e retomável**: se a ligação cair, volta a largar o mesmo ficheiro e o upload continua de onde parou, mesmo depois de recarregar a página. Os metadados são extraídos automaticamente. Se o codec não for reproduzível no browser e houver `ffmpeg`, é criada uma **cópia H.264 só para visualização**. A análise usa sempre o original.
+3. **Vídeos:** arrasta os ficheiros de CCTV. O envio é **em blocos e retomável**: se a ligação cair, volta a largar o mesmo ficheiro e o upload continua de onde parou, mesmo depois de recarregar a página. Os metadados são extraídos automaticamente. Se o browser não conseguir reproduzir o vídeo e houver `ffmpeg`, é criada uma **cópia H.264 só para visualização**. A análise usa sempre o original. Os casos típicos são H.265/HEVC, `.dav`, `.avi`/MPEG-4, H.264 a 10 bits ou 4:2:2/4:4:4, que dão a mensagem "nenhum vídeo com formato e tipo MIME suportado".
+   - A decisão usa o `ffprobe` (codec e formato de cor), e não só a extensão.
+   - As conversões correm numa fila, uma de cada vez. A coluna **Reprodução no browser** mostra o estado e o progresso: em fila, a converter, pronta ou falhou.
+   - As conversões interrompidas por um reinício são retomadas no arranque. Os vídeos importados por versões anteriores são avaliados nessa altura.
+   - O botão ↻ cria ou recria a cópia manualmente. Os resultados também o oferecem se o browser não conseguir reproduzir o vídeo.
 4. **Análises:** escolhe o modo (**procurar uma pessoa** com amostra, ou **descobrir todas as faces** sem amostra), os vídeos, as referências, o modelo, os fps e o limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo.
 5. **Resultados:**
    - player com linha temporal e tabela de segmentos;
