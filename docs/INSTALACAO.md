@@ -291,6 +291,8 @@ Os vídeos são enviados em blocos de 8 MB (`FACEAI_UPLOAD_CHUNK_MB`), por isso 
 | Download dos modelos falha (`urlopen error` / `SHA-256 inválido`) | Sem acesso a `github.com`, ou download corrompido. Repete, ou copia `~/.faceai/models` de outra máquina (ver C). |
 | `No module named 'onnxruntime'` | Falta o extra: `pip install -e "backend[cpu]"` (ou `[gpu]`). |
 | `A KerasTensor cannot be used…` (só com `FACEAI_ENGINE=deepface`) | Falta o `tf-keras`. Reinstala com `pip install -e "backend[cpu,deepface]"`. |
+| "OCR indisponível" ao acertar a hora | Falta o pacote `rapidocr`: corre `pip install -e "backend[cpu]"` outra vez. |
+| O OCR não encontra a data/hora | Marca a zona à mão (arrastando o rato sobre o frame), escolhe o formato da data certo, ou usa o acerto manual. |
 | Upload de vídeo grande falha atrás do Cloudflare (413) | Versão antiga sem upload em blocos. Atualiza a app e recarrega a página (Ctrl+F5); confirma `FACEAI_UPLOAD_CHUNK_MB` < 100. |
 | PDF não é gerado (`cannot load library 'libpango'`) | Falta `libpango-1.0-0 libpangoft2-1.0-0` (passo A.1). |
 | O vídeo não reproduz no browser | Codec não suportado e ffmpeg não instalado. Instala o ffmpeg e volta a importar o vídeo. A análise funciona na mesma. |

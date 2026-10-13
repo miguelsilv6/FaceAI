@@ -10,6 +10,8 @@ interface Props {
   onSeek: (t: number) => void;
   onReview: (track: Track, status: ReviewStatus) => void;
   onShowDetections: (track: Track) => void;
+  realStart?: string;
+  realEnd?: string;
 }
 
 const REVIEW: Record<ReviewStatus, [string, string]> = {
@@ -19,7 +21,7 @@ const REVIEW: Record<ReviewStatus, [string, string]> = {
 };
 
 /** Um track = a mesma face em vários frames. A revisão aplica-se a todas as deteções do track. */
-export default function TrackCard({ track, onSeek, onReview, onShowDetections }: Props) {
+export default function TrackCard({ track, onSeek, onReview, onShowDetections, realStart, realEnd }: Props) {
   const [label, color] = REVIEW[track.review_status];
   const sim = 1 - track.track_distance;
   return (
@@ -41,7 +43,12 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections }:
             <Badge color={track.is_match ? "red" : "orange"} variant="filled" size="sm">{(sim * 100).toFixed(1)}%</Badge>
           </Tooltip>
         </Group>
-        <Text size="xs" ff="monospace">{formatTime(track.start_s)} → {formatTime(track.end_s)}</Text>
+        {realStart && (
+          <Text size="xs" ff="monospace" fw={600}>{realStart} → {realEnd?.slice(11)}</Text>
+        )}
+        <Text size="xs" ff="monospace" c={realStart ? "dimmed" : undefined}>
+          {realStart ? "vídeo " : ""}{formatTime(track.start_s)} → {formatTime(track.end_s)}
+        </Text>
         <Group gap={6} wrap="nowrap">
           <QualityBadge quality={track.best_quality} />
           <Text size="xs" c="dimmed">{track.n_faces} faces · {track.n_saved} guardadas</Text>

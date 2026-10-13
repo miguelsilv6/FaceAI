@@ -1,5 +1,6 @@
 import type {
-  AuditEvent, Case, Detection, Job, JobParams, ReferenceImage, ReviewStatus, Segment, SystemInfo, Track, Video,
+  AuditEvent, Case, Detection, Job, JobParams, OcrTest, ReferenceImage, ReviewStatus, Segment, SystemInfo, Track,
+  Video,
 } from "./types";
 
 const ANALYST_KEY = "faceai.analyst";
@@ -27,15 +28,23 @@ function headers(extra?: Record<string, string>): Record<string, string> {
   return h;
 }
 
-async function parseError(res: Response): Promise<string> {
+/** Erro da API; `detail` guarda o corpo estruturado quando existe (ex.: amostras de uma calibração falhada). */
+export class ApiError extends Error {
+  constructor(message: string, public detail?: unknown) {
+    super(message);
+  }
+}
+
+async function parseError(res: Response): Promise<ApiError> {
   try {
     const body = await res.json();
-    if (typeof body.detail === "string") return body.detail;
-    if (Array.isArray(body.detail)) return body.detail.map((d: { msg: string }) => d.msg).join("; ");
+    if (typeof body.detail === "string") return new ApiError(body.detail);
+    if (Array.isArray(body.detail)) return new ApiError(body.detail.map((d: { msg: string }) => d.msg).join("; "));
+    if (body.detail && typeof body.detail.message === "string") return new ApiError(body.detail.message, body.detail);
   } catch {
     /* sem corpo JSON */
   }
-  return `${res.status} ${res.statusText}`;
+  return new ApiError(`${res.status} ${res.statusText}`);
 }
 
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -44,7 +53,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     headers: headers(body !== undefined ? { "Content-Type": "application/json" } : undefined),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  if (!res.ok) throw new Error(await parseError(res));
+  if (!res.ok) throw await parseError(res);
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
@@ -163,6 +172,16 @@ export const api = {
   uploadVideos: (caseId: number, files: File[], onProgress?: (f: number) => void) =>
     uploadMany<Video>(caseId, "video", files, onProgress),
   videoUrl: (id: number) => `/api/videos/${id}/stream`,
+  videoFrameUrl: (id: number, t: number) => `/api/videos/${id}/frame?t=${t.toFixed(2)}`,
+  clockOcrTest: (id: number, body: { roi: number[] | null; t: number; date_order: string }) =>
+    request<OcrTest>("POST", `/api/videos/${id}/clock/ocr-test`, body),
+  clockOcr: (id: number, body: { roi: number[] | null; samples: number; date_order: string;
+    clock_offset_s: number; note: string }) => request<Video>("POST", `/api/videos/${id}/clock/ocr`, body),
+  clockManual: (id: number, body: { video_s: number; dvr_time: string; clock_offset_s: number; note: string }) =>
+    request<Video>("PUT", `/api/videos/${id}/clock`, body),
+  clockOffset: (id: number, clock_offset_s: number, note?: string) =>
+    request<Video>("PATCH", `/api/videos/${id}/clock/offset`, { clock_offset_s, note }),
+  clockReset: (id: number) => request<Video>("DELETE", `/api/videos/${id}/clock`),
 
   jobs: (caseId: number) => request<Job[]>("GET", `/api/cases/${caseId}/jobs`),
   job: (id: number) => request<Job>("GET", `/api/jobs/${id}`),
@@ -210,4 +229,20 @@ export function formatDate(iso: string | null): string {
   if (!iso) return "—";
   const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
   return d.toLocaleString("pt-PT");
+}
+
+/**
+ * Hora real de um instante do vídeo: relógio do DVR (início + t × taxa) + desvio. A hora do DVR é "de parede"
+ * (sem fuso), por isso o cálculo é feito em UTC para o browser não aplicar o fuso local.
+ */
+export function realTime(video: Pick<Video, "dvr_start" | "dvr_rate" | "clock_offset_s"> | null | undefined,
+  seconds: number): string {
+  if (!video?.dvr_start) return "";
+  const m = video.dvr_start.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?/);
+  if (!m) return "";
+  const base = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6], m[7] ? +m[7].padEnd(3, "0").slice(0, 3) : 0);
+  const d = new Date(base + (seconds * (video.dvr_rate || 1) + (video.clock_offset_s || 0)) * 1000);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} `
+    + `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
 }

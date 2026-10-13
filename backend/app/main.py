@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
-from .api import cases, jobs, system, uploads
+from .api import cases, clock, jobs, system, uploads
 from .api.uploads import cleanup_stale_uploads
 from .config import settings
 from .db import init_db
@@ -47,6 +47,7 @@ app.include_router(system.router)
 app.include_router(cases.router)
 app.include_router(jobs.router)
 app.include_router(uploads.router)
+app.include_router(clock.router)
 
 # Em produção, o build do frontend (frontend/dist) é servido pelo próprio backend.
 if settings.frontend_dist.is_dir():

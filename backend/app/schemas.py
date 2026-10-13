@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 from .models import ReviewStatus
@@ -54,3 +56,32 @@ class UploadCreate(BaseModel):
     kind: str = Field(pattern="^(video|reference)$")
     filename: str = Field(min_length=1, max_length=255)
     size_bytes: int = Field(gt=0)
+
+
+class ClockManual(BaseModel):
+    """O frame em `video_s` mostra (ou corresponde a) `dvr_time` no relógio do DVR."""
+
+    video_s: float = Field(0.0, ge=0)
+    dvr_time: datetime
+    clock_offset_s: float = Field(0.0, description="Correção do relógio do DVR para a hora real (s)")
+    note: str = ""
+
+
+class ClockOcr(BaseModel):
+    roi: list[float] | None = Field(None, min_length=4, max_length=4,
+                                    description="Zona [x, y, largura, altura] normalizada 0–1; vazio = automática")
+    samples: int = Field(12, ge=2, le=60)
+    date_order: str = Field("DMY", pattern="^(DMY|MDY|YMD)$")
+    clock_offset_s: float = 0.0
+    note: str = ""
+
+
+class ClockOcrTest(BaseModel):
+    roi: list[float] | None = Field(None, min_length=4, max_length=4)
+    t: float = Field(0.0, ge=0)
+    date_order: str = Field("DMY", pattern="^(DMY|MDY|YMD)$")
+
+
+class ClockOffset(BaseModel):
+    clock_offset_s: float
+    note: str | None = None

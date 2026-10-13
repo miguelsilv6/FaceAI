@@ -32,6 +32,40 @@ export interface Video {
   height: number;
   codec: string;
   uploaded_at: string;
+  dvr_start: string | null;
+  dvr_rate: number;
+  clock_offset_s: number;
+  time_source: "" | "manual" | "ocr";
+  time_note: string;
+  time_calibration: ClockCalibration | Record<string, never>;
+}
+
+export interface ClockSample {
+  video_s: number;
+  text: string;
+  dvr: string | null;
+  inlier?: boolean;
+}
+
+export interface ClockCalibration {
+  roi?: number[];
+  date_order?: string;
+  samples?: ClockSample[];
+  dvr_start?: string;
+  rate?: number;
+  max_residual_s?: number;
+  inliers?: number;
+  valid_readings?: number;
+  error?: string;
+  video_s?: number;
+  dvr_time?: string;
+}
+
+export interface OcrTest {
+  roi: number[] | null;
+  text: string;
+  dvr: string | null;
+  auto: boolean;
 }
 
 export interface JobParams {

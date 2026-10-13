@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 from .. import __version__
 from ..config import settings
 from ..models import AuditEvent, Case, Detection, Job, ReferenceImage, ReviewStatus, Track, Video
+from .clock import format_real, real_time
 from .segments import Interval, merge_intervals
 from .video_processor import format_timestamp
 
@@ -28,7 +29,7 @@ _TEMPLATES.filters["ts"] = format_timestamp
 
 CSV_FIELDS = [
     "detection_id", "video_id", "video_filename", "frame_index", "timestamp_s", "timestamp",
-    "x", "y", "w", "h", "face_confidence", "reference_id", "reference_filename",
+    "real_time", "x", "y", "w", "h", "face_confidence", "reference_id", "reference_filename",
     "distance", "similarity", "is_match", "track_id", "track_is_match", "quality", "sharpness", "size_score",
     "frontal", "review_status", "reviewed_by", "reviewed_at", "review_note", "crop_file", "frame_file",
 ]
@@ -84,8 +85,23 @@ def load_job_data(s: Session, job: Job) -> dict[str, Any]:
             "tracks": tracks, "audit": audit}
 
 
+def video_real_time(v: Video | None, video_s: float) -> str:
+    """Hora real (relógio do DVR + desvio) de um instante do vídeo, ou "" se o vídeo não tiver a hora acertada."""
+    if v is None:
+        return ""
+    return format_real(real_time(v.dvr_start, v.dvr_rate, v.clock_offset_s, video_s))
+
+
+_TEMPLATES.globals["real_at"] = lambda v, t: video_real_time(v, t)
+
+
 def segments_for(data: dict[str, Any]) -> list[dict[str, Any]]:
-    return match_segments(data["detections"], data["job"].params.get("segment_gap_s", 2.0), data.get("tracks"))
+    segs = match_segments(data["detections"], data["job"].params.get("segment_gap_s", 2.0), data.get("tracks"))
+    for seg in segs:
+        v = data["videos"].get(seg["video_id"])
+        seg["real_start"] = video_real_time(v, seg["start_s"])
+        seg["real_end"] = video_real_time(v, seg["end_s"])
+    return segs
 
 
 def effective_match(d: Detection, data: dict[str, Any]) -> bool:
@@ -99,6 +115,7 @@ def detection_row(d: Detection, data: dict[str, Any]) -> dict[str, Any]:
     return {
         "detection_id": d.id, "video_id": d.video_id, "video_filename": v.filename if v else "",
         "frame_index": d.frame_index, "timestamp_s": d.timestamp_s, "timestamp": format_timestamp(d.timestamp_s),
+        "real_time": video_real_time(v, d.timestamp_s),
         "x": d.x, "y": d.y, "w": d.w, "h": d.h, "face_confidence": d.face_confidence,
         "reference_id": d.reference_id, "reference_filename": r.filename if r else "",
         "distance": d.distance, "similarity": d.similarity, "is_match": d.is_match,
@@ -135,7 +152,10 @@ def to_json(data: dict[str, Any]) -> str:
             r.model_dump(mode="json", exclude={"stored_path", "face_crop_path"}) for r in data["references"].values()
         ],
         "segments": segments_for(data),
-        "tracks": [t.model_dump(mode="json") for t in data.get("tracks", {}).values()],
+        "tracks": [{**t.model_dump(mode="json"),
+                    "real_start": video_real_time(data["videos"].get(t.video_id), t.start_s),
+                    "real_end": video_real_time(data["videos"].get(t.video_id), t.end_s)}
+                   for t in data.get("tracks", {}).values()],
         "detections": [detection_row(d, data) for d in data["detections"]],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
@@ -174,7 +194,9 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
         if not t.is_match:
             continue
         best = by_id.get(t.best_detection_id)
-        tracks.append({"t": t, "video": data["videos"].get(t.video_id),
+        tv = data["videos"].get(t.video_id)
+        tracks.append({"t": t, "video": tv, "real_start": video_real_time(tv, t.start_s),
+                       "real_end": video_real_time(tv, t.end_s),
                        "ref": data["references"].get(t.reference_id),
                        "crop_img": _img_data_uri(best.crop_path if best else None)})
     references = [

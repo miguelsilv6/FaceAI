@@ -6,7 +6,7 @@ import { IconAlertTriangle, IconDownload, IconInfoCircle, IconPlayerStop } from 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { api, formatTime } from "../api";
+import { api, formatTime, realTime } from "../api";
 import DetectionCard from "../components/DetectionCard";
 import TrackCard from "../components/TrackCard";
 import JobStatusBadge from "../components/JobStatusBadge";
@@ -197,6 +197,7 @@ export default function Results() {
                   Se o navegador não reproduzir este codec, use as imagens dos frames (botão 🔍 nas deteções) ou converta o vídeo para H.264/MP4.
                 </Text>
                 <Timeline duration={video.duration_s} segments={videoSegments} detections={videoDets.filter(isEffectiveMatch)}
+                  realTime={video.dvr_start ? (sec) => realTime(video, sec) : undefined}
                   currentTime={currentTime} onSeek={seek} />
               </>
             )}
@@ -211,7 +212,8 @@ export default function Results() {
               <Table highlightOnHover>
                 <Table.Thead>
                   <Table.Tr><Table.Th>Melhor face</Table.Th><Table.Th>Início</Table.Th><Table.Th>Fim</Table.Th>
-                    <Table.Th>Deteções</Table.Th><Table.Th>Melhor sim.</Table.Th></Table.Tr>
+                    <Table.Th>Deteções</Table.Th><Table.Th>Melhor sim.</Table.Th>
+                    {video?.dvr_start && <Table.Th>Hora real</Table.Th>}</Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {videoSegments.map((s, i) => (
@@ -221,6 +223,9 @@ export default function Results() {
                       <Table.Td ff="monospace">{formatTime(s.end_s)}</Table.Td>
                       <Table.Td>{s.count}</Table.Td>
                       <Table.Td>{(s.best_similarity * 100).toFixed(1)}%</Table.Td>
+                      {video?.dvr_start && (
+                        <Table.Td ff="monospace" fz="xs">{realTime(video, s.start_s)}<br />→ {realTime(video, s.end_s).slice(11)}</Table.Td>
+                      )}
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
@@ -263,6 +268,7 @@ export default function Results() {
             <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
               {visibleTracks.map((t) => (
                 <TrackCard key={t.id} track={t} onSeek={seek} onReview={reviewTrack}
+                  realStart={realTime(video, t.start_s)} realEnd={realTime(video, t.end_s)}
                   onShowDetections={(x) => { setTrackFilter(x.id); setView("detections"); }} />
               ))}
             </SimpleGrid>
@@ -272,7 +278,8 @@ export default function Results() {
         ) : (
           <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
             {visible.map((d) => (
-              <DetectionCard key={d.id} det={d} onSeek={(x) => seek(x.timestamp_s)} onReview={review} onOpenFrame={setFrameDet} />
+              <DetectionCard key={d.id} det={d} onSeek={(x) => seek(x.timestamp_s)} onReview={review} onOpenFrame={setFrameDet}
+                realTime={realTime(video, d.timestamp_s)} />
             ))}
           </SimpleGrid>
         )}

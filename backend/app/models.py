@@ -64,6 +64,13 @@ class Video(SQLModel, table=True):
     height: int = 0
     codec: str = ""
     playback_path: str | None = None  # cópia H.264 só para visualização no navegador
+    # Hora real (relógio do DVR): hora_real(t) = dvr_start + t × dvr_rate + clock_offset_s
+    dvr_start: str | None = None  # ISO 8601 sem fuso: hora "de parede" do DVR (não é convertida para UTC)
+    dvr_rate: float = 1.0
+    clock_offset_s: float = 0.0
+    time_source: str = ""  # "" | "manual" | "ocr"
+    time_note: str = ""
+    time_calibration: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     uploaded_at: datetime = Field(default_factory=utcnow)
 
 

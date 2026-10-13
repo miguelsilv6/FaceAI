@@ -12,6 +12,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "jinja2>=3.1",
     "weasyprint>=62",
+    "rapidocr>=3.0",  # OCR da data/hora do CCTV (PP-OCR em ONNX Runtime; modelos incluídos no pacote)
 ]
 
 [project.optional-dependencies]
