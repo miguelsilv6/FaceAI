@@ -116,7 +116,13 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
    - A decisão usa o `ffprobe` (codec e formato de cor), e não só a extensão.
    - As conversões correm numa fila, uma de cada vez. A coluna **Reprodução no browser** mostra o estado e o progresso: em fila, a converter, pronta ou falhou.
    - As conversões interrompidas por um reinício são retomadas no arranque. Os vídeos importados por versões anteriores são avaliados nessa altura.
-   - O botão ↻ cria ou recria a cópia manualmente. Os resultados também o oferecem se o browser não conseguir reproduzir o vídeo.
+   - O botão ↻ cria ou recria a cópia manualmente.
+   - Se, mesmo assim, o browser não reproduzir o vídeo nos resultados, a cópia certa é pedida **automaticamente**:
+     - H.264/MP4 por omissão;
+     - **VP9/WebM** se o browser não tiver H.264, como alguns Firefox/Chromium em Linux.
+
+     O aviso mostra o diagnóstico: erro do browser, contentor e codec reais do original, e codecs suportados pelo browser.
+   - O `ffprobe` também deteta as exportações de DVR com extensão `.mp4` que são, na verdade, H.264 "cru".
 4. **Análises:** escolhe o modo (**procurar uma pessoa** com amostra, ou **descobrir todas as faces** sem amostra), os vídeos, as referências, o modelo, os fps e o limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo.
 5. **Resultados:**
    - player com linha temporal e tabela de segmentos;

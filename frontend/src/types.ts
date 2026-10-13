@@ -35,12 +35,22 @@ export interface Video {
   playback_status: "" | "not_needed" | "pending" | "running" | "ready" | "failed" | "unavailable";
   playback_progress: number;
   playback_error: string;
+  playback_format: "" | "mp4" | "webm";
   dvr_start: string | null;
   dvr_rate: number;
   clock_offset_s: number;
   time_source: "" | "manual" | "ocr";
   time_note: string;
   time_calibration: ClockCalibration | Record<string, never>;
+}
+
+export interface VideoProbe {
+  format_name?: string;
+  codec_name?: string;
+  profile?: string;
+  pix_fmt?: string;
+  width?: number;
+  height?: number;
 }
 
 export interface ClockSample {

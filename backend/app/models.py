@@ -68,6 +68,7 @@ class Video(SQLModel, table=True):
     playback_status: str = ""
     playback_progress: float = 0.0
     playback_error: str = ""
+    playback_format: str = ""  # formato da cópia: "mp4" (H.264) | "webm" (VP9)
     # Hora real (relógio do DVR): hora_real(t) = dvr_start + t × dvr_rate + clock_offset_s
     dvr_start: str | None = None  # ISO 8601 sem fuso: hora "de parede" do DVR (não é convertida para UTC)
     dvr_rate: float = 1.0

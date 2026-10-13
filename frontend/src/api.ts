@@ -1,6 +1,6 @@
 import type {
   AuditEvent, Case, Detection, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
-  Track, Video,
+  Track, Video, VideoProbe,
 } from "./types";
 
 const ANALYST_KEY = "faceai.analyst";
@@ -173,8 +173,12 @@ export const api = {
   videos: (caseId: number) => request<Video[]>("GET", `/api/cases/${caseId}/videos`),
   uploadVideos: (caseId: number, files: File[], onProgress?: (f: number) => void) =>
     uploadMany<Video>(caseId, "video", files, onProgress),
-  videoUrl: (id: number) => `/api/videos/${id}/stream`,
-  createPlaybackCopy: (id: number) => request<Video>("POST", `/api/videos/${id}/playback`),
+  /** O parâmetro muda quando a cópia de reprodução muda, para o browser não reutilizar a versão anterior em cache. */
+  videoUrl: (v: Pick<Video, "id" | "playback_status" | "playback_format">) =>
+    `/api/videos/${v.id}/stream?v=${v.playback_status === "ready" ? `copy-${v.playback_format || "mp4"}` : "original"}`,
+  createPlaybackCopy: (id: number, format: "mp4" | "webm" = browserPlaybackFormat()) =>
+    request<Video>("POST", `/api/videos/${id}/playback?format=${format}`),
+  probeVideo: (id: number) => request<VideoProbe>("GET", `/api/videos/${id}/probe`),
   videoFrameUrl: (id: number, t: number) => `/api/videos/${id}/frame?t=${t.toFixed(2)}`,
   clockOcrTest: (id: number, body: { roi: number[] | null; t: number; date_order: string }) =>
     request<OcrTest>("POST", `/api/videos/${id}/clock/ocr-test`, body),
@@ -222,6 +226,20 @@ export const api = {
   exportUrl: (jobId: number, fmt: string) =>
     `/api/jobs/${jobId}/export/${fmt}?analyst=${encodeURIComponent(getAnalyst())}`,
 };
+
+/** Codecs que este browser diz reproduzir (alguns Firefox/Chromium em Linux não têm H.264). */
+export function browserCodecs(): { h264: boolean; vp9: boolean } {
+  const v = document.createElement("video");
+  return {
+    h264: v.canPlayType('video/mp4; codecs="avc1.640028"') !== "",
+    vp9: v.canPlayType('video/webm; codecs="vp9"') !== "",
+  };
+}
+
+/** Formato da cópia de reprodução adequado a este browser: H.264/MP4 se o suportar, senão VP9/WebM. */
+export function browserPlaybackFormat(): "mp4" | "webm" {
+  return browserCodecs().h264 ? "mp4" : "webm";
+}
 
 export function formatTime(seconds: number): string {
   const ms = Math.round(seconds * 1000);

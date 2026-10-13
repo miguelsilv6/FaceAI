@@ -11,7 +11,8 @@ export default function PlaybackBadge({ video, onCreate }: { video: Video; onCre
     not_needed: ["Original", "gray", "O browser reproduz o ficheiro original."],
     pending: ["Em fila", "yellow", "A cópia de reprodução H.264 está na fila de conversão."],
     running: [`A converter ${Math.round(video.playback_progress * 100)}%`, "blue", "A criar a cópia de reprodução H.264."],
-    ready: ["Cópia H.264", "teal", "O browser mostra uma cópia H.264; a análise usa sempre o original."],
+    ready: [`Cópia ${video.playback_format === "webm" ? "VP9" : "H.264"}`, "teal",
+      "O browser mostra uma cópia só para visualização; a análise usa sempre o original."],
     failed: ["Falhou", "red", `Não foi possível criar a cópia: ${video.playback_error}`],
     unavailable: ["Sem ffmpeg", "orange", video.playback_error || "O ffmpeg não está instalado no servidor."],
   }[s] as [string, string, string];

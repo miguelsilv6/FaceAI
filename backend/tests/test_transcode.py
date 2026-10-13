@@ -122,3 +122,35 @@ def test_resume_pending_copies(client, tmp_path, with_ffmpeg):
     for vid in (1, 2):
         assert _wait_status(client, vid, {"ready", "failed"})["playback_status"] == "ready"
     assert np.asarray(cv2.VideoCapture(str(tmp_path / "stored_old_playback.mp4")).read()[1]).size > 0
+
+
+def test_raw_h264_with_mp4_extension_needs_copy(client, tmp_path, with_ffmpeg):
+    """Exportações de DVR com extensão .mp4 que são H.264 "cru": o codec é h264 mas o browser não as abre."""
+    import subprocess
+
+    client.post("/api/cases", json={"name": "c"})
+    src = make_video(tmp_path / "s.mp4", [(0.0, 2.0, RED)], duration_s=2, fps=10)
+    raw = tmp_path / "raw.h264"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-f", "h264", str(raw)], check=True)
+    fake_mp4 = tmp_path / "dvr_export.mp4"
+    raw.rename(fake_mp4)
+    v = _upload(client, fake_mp4, "dvr_export.mp4")
+    assert v["playback_status"] in ("pending", "running", "ready"), v
+    probe = client.get(f"/api/videos/{v['id']}/probe").json()
+    assert probe["codec_name"] == "h264" and probe["format_name"] == "h264"
+    assert _wait_status(client, v["id"], {"ready", "failed"})["playback_status"] == "ready"
+
+
+def test_webm_copy_for_browsers_without_h264(client, tmp_path, with_ffmpeg):
+    client.post("/api/cases", json={"name": "c"})
+    v = _upload(client, _h264(tmp_path / "ok.mp4"), "ok.mp4")
+    assert v["playback_status"] == "not_needed"
+    assert client.post(f"/api/videos/{v['id']}/playback", params={"format": "avi"}).status_code == 422
+    r = client.post(f"/api/videos/{v['id']}/playback", params={"format": "webm"})
+    assert r.status_code == 200 and r.json()["playback_format"] == "webm"
+    v = _wait_status(client, v["id"], {"ready", "failed"})
+    assert v["playback_status"] == "ready", v
+    stream = client.get(f"/api/videos/{v['id']}/stream")
+    assert stream.headers["content-type"] == "video/webm" and stream.content[:4] == b"\x1aE\xdf\xa3"  # EBML
+    assert stream.headers["cache-control"] == "no-cache"  # o mesmo URL passa do original para a cópia

@@ -16,7 +16,7 @@ from ..schemas import CaseCreate, CaseUpdate
 from ..services.audit import log_event
 from ..services.face_engine import get_engine
 from ..services.references import validate_reference
-from ..services.transcode import READY, request_playback_copy
+from ..services.transcode import FORMATS, READY, probe_stream, request_playback_copy
 from ..services.video_processor import probe
 from .deps import ActorDep, SessionDep, get_case_or_404
 
@@ -196,16 +196,37 @@ def stream_video(video_id: int, session: SessionDep) -> FileResponse:
     if video is None:
         raise HTTPException(404, "Vídeo não encontrado.")
     if video.playback_status == READY and video.playback_path and Path(video.playback_path).exists():
-        return FileResponse(video.playback_path, media_type="video/mp4", content_disposition_type="inline")
-    return FileResponse(video.stored_path, filename=video.filename, content_disposition_type="inline")
+        media_type = FORMATS.get(video.playback_format, "video/mp4")
+        return FileResponse(video.playback_path, media_type=media_type, content_disposition_type="inline",
+                            headers=_NO_CACHE)
+    return FileResponse(video.stored_path, filename=video.filename, content_disposition_type="inline",
+                        headers=_NO_CACHE)
+
+
+# O mesmo URL serve o original ou a cópia de reprodução, que pode mudar: o browser tem de revalidar.
+_NO_CACHE = {"Cache-Control": "no-cache"}
 
 
 @router.post("/videos/{video_id}/playback", response_model=Video)
-def create_playback_copy(video_id: int, session: SessionDep, actor: ActorDep) -> Video:
-    """(Re)cria a cópia H.264 de visualização, ex.: quando o browser não reproduz o original ou a conversão falhou."""
+def create_playback_copy(video_id: int, session: SessionDep, actor: ActorDep, format: str = "mp4") -> Video:
+    """(Re)cria a cópia de visualização, ex.: quando o browser não reproduz o original ou a conversão falhou.
+
+    format=mp4 (H.264) ou webm (VP9, para browsers sem H.264).
+    """
     video = session.get(Video, video_id)
     if video is None:
         raise HTTPException(404, "Vídeo não encontrado.")
-    request_playback_copy(session, video, force=True, actor=actor)
+    if format not in FORMATS:
+        raise HTTPException(422, f"Formato desconhecido: {format} (use mp4 ou webm).")
+    request_playback_copy(session, video, force=True, actor=actor, fmt=format)
     session.refresh(video)
     return video
+
+
+@router.get("/videos/{video_id}/probe")
+def probe_video(video_id: int, session: SessionDep) -> dict:
+    """Contentor e codec reais do ficheiro original (ffprobe), para diagnosticar problemas de reprodução."""
+    video = session.get(Video, video_id)
+    if video is None:
+        raise HTTPException(404, "Vídeo não encontrado.")
+    return probe_stream(video.stored_path) or {}
