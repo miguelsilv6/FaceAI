@@ -20,6 +20,11 @@ class CaseUpdate(BaseModel):
     description: str | None = None
 
 
+class CaseDelete(BaseModel):
+    confirm_case_id: int = Field(description="Número do caso, repetido como confirmação do pedido")
+    reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")
+
+
 class JobDelete(BaseModel):
     confirm_job_id: int = Field(description="Número da análise, repetido como confirmação do pedido")
     reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")

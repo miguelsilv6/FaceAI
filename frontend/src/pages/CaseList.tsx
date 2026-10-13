@@ -1,10 +1,11 @@
-import { Button, Card, Group, Modal, Stack, Table, Text, TextInput, Textarea, Title } from "@mantine/core";
+import { ActionIcon, Button, Card, Group, Modal, Stack, Table, Text, TextInput, Textarea, Title, Tooltip } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { IconFolderPlus } from "@tabler/icons-react";
+import { IconFolderPlus, IconTrash } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api, formatDate, getAnalyst } from "../api";
+import DeleteCaseModal from "../components/DeleteCaseModal";
 import { notifyError } from "../notify";
 import type { Case } from "../types";
 
@@ -13,6 +14,7 @@ export default function CaseList() {
   const [opened, { open, close }] = useDisclosure(false);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [toDelete, setToDelete] = useState<Case | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -43,7 +45,7 @@ export default function CaseList() {
             <Table highlightOnHover>
               <Table.Thead>
                 <Table.Tr><Table.Th>#</Table.Th><Table.Th>Nome</Table.Th><Table.Th>Descrição</Table.Th>
-                  <Table.Th>Analista</Table.Th><Table.Th>Criado</Table.Th></Table.Tr>
+                  <Table.Th>Analista</Table.Th><Table.Th>Criado</Table.Th><Table.Th /></Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {cases.map((c) => (
@@ -53,6 +55,13 @@ export default function CaseList() {
                     <Table.Td>{c.description}</Table.Td>
                     <Table.Td>{c.analyst}</Table.Td>
                     <Table.Td>{formatDate(c.created_at)}</Table.Td>
+                    <Table.Td w={40} onClick={(e) => e.stopPropagation()}>
+                      <Tooltip label="Eliminar caso">
+                        <ActionIcon variant="subtle" color="red" aria-label={`Eliminar caso ${c.id}`} onClick={() => setToDelete(c)}>
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>
@@ -60,6 +69,8 @@ export default function CaseList() {
           </Table.ScrollContainer>
         )}
       </Card>
+      <DeleteCaseModal kase={toDelete} onClose={() => setToDelete(null)}
+        onDeleted={(c) => { setToDelete(null); setCases((cs) => cs.filter((x) => x.id !== c.id)); }} />
       <Modal opened={opened} onClose={close} title="Novo caso">
         <Stack>
           <TextInput label="Nome / referência do processo" required value={name}

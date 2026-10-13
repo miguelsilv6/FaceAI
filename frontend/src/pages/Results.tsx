@@ -111,11 +111,13 @@ export default function Results() {
       setCurrentTime(0);
     }
   };
+  // Cópia de reprodução de todos os vídeos do caso: se o browser não reproduz um, os outros do mesmo DVR também não.
   const createPlaybackCopy = async (format?: "mp4" | "webm") => {
-    if (!video) return;
+    if (!video || !job) return;
     try {
-      const updated = await api.createPlaybackCopy(video.id, format);
-      setVideos((vs) => vs.map((v) => (v.id === updated.id ? updated : v)));
+      const updated = await api.createCaseCopies(job.case_id, format);
+      const byId = new Map(updated.map((v) => [v.id, v]));
+      setVideos((vs) => vs.map((v) => byId.get(v.id) ?? v));
       setPlayError(null);
     } catch (e) {
       notifyError(e);
@@ -381,10 +383,10 @@ export default function Results() {
                     {video.playback_status !== "unavailable" && (
                       <Group gap="xs" mt="xs">
                         <Button size="compact-xs" variant="light" onClick={() => createPlaybackCopy("mp4")}>
-                          Criar cópia H.264 (MP4)
+                          Criar cópias H.264 (MP4) de todos os vídeos
                         </Button>
                         <Button size="compact-xs" variant="light" onClick={() => createPlaybackCopy("webm")}>
-                          Criar cópia VP9 (WebM)
+                          Criar cópias VP9 (WebM) de todos os vídeos
                         </Button>
                       </Group>
                     )}

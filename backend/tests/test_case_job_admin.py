@@ -82,3 +82,65 @@ def test_cannot_delete_running_job(client, tmp_path, monkeypatch):
         s.commit()
     r = client.request("DELETE", f"/api/jobs/{job['id']}", json={"confirm_job_id": job["id"]})
     assert r.status_code == 409 and "Cancele" in r.text
+
+
+def test_delete_case_removes_everything(client, tmp_path):
+    from app.config import settings
+
+    case, job = _case_with_job(client, tmp_path)
+    other = client.post("/api/cases", json={"name": "Outro caso"}).json()
+    folder = settings.case_dir(case["id"])
+    assert any(folder.rglob("*.mp4")) and any((folder / "jobs").iterdir())
+    # Upload em blocos por concluir (ficheiro temporário fora da pasta do caso).
+    up = client.post(f"/api/cases/{case['id']}/uploads",
+                     json={"kind": "video", "filename": "x.mp4", "size_bytes": 10}).json()
+    from pathlib import Path
+
+    from sqlmodel import Session as _S
+
+    import app.db as _db
+    from app.models import Upload
+    with _S(_db.get_engine()) as s:
+        part = Path(s.get(Upload, up["id"]).temp_path)
+    assert part.exists()
+
+    url = f"/api/cases/{case['id']}"
+    assert client.request("DELETE", url, json={"confirm_case_id": case["id"] + 1}).status_code == 422
+    assert client.get(url).status_code == 200
+    r = client.request("DELETE", url, json={"confirm_case_id": case["id"], "reason": "caso arquivado"})
+    assert r.status_code == 204, r.text
+
+    assert client.get(url).status_code == 404
+    assert client.get(f"/api/jobs/{job['id']}").status_code == 404
+    assert not folder.exists() and not part.exists()
+    assert [c["id"] for c in client.get("/api/cases").json()] == [other["id"]]
+    # A auditoria do caso mantém-se, com o registo da eliminação.
+    audit = client.get(f"/api/cases/{case['id']}/audit")
+    assert audit.status_code == 404  # o caso já não existe na interface…
+    from sqlmodel import Session, select
+
+    import app.db
+    from app.models import AuditEvent
+    with Session(app.db.get_engine()) as s:
+        events = list(s.exec(select(AuditEvent).where(AuditEvent.case_id == case["id"])))
+    deleted = [e for e in events if e.action == "case.deleted"]
+    assert len(deleted) == 1 and deleted[0].details["reason"] == "caso arquivado"
+    assert deleted[0].details["videos"][0]["filename"] == "v.mp4" and deleted[0].details["files_removed_bytes"] > 0
+    assert any(e.action == "job.completed" for e in events)  # …e no registo append-only
+    assert "case.deleted" in (settings.audit_log_path.read_text())
+
+
+def test_cannot_delete_case_with_running_job(client, tmp_path):
+    from sqlmodel import Session
+
+    import app.db
+    from app.models import Job, JobStatus
+
+    case, job = _case_with_job(client, tmp_path)
+    with Session(app.db.get_engine()) as s:
+        row = s.get(Job, job["id"])
+        row.status = JobStatus.running
+        s.add(row)
+        s.commit()
+    r = client.request("DELETE", f"/api/cases/{case['id']}", json={"confirm_case_id": case["id"]})
+    assert r.status_code == 409 and client.get(f"/api/cases/{case['id']}").status_code == 200

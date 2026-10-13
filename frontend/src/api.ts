@@ -160,6 +160,10 @@ export const api = {
   case: (id: number) => request<Case>("GET", `/api/cases/${id}`),
   createCase: (body: { name: string; description: string; analyst: string }) =>
     request<Case>("POST", "/api/cases", body),
+  deleteCase: (id: number, reason: string) =>
+    request<void>("DELETE", `/api/cases/${id}`, { confirm_case_id: id, reason }),
+  createCaseCopies: (caseId: number, format: "mp4" | "webm" = browserPlaybackFormat()) =>
+    request<Video[]>("POST", `/api/cases/${caseId}/playback?format=${format}`),
   updateCase: (id: number, body: { name?: string; description?: string }) =>
     request<Case>("PATCH", `/api/cases/${id}`, body),
   audit: (caseId: number) => request<AuditEvent[]>("GET", `/api/cases/${caseId}/audit`),

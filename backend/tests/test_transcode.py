@@ -162,3 +162,30 @@ def test_progress_parsing():
     assert transcode._progress_seconds("out_time", "00:01:02.500000") == 62.5
     assert transcode._progress_seconds("out_time_us", "N/A") is None
     assert transcode._progress_seconds("frame", "10") is None
+
+
+def test_case_wide_copies_and_delete_while_converting(client, tmp_path, with_ffmpeg):
+    """O browser não reproduz um vídeo → cópias de todos os vídeos do caso; eliminar o caso cancela as conversões."""
+    client.post("/api/cases", json={"name": "c"})
+    a = _upload(client, _h264(tmp_path / "a.mp4"), "a.mp4")
+    b = _upload(client, _h264(tmp_path / "b.mp4"), "b.mp4")
+    assert a["playback_status"] == b["playback_status"] == "not_needed"
+    r = client.post("/api/cases/1/playback", params={"format": "mp4"})
+    assert r.status_code == 200 and {v["playback_status"] for v in r.json()} <= {"pending", "running", "ready"}
+    for vid in (a["id"], b["id"]):
+        assert _wait_status(client, vid, {"ready", "failed"})["playback_status"] == "ready"
+    # Repetir não volta a converter os que já têm a cópia neste formato.
+    again = client.post("/api/cases/1/playback", params={"format": "mp4"}).json()
+    assert {v["playback_status"] for v in again} == {"ready"}
+
+    # Conversão longa em curso + caso eliminado: o ffmpeg é cancelado e nada é recriado na pasta do caso.
+    long_src = make_video(tmp_path / "long.mp4", [(0.0, 60.0, RED)], duration_s=60, fps=25)
+    c = _upload(client, long_src, "long.mp4")
+    assert c["playback_status"] in ("pending", "running")
+    _wait_status(client, c["id"], {"running", "ready"})
+    from app.config import settings
+    folder = settings.case_dir(1)
+    assert client.request("DELETE", "/api/cases/1", json={"confirm_case_id": 1}).status_code == 204
+    time.sleep(1.5)
+    assert not folder.exists()
+    assert not transcode._running and c["id"] not in transcode._queued

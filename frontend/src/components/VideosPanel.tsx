@@ -1,5 +1,5 @@
-import { Badge, Button, Card, Stack, Table, Text } from "@mantine/core";
-import { IconClock, IconMovie } from "@tabler/icons-react";
+import { Badge, Button, Card, Group, Stack, Table, Text } from "@mantine/core";
+import { IconClock, IconMovie, IconRefresh } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 
 import { api, formatBytes, formatTime, realTime } from "../api";
@@ -32,6 +32,17 @@ export default function VideosPanel({ caseId, videos, onChange }: Props) {
     return () => clearInterval(t);
   }, [converting, onChange]);
 
+  const convertAll = async () => {
+    try {
+      const vs = await api.createCaseCopies(caseId);
+      const queued = vs.filter((v) => v.playback_status === "pending" || v.playback_status === "running").length;
+      notifyOk(queued ? `${queued} vídeo(s) na fila de conversão para o browser.` : "Todos os vídeos já têm cópia de reprodução.");
+      onChange();
+    } catch (e) {
+      notifyError(e);
+    }
+  };
+
   const createCopy = async (v: Video) => {
     try {
       await api.createPlaybackCopy(v.id);
@@ -62,6 +73,13 @@ export default function VideosPanel({ caseId, videos, onChange }: Props) {
         icon={<IconMovie size={40} stroke={1.5} />}
         title="Arraste vídeos de CCTV"
         hint="MP4, AVI, MKV, MOV, … Envio em blocos: se a ligação falhar, volte a largar o mesmo ficheiro para continuar de onde parou." />
+      {videos.length > 0 && (
+        <Group justify="flex-end">
+          <Button size="xs" variant="light" leftSection={<IconRefresh size={14} />} onClick={convertAll}>
+            Criar cópias de reprodução de todos os vídeos
+          </Button>
+        </Group>
+      )}
       <Card withBorder p={0}>
         {videos.length === 0 ? (
           <Text c="dimmed" p="md">Sem vídeos importados.</Text>
