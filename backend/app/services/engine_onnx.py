@@ -291,9 +291,11 @@ class OnnxEngine:
         return max(160, int(round(BASE_INPUT * max(1.0, upscale or 1.0) / 32)) * 32)
 
     def detect(
-        self, image_bgr: np.ndarray, *, model: str, detector: str, upscale: float = 1.0
+        self, image_bgr: np.ndarray, *, model: str, detector: str, upscale: float = 1.0,
+        min_confidence: float | None = None,
     ) -> list[FaceObservation]:
-        dets, kps = self._detector(detector).detect(image_bgr, self._input_size(upscale), DET_THRESHOLD)
+        thresh = DET_THRESHOLD if min_confidence is None else max(0.05, float(min_confidence))
+        dets, kps = self._detector(detector).detect(image_bgr, self._input_size(upscale), thresh)
         if len(dets) == 0 or kps is None:
             return []
         aligned = [align_face(image_bgr, k) for k in kps]
@@ -309,8 +311,8 @@ class OnnxEngine:
                                          embedding=emb, landmarks=k.astype(np.float32)))
         return faces
 
-    def count_faces(self, image_bgr: np.ndarray, *, detector: str) -> int:
-        dets, _ = self._detector(detector).detect(image_bgr, BASE_INPUT, FAST_DET_THRESHOLD)
+    def count_faces(self, image_bgr: np.ndarray, *, detector: str, upscale: float = 1.0) -> int:
+        dets, _ = self._detector(detector).detect(image_bgr, self._input_size(upscale), FAST_DET_THRESHOLD)
         return len(dets)
 
     def warmup(self) -> None:

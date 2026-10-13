@@ -23,7 +23,8 @@ class FakeEngine:
         self.calls = 0
         self.count_calls = 0
 
-    def count_faces(self, image_bgr, *, detector):
+    def count_faces(self, image_bgr, *, detector, upscale=1.0):
+        self.last_count_upscale = upscale
         self.count_calls += 1
         return len(self._find(image_bgr))
 
@@ -36,7 +37,8 @@ class FakeEngine:
     def default_fast_detector(self):
         return "fake_fast"
 
-    def detect(self, image_bgr, *, model, detector, upscale=1.0):
+    def detect(self, image_bgr, *, model, detector, upscale=1.0, min_confidence=None):
+        self.last_min_confidence = min_confidence
         self.calls += 1
         return self._find(image_bgr)
 

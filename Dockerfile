@@ -18,7 +18,7 @@ ENV PYTHONUNBUFFERED=1 \
     FACEAI_MODELS_DIR=/models \
     DEEPFACE_HOME=/models
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg libglib2.0-0 libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-dejavu-core \
+        ffmpeg libgl1 libglib2.0-0 libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app/backend
 COPY backend/ ./

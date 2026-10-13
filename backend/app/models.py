@@ -156,6 +156,7 @@ class Upload(SQLModel, table=True):
     created_by: str = ""
     created_at: datetime = Field(default_factory=utcnow)
     completed_at: datetime | None = None
+    result_id: int | None = None  # Video/ReferenceImage criado na conclusão (torna /complete idempotente)
 
 
 class AuditEvent(SQLModel, table=True):

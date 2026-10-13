@@ -22,4 +22,5 @@ def test_add_missing_columns(tmp_path, monkeypatch):
     with engine.connect() as conn:
         row = conn.exec_driver_sql("SELECT id, distance, quality, review_status FROM detection").one()
     assert tuple(row) == (1, 0.3, 0.0, "pending")
+    assert "ix_detection_track_id" in {i["name"] for i in inspect(engine).get_indexes("detection")}
     monkeypatch.setattr(db, "_engine", None)

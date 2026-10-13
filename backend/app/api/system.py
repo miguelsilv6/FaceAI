@@ -3,9 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from .. import __version__
-from ..config import settings
 from ..schemas import JobParams
 from ..services.face_engine import get_engine
+from .uploads import chunk_size
 
 router = APIRouter(prefix="/api", tags=["sistema"])
 
@@ -28,5 +28,5 @@ def system_info() -> dict:
                    for m in engine.models()],
         "detectors": engine.detectors(),
         "defaults": engine_defaults().model_dump(),
-        "upload_chunk_bytes": settings.upload_chunk_mb * 1024 * 1024,
+        "upload_chunk_bytes": chunk_size(),
     }

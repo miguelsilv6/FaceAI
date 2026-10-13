@@ -163,3 +163,20 @@ def test_track_continuations_are_saved(client, tmp_path):
     dets = client.get(f"/api/jobs/{job['id']}/detections").json()
     assert {d["is_match"] for d in dets} == {True, False}
     assert len({d["track_id"] for d in dets}) <= 2
+
+
+def test_cascade_and_detector_receive_job_settings(client, tmp_path):
+    """A 1.ª passagem usa a mesma ampliação que a deteção completa e o limiar do detetor segue o parâmetro."""
+    from app.services import face_engine
+
+    eng = face_engine.get_engine()
+    case = client.post("/api/cases", json={"name": "Parametros"}).json()
+    with make_image(tmp_path / "ref.jpg", RED).open("rb") as fh:
+        client.post(f"/api/cases/{case['id']}/references", files=[("files", ("ref.jpg", fh, "image/jpeg"))])
+    video = make_video(tmp_path / "v.mp4", [(0.0, 2.0, RED)], duration_s=2, fps=10)
+    with video.open("rb") as fh:
+        client.post(f"/api/cases/{case['id']}/videos", files=[("files", ("v.mp4", fh, "video/mp4"))])
+    r = client.post(f"/api/cases/{case['id']}/jobs", json={"params": {
+        "sample_fps": 2, "upscale": 2.0, "min_confidence": 0.3, "motion_filter": False}})
+    assert wait_for_job(client, r.json()["id"])["status"] == "completed"
+    assert eng.last_count_upscale == 2.0 and eng.last_min_confidence == 0.3

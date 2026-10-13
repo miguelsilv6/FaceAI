@@ -89,7 +89,13 @@ async function uploadChunked<T>(caseId: number, kind: "video" | "reference", fil
   if (saved) {
     try {
       status = await request<UploadStatus>("GET", `/api/uploads/${saved}`);
-      if (status.completed) status = null;
+      if (status.completed) {
+        // A resposta de "concluir" perdeu-se da última vez: obtém o resultado sem reenviar o ficheiro.
+        const result = await request<T>("POST", `/api/uploads/${status.id}/complete`);
+        storage("remove", key);
+        onBytes(file.size);
+        return result;
+      }
     } catch {
       status = null;
     }

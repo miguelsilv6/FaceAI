@@ -128,10 +128,11 @@ export default function Results() {
   };
 
   if (!job) return null;
+  // Mesmo critério do relatório: correspondência no frame ou num track com correspondência.
   const counts = {
-    confirmed: detections.filter((d) => d.is_match && d.review_status === "confirmed").length,
-    rejected: detections.filter((d) => d.is_match && d.review_status === "rejected").length,
-    matches: detections.filter((d) => d.is_match).length,
+    confirmed: detections.filter((d) => isEffectiveMatch(d) && d.review_status === "confirmed").length,
+    rejected: detections.filter((d) => isEffectiveMatch(d) && d.review_status === "rejected").length,
+    matches: detections.filter(isEffectiveMatch).length,
     tracks: tracks.filter((t) => t.is_match).length,
   };
 

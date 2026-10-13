@@ -30,7 +30,10 @@ def test_chunked_video_upload_with_resume(client, tmp_path):
     video = client.post(f"/api/uploads/{up['id']}/complete").json()
     assert video["filename"] == "cctv.mp4" and video["size_bytes"] == len(data) and video["frame_count"] == 40
     assert client.get(f"/api/cases/{case['id']}/videos").json()[0]["id"] == video["id"]
-    assert client.post(f"/api/uploads/{up['id']}/complete").status_code == 409  # já concluído
+    # idempotente: repetir (resposta perdida) devolve o mesmo vídeo, sem duplicar
+    again = client.post(f"/api/uploads/{up['id']}/complete")
+    assert again.status_code == 200 and again.json()["id"] == video["id"]
+    assert len(client.get(f"/api/cases/{case['id']}/videos").json()) == 1
     actions = [e["action"] for e in client.get(f"/api/cases/{case['id']}/audit").json()]
     assert "upload.started" in actions and "video.uploaded" in actions
 
@@ -79,3 +82,24 @@ def test_stale_uploads_are_cleaned(client, tmp_path):
     assert client.get(f"/api/uploads/{up['id']}").status_code == 404
     import os
     assert not os.path.exists(part)
+
+
+def test_invalid_video_upload_is_discarded(client, tmp_path):
+    case = _case(client)
+    data = b"isto nao e um video" * 10
+    up = client.post(f"/api/cases/{case['id']}/uploads",
+                     json={"kind": "video", "filename": "x.mp4", "size_bytes": len(data)}).json()
+    client.put(f"/api/uploads/{up['id']}?offset=0", content=data)
+    assert client.post(f"/api/uploads/{up['id']}/complete").status_code == 422
+    assert client.get(f"/api/uploads/{up['id']}").status_code == 404
+    assert client.get(f"/api/cases/{case['id']}/videos").json() == []
+
+
+def test_advertised_chunk_never_exceeds_server_limit():
+    from app.api import uploads
+
+    object.__setattr__(uploads.settings, "upload_chunk_mb", 90)
+    try:
+        assert uploads.chunk_size() == uploads.MAX_CHUNK_BYTES
+    finally:
+        object.__setattr__(uploads.settings, "upload_chunk_mb", 8)

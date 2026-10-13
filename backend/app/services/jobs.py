@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import bisect
 import logging
 import math
 import threading
@@ -224,7 +225,8 @@ class _AnalysisContext:
 class _TrackState:
     start_s: float
     end_s: float
-    distances: list[float] = field(default_factory=list)
+    n_faces: int = 0
+    top: list[float] = field(default_factory=list)  # as K menores distâncias, ordenadas
     best_distance: float = 2.0
     best_ref_id: int | None = None
     best_quality: float = 0.0
@@ -257,11 +259,13 @@ class _VideoAnalyzer:
                         self._refresh_track_row(st)
             return
         self.visible_tids = []
-        if ctx.fast_detector and ctx.engine.count_faces(frame.image, detector=ctx.fast_detector) == 0:
+        if ctx.fast_detector and ctx.engine.count_faces(frame.image, detector=ctx.fast_detector,
+                                                        upscale=ctx.upscale) == 0:
             job.frames_skipped_noface += 1
             return
 
-        faces = ctx.engine.detect(frame.image, model=ctx.model, detector=ctx.detector, upscale=ctx.upscale)
+        faces = ctx.engine.detect(frame.image, model=ctx.model, detector=ctx.detector, upscale=ctx.upscale,
+                                  min_confidence=ctx.min_conf)
         job.frames_processed += 1
         kept = []
         for face in faces:
@@ -300,7 +304,10 @@ class _VideoAnalyzer:
         if st is None:
             st = self.tracks[tid] = _TrackState(start_s=ts, end_s=ts)
         st.end_s = ts
-        st.distances.append(distance)
+        st.n_faces += 1
+        if len(st.top) < TRACK_TOP_K or distance < st.top[-1]:
+            bisect.insort(st.top, distance)
+            del st.top[TRACK_TOP_K:]
         st.best_quality = max(st.best_quality, quality)
         if distance < st.best_distance:
             st.best_distance, st.best_ref_id = distance, ref_id
@@ -337,9 +344,8 @@ class _VideoAnalyzer:
             st.row = Track(job_id=self.job.id, video_id=self.video.id, start_s=round(st.start_s, 3),
                            end_s=round(st.end_s, 3))
             self.s.add(st.row)
-            self.s.flush()
             self.job.tracks += 1
-        self.s.flush()  # garante o id da deteção
+        self.s.flush()  # um só flush: ids do track (se novo) e da deteção
         det.track_id = st.row.id
         st.row.n_saved += 1
         if det.distance < st.best_saved_distance:
@@ -349,9 +355,9 @@ class _VideoAnalyzer:
 
     def _refresh_track_row(self, st: _TrackState) -> None:
         row = st.row
-        top = sorted(st.distances)[:TRACK_TOP_K]
+        top = st.top
         row.end_s = round(st.end_s, 3)
-        row.n_faces = len(st.distances)
+        row.n_faces = st.n_faces
         row.best_distance = round(st.best_distance, 4)
         row.reference_id = st.best_ref_id
         row.track_distance = round(float(sum(top) / len(top)), 4)

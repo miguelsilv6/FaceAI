@@ -51,6 +51,9 @@ def _add_missing_columns(engine) -> None:
                 coltype = col.type.compile(dialect=engine.dialect)
                 default = _sql_default(col)
                 conn.execute(text(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {coltype}{default}'))
+            # create_all não cria índices em tabelas que já existiam (ex.: detection.track_id)
+            for index in table.indexes:
+                index.create(conn, checkfirst=True)
 
 
 def _sql_default(col) -> str:

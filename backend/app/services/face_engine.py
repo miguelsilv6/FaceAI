@@ -45,12 +45,17 @@ class FaceEngine(Protocol):
     name: str
 
     def detect(
-        self, image_bgr: np.ndarray, *, model: str, detector: str, upscale: float = 1.0
+        self, image_bgr: np.ndarray, *, model: str, detector: str, upscale: float = 1.0,
+        min_confidence: float | None = None,
     ) -> list[FaceObservation]:
-        """Deteta todas as faces e calcula o embedding de cada uma."""
+        """Deteta todas as faces e calcula o embedding de cada uma.
 
-    def count_faces(self, image_bgr: np.ndarray, *, detector: str) -> int:
-        """Deteção rápida (sem embeddings) usada como primeira passagem da cascata."""
+        `min_confidence` (se dado) é o limiar de confiança do próprio detetor; `None` = valor por omissão do motor.
+        """
+
+    def count_faces(self, image_bgr: np.ndarray, *, detector: str, upscale: float = 1.0) -> int:
+        """Deteção rápida (sem embeddings) usada como primeira passagem da cascata; usa a mesma ampliação que a
+        deteção completa, para não descartar frames com faces pequenas."""
 
     def models(self) -> list[ModelInfo]: ...
 
@@ -70,6 +75,7 @@ def default_threshold(model: str, engine: FaceEngine | None = None) -> float:
 
 
 _engine: FaceEngine | None = None
+_engine_lock = threading.Lock()
 
 
 def create_engine(name: str | None = None) -> FaceEngine:
@@ -88,7 +94,9 @@ def create_engine(name: str | None = None) -> FaceEngine:
 def get_engine() -> FaceEngine:
     global _engine
     if _engine is None:
-        _engine = create_engine()
+        with _engine_lock:  # o pré-carregamento corre numa thread em paralelo com os 1.ºs pedidos
+            if _engine is None:
+                _engine = create_engine()
     return _engine
 
 

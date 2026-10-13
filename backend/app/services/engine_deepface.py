@@ -31,7 +31,8 @@ class DeepFaceEngine:
         self._lock = threading.Lock()
 
     def detect(
-        self, image_bgr: np.ndarray, *, model: str, detector: str, upscale: float = 1.0
+        self, image_bgr: np.ndarray, *, model: str, detector: str, upscale: float = 1.0,
+        min_confidence: float | None = None,  # o DeepFace não expõe o limiar do detetor; filtrado depois
     ) -> list[FaceObservation]:
         from deepface import DeepFace
 
@@ -66,9 +67,11 @@ class DeepFaceEngine:
             )
         return faces
 
-    def count_faces(self, image_bgr: np.ndarray, *, detector: str) -> int:
+    def count_faces(self, image_bgr: np.ndarray, *, detector: str, upscale: float = 1.0) -> int:
         from deepface import DeepFace
 
+        if upscale and upscale > 1.0:
+            image_bgr = cv2.resize(image_bgr, None, fx=upscale, fy=upscale, interpolation=cv2.INTER_CUBIC)
         with self._lock:
             faces = DeepFace.extract_faces(img_path=image_bgr, detector_backend=detector, enforce_detection=False,
                                            align=False)
