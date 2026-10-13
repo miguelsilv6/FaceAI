@@ -10,7 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from .clock import ClockSample, fit_clock, parse_datetime
+from .clock import ClockSample, fit_clock, infer_missing_dates, parse_datetime, parse_time_only
 
 log = logging.getLogger(__name__)
 
@@ -135,18 +135,32 @@ def crop_roi(image: np.ndarray, roi: list[float]) -> np.ndarray:
     return crop
 
 
+def _variants(crop: np.ndarray):
+    """Versões da zona a tentar, da mais barata à mais robusta (texto fino/pequeno, fundo com ruído)."""
+    yield "rec", crop, False
+    big = cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+    yield "rec×2", big, False
+    gray = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
+    gray = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8)).apply(gray)
+    yield "rec×2-contraste", cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR), False
+    yield "det+rec", crop, True
+
+
 def read_timestamp(image: np.ndarray, roi: list[float], date_order: str = "DMY") -> tuple[str, object]:
-    """Lê a zona indicada: primeiro só reconhecimento (rápido, 1 linha); se não der uma data/hora, deteção +
-    reconhecimento dentro da zona (data e hora em blocos ou linhas separadas)."""
+    """Lê a zona indicada. Tenta várias versões da imagem (original, ampliada, com contraste, e com deteção de
+    texto para data e hora em blocos/linhas separados) e fica com a primeira que dá uma data/hora completa;
+    se nenhuma der, devolve o texto mais promissor (com hora legível) para a data poder ser inferida."""
     crop = crop_roi(image, roi)
-    texts = [b.text for b in _run(crop, detect=False)]
-    text = " ".join(texts)
-    dvr = parse_datetime(text, date_order)
-    if dvr is None:
-        boxes = _run(crop)
-        text = " ".join(b.text for line in _lines(boxes) for b in line)
+    fallback = ""
+    for _name, img, detect in _variants(crop):
+        boxes = _run(img, detect=detect)
+        text = " ".join(b.text for line in _lines(boxes) for b in line) if detect else " ".join(b.text for b in boxes)
         dvr = parse_datetime(text, date_order)
-    return text, dvr
+        if dvr is not None:
+            return text, dvr
+        if not fallback or (parse_time_only(text) and not parse_time_only(fallback)):
+            fallback = text
+    return fallback, None
 
 
 def calibrate(path: str | Path, fps: float, duration_s: float, *, roi: list[float] | None, samples: int,
@@ -163,26 +177,34 @@ def calibrate(path: str | Path, fps: float, duration_s: float, *, roi: list[floa
     n = max(2, samples)
     end = max(0.0, duration_s - 1.0)
     times = sorted({round(end * k / (n - 1), 3) for k in range(n)}) if end > 0 else [0.0]
-    readings: list[ClockSample] = []
+    raw: list[tuple[float, str, object]] = []
     for t in times:
         try:
             text, dvr = read_timestamp(read_frame(path, t, fps), roi, date_order)
         except ValueError as exc:
             text, dvr = f"(erro: {exc})", None
-        readings.append(ClockSample(video_s=t, text=text, dvr=dvr))
+        raw.append((t, text, dvr))
+    # Frames em que só a hora é legível: data completada a partir das outras leituras (marcado como inferido).
+    inferred = infer_missing_dates(raw)
+    readings = [ClockSample(video_s=t, text=text, dvr=d) for (t, text, _), (d, _) in zip(raw, inferred, strict=True)]
     result = {
         "roi": roi, "date_order": date_order,
-        "samples": [{"video_s": r.video_s, "text": r.text, "dvr": r.dvr.isoformat() if r.dvr else None}
-                    for r in readings],
+        "samples": [{"video_s": r.video_s, "text": r.text, "dvr": r.dvr.isoformat() if r.dvr else None,
+                     "date_inferred": inf}
+                    for r, (_, inf) in zip(readings, inferred, strict=True)],
     }
     try:
         fit = fit_clock(readings)
     except ValueError as exc:
-        result["error"] = str(exc)
+        legible = sum(1 for _, text, _ in raw if text.strip() and not text.startswith("(erro"))
+        result["error"] = (f"{exc} {legible} de {len(raw)} frames tinham texto legível na zona. Veja abaixo o que "
+                           "foi lido: confirme a zona (arraste sobre a data/hora) e o formato da data, ou use o "
+                           "acerto manual.")
         return result
     for i, smp in enumerate(result["samples"]):
         smp["inlier"] = i in fit.inliers
     result.update({"dvr_start": fit.start.isoformat(timespec="milliseconds"), "rate": round(fit.rate, 6),
                    "max_residual_s": fit.max_residual_s, "inliers": len(fit.inliers),
-                   "valid_readings": sum(1 for r in readings if r.dvr is not None)})
+                   "valid_readings": sum(1 for r in readings if r.dvr is not None),
+                   "inferred_dates": sum(1 for _, inf in inferred if inf)})
     return result

@@ -1,6 +1,6 @@
 import type {
-  AuditEvent, Case, Detection, Job, JobParams, OcrTest, ReferenceImage, ReviewStatus, Segment, SystemInfo, Track,
-  Video,
+  AuditEvent, Case, Detection, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
+  Track, Video,
 } from "./types";
 
 const ANALYST_KEY = "faceai.analyst";
@@ -160,6 +160,8 @@ export const api = {
   case: (id: number) => request<Case>("GET", `/api/cases/${id}`),
   createCase: (body: { name: string; description: string; analyst: string }) =>
     request<Case>("POST", "/api/cases", body),
+  updateCase: (id: number, body: { name?: string; description?: string }) =>
+    request<Case>("PATCH", `/api/cases/${id}`, body),
   audit: (caseId: number) => request<AuditEvent[]>("GET", `/api/cases/${caseId}/audit`),
 
   references: (caseId: number) => request<ReferenceImage[]>("GET", `/api/cases/${caseId}/references`),
@@ -192,14 +194,30 @@ export const api = {
       reference_ids: referenceIds,
     }),
   cancelJob: (id: number) => request<Job>("POST", `/api/jobs/${id}/cancel`),
+  deleteJob: (id: number, reason: string) =>
+    request<void>("DELETE", `/api/jobs/${id}`, { confirm_job_id: id, reason }),
   detections: (jobId: number) => request<Detection[]>("GET", `/api/jobs/${jobId}/detections`),
-  segments: (jobId: number) => request<Segment[]>("GET", `/api/jobs/${jobId}/segments`),
+  segments: (jobId: number, personId?: number | null) => request<Segment[]>("GET",
+    `/api/jobs/${jobId}/segments${personId != null ? `?person_id=${personId}` : ""}`),
   tracks: (jobId: number) => request<Track[]>("GET", `/api/jobs/${jobId}/tracks`),
   reviewTrack: (trackId: number, status: ReviewStatus, note = "") =>
     request<Track>("PATCH", `/api/tracks/${trackId}/review`, { status, note }),
   review: (detId: number, status: ReviewStatus, note = "") =>
     request<Detection>("PATCH", `/api/detections/${detId}/review`, { status, note }),
   detectionImageUrl: (id: number, kind: "crop" | "frame") => `/api/detections/${id}/${kind}`,
+  /** Frame completo: "annotated" (JPEG com a caixa) ou "original" (PNG extraído do vídeo, sem marcações). */
+  detectionFrameUrl: (id: number, variant: "annotated" | "original", download = false) => {
+    const base = variant === "original" ? `/api/detections/${id}/frame/original` : `/api/detections/${id}/frame`;
+    return download ? `${base}?download=1&analyst=${encodeURIComponent(getAnalyst())}` : base;
+  },
+  detectionAsReference: (id: number) => request<ReferenceImage>("POST", `/api/detections/${id}/as-reference`),
+  persons: (jobId: number) => request<Person[]>("GET", `/api/jobs/${jobId}/persons`),
+  reviewPerson: (jobId: number, personId: number, status: ReviewStatus, note = "") =>
+    request<Person>("PATCH", `/api/jobs/${jobId}/persons/${personId}/review`, { status, note }),
+  mergePersons: (jobId: number, personIds: number[]) =>
+    request<Person[]>("POST", `/api/jobs/${jobId}/persons/merge`, { person_ids: personIds }),
+  moveTrack: (trackId: number, personId: number | null) =>
+    request<Track>("PATCH", `/api/tracks/${trackId}/person`, { person_id: personId }),
   exportUrl: (jobId: number, fmt: string) =>
     `/api/jobs/${jobId}/export/${fmt}?analyst=${encodeURIComponent(getAnalyst())}`,
 };

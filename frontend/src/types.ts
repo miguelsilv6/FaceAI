@@ -45,6 +45,7 @@ export interface ClockSample {
   text: string;
   dvr: string | null;
   inlier?: boolean;
+  date_inferred?: boolean;
 }
 
 export interface ClockCalibration {
@@ -68,7 +69,10 @@ export interface OcrTest {
   auto: boolean;
 }
 
+export type JobMode = "match" | "discover";
+
 export interface JobParams {
+  mode: JobMode;
   model: string | null;
   detector: string | null;
   sample_fps: number;
@@ -107,6 +111,7 @@ export interface Job {
   frames_skipped_motion: number;
   frames_skipped_noface: number;
   tracks: number;
+  persons: number;
   message: string;
   created_by: string;
   created_at: string;
@@ -120,7 +125,7 @@ export interface Detection {
   id: number;
   job_id: number;
   video_id: number;
-  reference_id: number;
+  reference_id: number | null;
   frame_index: number;
   timestamp_s: number;
   x: number;
@@ -147,6 +152,7 @@ export interface Track {
   job_id: number;
   video_id: number;
   reference_id: number | null;
+  person_id: number | null;
   start_s: number;
   end_s: number;
   n_faces: number;
@@ -172,6 +178,23 @@ export interface Segment {
   best_detection_id: number;
   detection_ids: number[];
   count: number;
+  person_id?: number | null;
+}
+
+/** Modo descoberta: pessoa distinta = grupo de tracks com faces semelhantes. */
+export interface Person {
+  person_id: number;
+  track_ids: number[];
+  n_tracks: number;
+  n_faces: number;
+  n_saved: number;
+  video_ids: number[];
+  first: { video_id: number; start_s: number };
+  duration_s: number;
+  best_detection_id: number | null;
+  best_quality: number;
+  max_distance: number;
+  review_status: ReviewStatus | "mixed";
 }
 
 export interface AuditEvent {

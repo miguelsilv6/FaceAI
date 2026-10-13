@@ -11,15 +11,17 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
 from sqlmodel import Session, select
 
 from ..config import settings
 from ..db import get_engine as get_db_engine
 from ..models import Detection, Job, JobStatus, ReferenceImage, Track, Video, utcnow
 from .audit import log_event
+from .clustering import centroids_of, cluster_embeddings
 from .face_engine import FaceEngine, get_engine
 from .imageio import write_jpeg
-from .matcher import ReferenceSet, is_match
+from .matcher import ReferenceSet, is_match, l2_normalize
 from .motion import MotionGate
 from .quality import face_quality
 from .references import reference_embeddings
@@ -108,16 +110,19 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                   details={"job_id": job.id, "params": p, "environment": job.environment})
 
         try:
-            refs = [s.get(ReferenceImage, rid) for rid in job.reference_ids]
-            refs = [r for r in refs if r is not None]
-            used_refs, ref_matrix, warnings = reference_embeddings(
-                refs, engine, model=p["model"], detector=p["detector"]
-            )
-            if not used_refs:
-                raise ValueError("Nenhuma imagem de referência válida. " + " ".join(warnings))
-            reference_set = ReferenceSet(ref_matrix)
-            job.reference_ids = [r.id for r in used_refs]
-            job.message = " ".join(warnings)
+            discover = p.get("mode") == "discover"
+            reference_set, used_refs = None, []
+            if not discover:
+                refs = [s.get(ReferenceImage, rid) for rid in job.reference_ids]
+                refs = [r for r in refs if r is not None]
+                used_refs, ref_matrix, warnings = reference_embeddings(
+                    refs, engine, model=p["model"], detector=p["detector"]
+                )
+                if not used_refs:
+                    raise ValueError("Nenhuma imagem de referência válida. " + " ".join(warnings))
+                reference_set = ReferenceSet(ref_matrix)
+                job.reference_ids = [r.id for r in used_refs]
+                job.message = " ".join(warnings)
 
             videos = [v for v in (s.get(Video, vid) for vid in job.video_ids) if v is not None]
             if not videos:
@@ -145,21 +150,47 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                         s.add(job)
                         s.commit()
                 s.commit()
+            frames = (f"{job.frames_processed} frames analisados ({job.frames_sampled} amostrados;"
+                      f" {job.frames_skipped_motion} sem movimento, {job.frames_skipped_noface} sem faces na"
+                      " 1.ª passagem)")
+            if discover:
+                _group_persons(ctx, s, job)
+                summary = (f"{job.faces_detected} face(s) em {frames}, seguidas em {job.tracks} track(s) e"
+                           f" agrupadas em {job.persons} pessoa(s) distinta(s) (limiar {ctx.threshold})")
+            else:
+                matched_tracks = s.exec(
+                    select(Track).where(Track.job_id == job.id, Track.is_match == True)  # noqa: E712
+                ).all()
+                summary = f"{job.matches} correspondência(s) em {frames}"
+                if ctx.tracking:
+                    summary += f"; {len(matched_tracks)} track(s) com correspondência"
             job.progress = 1.0
-            matched_tracks = s.exec(
-                select(Track).where(Track.job_id == job.id, Track.is_match == True)  # noqa: E712
-            ).all()
-            summary = (f"{job.matches} correspondência(s) em {job.frames_processed} frames analisados"
-                       f" ({job.frames_sampled} amostrados; {job.frames_skipped_motion} sem movimento,"
-                       f" {job.frames_skipped_noface} sem faces na 1.ª passagem)")
-            if ctx.tracking:
-                summary += f"; {len(matched_tracks)} track(s) com correspondência"
             _finish(s, job, JobStatus.completed, (job.message + " " if job.message else "") + summary + ".")
         except JobCancelled:
-            _finish(s, job, JobStatus.cancelled, "Cancelada pelo utilizador.")
+            _finish_safely(s, job_id, JobStatus.cancelled, "Cancelada pelo utilizador.")
         except Exception as exc:
             log.error("Job %s falhou: %s", job_id, traceback.format_exc())
-            _finish(s, job, JobStatus.failed, f"Erro: {exc}")
+            _finish_safely(s, job_id, JobStatus.failed, f"Erro: {exc}")
+
+
+def _finish_safely(s: Session, job_id: int, status: JobStatus, message: str) -> None:
+    """Regista o fim da análise mesmo depois de um erro de base de dados.
+
+    Um erro a meio (ex.: base de dados bloqueada, disco cheio) deixa a sessão à espera de rollback; sem isso,
+    gravar o estado final também falharia e a análise ficaria para sempre "A decorrer".
+    """
+    try:
+        s.rollback()
+        job = s.get(Job, job_id)
+        if job is not None:
+            _finish(s, job, status, message)
+        return
+    except Exception:
+        log.exception("Não foi possível registar o fim do job %s na sessão da análise", job_id)
+    with Session(get_db_engine(), expire_on_commit=False) as s2:  # última tentativa, sessão nova
+        job = s2.get(Job, job_id)
+        if job is not None:
+            _finish(s2, job, status, message)
 
 
 def _finish(s: Session, job: Job, status: JobStatus, message: str) -> None:
@@ -177,12 +208,15 @@ def _finish(s: Session, job: Job, status: JobStatus, message: str) -> None:
 
 
 TRACK_TOP_K = 3  # o match do track decide-se pela média das K melhores distâncias
+DISCOVER_TOP_FACES = 5  # modo descoberta: o embedding do track é a média das K faces de melhor qualidade
+DISCOVER_QUALITY_STEP = 0.05  # guarda uma nova face do track quando a qualidade melhora pelo menos isto
+DISCOVER_SAVE_EVERY_S = 10.0  # ... ou quando passou este tempo desde a última face guardada do track
 
 
 @dataclass
 class _AnalysisContext:
     engine: FaceEngine
-    reference_set: ReferenceSet
+    reference_set: ReferenceSet | None  # None = modo descoberta
     refs: list[ReferenceImage]
     out_dir: Path
     model: str
@@ -200,9 +234,15 @@ class _AnalysisContext:
     keyframe_interval_s: float
     tracking: bool
     track_gap_s: float
+    discovered: list[_TrackState] = field(default_factory=list)  # modo descoberta: tracks de todos os vídeos
+    det_embeddings: list[tuple[Detection, np.ndarray]] = field(default_factory=list)
+
+    @property
+    def discover(self) -> bool:
+        return self.reference_set is None
 
     @classmethod
-    def from_params(cls, p: dict, engine: FaceEngine, reference_set: ReferenceSet,
+    def from_params(cls, p: dict, engine: FaceEngine, reference_set: ReferenceSet | None,
                     refs: list[ReferenceImage], out_dir: Path) -> _AnalysisContext:
         threshold = float(p["threshold"])
         fast = p.get("fast_detector") if p.get("cascade", False) else None
@@ -217,7 +257,8 @@ class _AnalysisContext:
             motion_filter=bool(p.get("motion_filter", False)),
             motion_threshold=float(p.get("motion_threshold", 0.0)),
             keyframe_interval_s=float(p.get("keyframe_interval_s", 0.0)),
-            tracking=bool(p.get("tracking", False)), track_gap_s=float(p.get("track_gap_s", 2.0)),
+            tracking=bool(p.get("tracking", False)) or reference_set is None,
+            track_gap_s=float(p.get("track_gap_s", 2.0)),
         )
 
 
@@ -232,6 +273,9 @@ class _TrackState:
     best_quality: float = 0.0
     best_saved_distance: float = 2.0
     row: Track | None = None
+    faces: list[tuple[float, np.ndarray]] = field(default_factory=list)  # descoberta: (qualidade, embedding)
+    best_saved_quality: float = -1.0
+    last_saved_s: float = -1e9
 
 
 class _VideoAnalyzer:
@@ -285,6 +329,9 @@ class _VideoAnalyzer:
                 frame.timestamp_s, [(f.x, f.y, f.w, f.h) for f, _ in kept], [f.embedding for f, _ in kept]))
 
         self.visible_tids = [t for t in track_ids if t is not None]
+        if ctx.discover:
+            self._process_discover(frame, kept, track_ids)
+            return
         for k, ((face, q), tid) in enumerate(zip(kept, track_ids, strict=True)):
             result = ctx.reference_set.best_match(face.embedding)
             ref = ctx.refs[result.reference_index]
@@ -295,6 +342,45 @@ class _VideoAnalyzer:
             det = self._save_detection(frame, k, face, q, result.distance, ref.id)
             if state is not None:
                 self._attach_to_track(state, det)
+
+    def _process_discover(self, frame: SampledFrame, kept: list, track_ids: list[int | None]) -> None:
+        """Sem referência: guarda as faces de cada track (a 1.ª, as que melhoram a qualidade e uma a cada
+        DISCOVER_SAVE_EVERY_S) e acumula o embedding do track para o agrupamento final em pessoas."""
+        for k, ((face, q), tid) in enumerate(zip(kept, track_ids, strict=True)):
+            st = self.tracks.get(tid)
+            if st is None:
+                st = self.tracks[tid] = _TrackState(start_s=frame.timestamp_s, end_s=frame.timestamp_s)
+                self.ctx.discovered.append(st)
+            st.end_s = frame.timestamp_s
+            st.n_faces += 1
+            st.best_quality = max(st.best_quality, q.score)
+            emb = l2_normalize(face.embedding)[0]
+            if len(st.faces) < DISCOVER_TOP_FACES or q.score > st.faces[-1][0]:
+                st.faces.append((q.score, emb))
+                st.faces.sort(key=lambda f: -f[0])
+                del st.faces[DISCOVER_TOP_FACES:]
+            if (st.row is None or q.score >= st.best_saved_quality + DISCOVER_QUALITY_STEP
+                    or frame.timestamp_s - st.last_saved_s >= DISCOVER_SAVE_EVERY_S):
+                det = self._save_detection(frame, k, face, q, None, None)
+                self.ctx.det_embeddings.append((det, emb))
+                self._attach_discovered(st, det, q.score)
+                st.last_saved_s = frame.timestamp_s
+            elif st.row is not None:
+                self._refresh_track_row(st)
+
+    def _attach_discovered(self, st: _TrackState, det: Detection, quality: float) -> None:
+        if st.row is None:
+            st.row = Track(job_id=self.job.id, video_id=self.video.id, start_s=round(st.start_s, 3),
+                           end_s=round(st.end_s, 3))
+            self.s.add(st.row)
+            self.job.tracks += 1
+        self.s.flush()
+        det.track_id = st.row.id
+        st.row.n_saved += 1
+        if quality > st.best_saved_quality:
+            st.best_saved_quality = quality
+            st.row.best_detection_id = det.id
+        self._refresh_track_row(st)
 
     def _track_state(self, tid: int | None, ts: float, distance: float, ref_id: int,
                      quality: float) -> _TrackState | None:
@@ -315,15 +401,22 @@ class _VideoAnalyzer:
             self._refresh_track_row(st)
         return st
 
-    def _save_detection(self, frame: SampledFrame, k: int, face, q, distance: float, ref_id: int) -> Detection:
+    def _save_detection(self, frame: SampledFrame, k: int, face, q, distance: float | None,
+                        ref_id: int | None) -> Detection:
+        """Guarda a deteção (recorte + frame anotado). distance=None: modo descoberta, sem referência."""
         ctx = self.ctx
-        matched = is_match(distance, ctx.threshold)
+        matched = distance is not None and is_match(distance, ctx.threshold)
         stem = f"v{self.video.id:04d}_f{frame.index:07d}_{k}"
         crop_path = ctx.out_dir / "crops" / f"{stem}.jpg"
         frame_path = ctx.out_dir / "frames" / f"{stem}.jpg"
         write_jpeg(crop_path, crop_with_margin(frame.image, face.x, face.y, face.w, face.h))
-        label = f"{format_timestamp(frame.timestamp_s)} sim={1 - distance:.2f} q={q.score:.2f}"
-        color = (0, 0, 255) if matched else (0, 165, 255)
+        if distance is None:
+            label = f"{format_timestamp(frame.timestamp_s)} q={q.score:.2f}"
+            color = (255, 160, 0)
+            distance = 1.0  # substituída pela distância ao centro do grupo da pessoa no fim da análise
+        else:
+            label = f"{format_timestamp(frame.timestamp_s)} sim={1 - distance:.2f} q={q.score:.2f}"
+            color = (0, 0, 255) if matched else (0, 165, 255)
         write_jpeg(frame_path, annotate(frame.image, face.x, face.y, face.w, face.h, label, color))
         det = Detection(
             job_id=self.job.id, video_id=self.video.id, reference_id=ref_id,
@@ -358,9 +451,57 @@ class _VideoAnalyzer:
         top = st.top
         row.end_s = round(st.end_s, 3)
         row.n_faces = st.n_faces
+        if self.ctx.discover:  # sem distâncias: são calculadas no agrupamento final
+            row.best_quality = round(st.best_quality, 3)
+            self.s.add(row)
+            return
         row.best_distance = round(st.best_distance, 4)
         row.reference_id = st.best_ref_id
         row.track_distance = round(float(sum(top) / len(top)), 4)
         row.best_quality = round(st.best_quality, 3)
         row.is_match = row.track_distance <= self.ctx.threshold
         self.s.add(row)
+
+
+def _track_embedding(st: _TrackState) -> np.ndarray:
+    weights = np.array([max(qs, 0.05) for qs, _ in st.faces])
+    return l2_normalize((np.stack([e for _, e in st.faces]) * weights[:, None]).sum(axis=0))[0]
+
+
+def _group_persons(ctx: _AnalysisContext, s: Session, job: Job) -> None:
+    """Modo descoberta: agrupa os tracks em pessoas e guarda a distância de cada track/face ao centro do grupo."""
+    states = [st for st in ctx.discovered if st.row is not None and st.faces]
+    if not states:
+        job.persons = 0
+        return
+    embs = np.stack([_track_embedding(st) for st in states])
+    weights = [len(st.faces) * (0.5 + st.best_quality) for st in states]
+    labels = cluster_embeddings(embs, weights, ctx.threshold)
+    # Numeração final: a pessoa 1 é a que tem mais faces detetadas (a que mais aparece).
+    faces_per = np.bincount(labels, weights=[st.n_faces for st in states])
+    order = np.argsort(-faces_per, kind="stable")
+    remap = np.empty_like(order)
+    remap[order] = np.arange(len(order))
+    labels = remap[labels]
+    centroids = centroids_of(embs, weights, labels)
+    for st, label, emb in zip(states, labels, embs, strict=True):
+        dist = float(1.0 - centroids[label] @ emb)
+        st.row.person_id = int(label) + 1
+        st.row.track_distance = st.row.best_distance = round(dist, 4)
+        st.row.is_match = False
+        s.add(st.row)
+    person_of_track = {st.row.id: int(label) for st, label in zip(states, labels, strict=True)}
+    for det, emb in ctx.det_embeddings:
+        label = person_of_track.get(det.track_id)
+        if label is None:
+            continue
+        dist = float(1.0 - centroids[label] @ emb)
+        det.distance, det.similarity = round(dist, 4), round(1.0 - dist, 4)
+        s.add(det)
+    job.persons = int(labels.max()) + 1
+    try:  # embeddings dos tracks, para reutilização futura (ex.: comparar pessoas entre análises)
+        ctx.out_dir.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(ctx.out_dir / "track_embeddings.npz", track_ids=[st.row.id for st in states],
+                            person_ids=labels + 1, embeddings=embs.astype(np.float32))
+    except OSError:
+        log.warning("Não foi possível gravar os embeddings dos tracks do job %s", job.id)

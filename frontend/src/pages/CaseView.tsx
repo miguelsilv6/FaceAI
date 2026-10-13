@@ -1,5 +1,7 @@
-import { Anchor, Badge, Breadcrumbs, Group, Stack, Tabs, Text, Title } from "@mantine/core";
-import { IconActivity, IconHistory, IconMovie, IconPhoto } from "@tabler/icons-react";
+import {
+  ActionIcon, Anchor, Badge, Breadcrumbs, Button, Group, Modal, Stack, Tabs, Text, TextInput, Textarea, Title, Tooltip,
+} from "@mantine/core";
+import { IconActivity, IconHistory, IconMovie, IconPencil, IconPhoto } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
@@ -8,7 +10,7 @@ import AuditPanel from "../components/AuditPanel";
 import JobsPanel from "../components/JobsPanel";
 import ReferencesPanel from "../components/ReferencesPanel";
 import VideosPanel from "../components/VideosPanel";
-import { notifyError } from "../notify";
+import { notifyError, notifyOk } from "../notify";
 import type { AuditEvent, Case, Job, ReferenceImage, Video } from "../types";
 
 export default function CaseView() {
@@ -19,6 +21,10 @@ export default function CaseView() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [tab, setTab] = useState<string | null>("references");
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState("");
+  const [description, setDescription] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const reload = useCallback(() => {
     Promise.all([api.case(caseId), api.references(caseId), api.videos(caseId), api.jobs(caseId), api.audit(caseId)])
@@ -40,6 +46,27 @@ export default function CaseView() {
     if (tab === "audit") api.audit(caseId).then(setAudit).catch(notifyError);
   }, [tab, caseId]);
 
+  const startEdit = () => {
+    if (!kase) return;
+    setName(kase.name);
+    setDescription(kase.description);
+    setEditing(true);
+  };
+  const save = async () => {
+    setSaving(true);
+    try {
+      const updated = await api.updateCase(caseId, { name: name.trim(), description });
+      setCase(updated);
+      setEditing(false);
+      notifyOk("Caso atualizado. A alteração fica registada na auditoria.");
+      if (tab === "audit") api.audit(caseId).then(setAudit);
+    } catch (e) {
+      notifyError(e, "Não foi possível guardar");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!kase) return null;
   return (
     <Stack maw={1300} mx="auto">
@@ -48,10 +75,28 @@ export default function CaseView() {
         <Text>#{kase.id} {kase.name}</Text>
       </Breadcrumbs>
       <div>
-        <Title order={2}>{kase.name}</Title>
+        <Group gap="xs" wrap="nowrap">
+          <Title order={2}>{kase.name}</Title>
+          <Tooltip label="Editar nome e descrição do caso">
+            <ActionIcon variant="subtle" onClick={startEdit} aria-label="Editar caso"><IconPencil size={18} /></ActionIcon>
+          </Tooltip>
+        </Group>
         <Text c="dimmed" size="sm">{kase.description || "Sem descrição"} · criado em {formatDate(kase.created_at)}
           {kase.analyst ? ` por ${kase.analyst}` : ""}</Text>
       </div>
+      <Modal opened={editing} onClose={() => setEditing(false)} title={`Editar caso #${kase.id}`}>
+        <Stack>
+          <TextInput label="Nome / referência do processo" required value={name} data-autofocus
+            onChange={(e) => setName(e.currentTarget.value)} error={!name.trim() ? "Obrigatório" : undefined} />
+          <Textarea label="Descrição" autosize minRows={2} value={description}
+            onChange={(e) => setDescription(e.currentTarget.value)} />
+          <Text size="xs" c="dimmed">Os valores anteriores ficam registados na auditoria do caso.</Text>
+          <Group justify="flex-end">
+            <Button variant="default" onClick={() => setEditing(false)}>Cancelar</Button>
+            <Button onClick={save} loading={saving} disabled={!name.trim()}>Guardar</Button>
+          </Group>
+        </Stack>
+      </Modal>
       <Tabs value={tab} onChange={setTab} keepMounted={false}>
         <Tabs.List>
           <Tabs.Tab value="references" leftSection={<IconPhoto size={16} />}>

@@ -180,3 +180,23 @@ def test_cascade_and_detector_receive_job_settings(client, tmp_path):
         "sample_fps": 2, "upscale": 2.0, "min_confidence": 0.3, "motion_filter": False}})
     assert wait_for_job(client, r.json()["id"])["status"] == "completed"
     assert eng.last_count_upscale == 2.0 and eng.last_min_confidence == 0.3
+
+
+def test_job_db_error_is_recorded_as_failed(client, tmp_path, monkeypatch):
+    """Um erro de base de dados a meio da análise não pode deixar o estado preso em "A decorrer"."""
+    from app.services import jobs as jobs_mod
+
+    case, _refs, _video = _setup_case(client, tmp_path)
+    original = jobs_mod._VideoAnalyzer._save_detection
+
+    def boom(self, *a, **kw):
+        det = original(self, *a, **kw)
+        det.crop_path = None  # coluna NOT NULL: o flush falha e a sessão fica à espera de rollback
+        self.s.flush()
+        return det
+
+    monkeypatch.setattr(jobs_mod._VideoAnalyzer, "_save_detection", boom)
+    r = client.post(f"/api/cases/{case['id']}/jobs", json={"params": {"sample_fps": 2, "threshold": 0.05,
+                                                                     "motion_filter": False}})
+    job = wait_for_job(client, r.json()["id"])
+    assert job["status"] == "failed" and "NOT NULL" in job["message"]

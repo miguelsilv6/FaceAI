@@ -113,3 +113,25 @@ def test_ocr_fails_cleanly_without_timestamp(client, tmp_path):
         video = client.post(f"/api/cases/{case['id']}/videos", files=[("files", ("v.mp4", fh))]).json()[0]
     r = client.post(f"/api/videos/{video['id']}/clock/ocr", json={"samples": 3})
     assert r.status_code == 422 and "Marque a zona" in r.json()["detail"]
+
+
+def test_ocr_small_font_low_resolution(client, tmp_path):
+    """Fonte fina e pequena em vídeo de baixa resolução: o OCR cola a data à hora e por vezes perde dígitos."""
+    case = client.post("/api/cases", json={"name": "CIF"}).json()
+    path = tmp_path / "cif.mp4"
+    rng = np.random.default_rng(1)
+    bg = (rng.random((360, 640, 3)) * 140).astype(np.uint8)
+    w = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 5, (640, 360))
+    for i in range(5 * 900 // 10):  # 90 s
+        f = bg.copy()
+        txt = (START + timedelta(seconds=int(i / 5))).strftime("%Y-%m-%d %H:%M:%S")
+        cv2.putText(f, txt, (6, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+        w.write(f)
+    w.release()
+    with path.open("rb") as fh:
+        video = client.post(f"/api/cases/{case['id']}/videos", files=[("files", ("cif.mp4", fh))]).json()[0]
+    r = client.post(f"/api/videos/{video['id']}/clock/ocr", json={"samples": 12})
+    assert r.status_code == 200, r.text
+    cal = r.json()["time_calibration"]
+    assert cal["inliers"] >= 8
+    assert abs((datetime.fromisoformat(r.json()["dvr_start"]) - START).total_seconds()) <= 1.0
