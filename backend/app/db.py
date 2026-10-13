@@ -14,7 +14,8 @@ def get_engine():
     global _engine
     if _engine is None:
         settings.ensure_dirs()
-        _engine = create_engine(settings.db_url, connect_args={"check_same_thread": False})
+        # timeout: espera até 30 s por um lock de escrita (análise + uploads em simultâneo) em vez de falhar logo
+        _engine = create_engine(settings.db_url, connect_args={"check_same_thread": False, "timeout": 30})
 
         @event.listens_for(_engine, "connect")
         def _sqlite_pragmas(dbapi_conn, _):  # pragma: no cover - trivial

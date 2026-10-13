@@ -156,10 +156,30 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                 summary += f"; {len(matched_tracks)} track(s) com correspondência"
             _finish(s, job, JobStatus.completed, (job.message + " " if job.message else "") + summary + ".")
         except JobCancelled:
-            _finish(s, job, JobStatus.cancelled, "Cancelada pelo utilizador.")
+            _finish_safely(s, job_id, JobStatus.cancelled, "Cancelada pelo utilizador.")
         except Exception as exc:
             log.error("Job %s falhou: %s", job_id, traceback.format_exc())
-            _finish(s, job, JobStatus.failed, f"Erro: {exc}")
+            _finish_safely(s, job_id, JobStatus.failed, f"Erro: {exc}")
+
+
+def _finish_safely(s: Session, job_id: int, status: JobStatus, message: str) -> None:
+    """Regista o fim da análise mesmo depois de um erro de base de dados.
+
+    Um erro a meio (ex.: base de dados bloqueada, disco cheio) deixa a sessão à espera de rollback; sem isso,
+    gravar o estado final também falharia e a análise ficaria para sempre "A decorrer".
+    """
+    try:
+        s.rollback()
+        job = s.get(Job, job_id)
+        if job is not None:
+            _finish(s, job, status, message)
+        return
+    except Exception:
+        log.exception("Não foi possível registar o fim do job %s na sessão da análise", job_id)
+    with Session(get_db_engine(), expire_on_commit=False) as s2:  # última tentativa, sessão nova
+        job = s2.get(Job, job_id)
+        if job is not None:
+            _finish(s2, job, status, message)
 
 
 def _finish(s: Session, job: Job, status: JobStatus, message: str) -> None:

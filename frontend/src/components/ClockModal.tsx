@@ -206,7 +206,13 @@ export default function ClockModal({ video, opened, onClose, onSaved }: Props) {
                           <Table.Tr key={i}>
                             <Table.Td ff="monospace">{formatTime(s.video_s)}</Table.Td>
                             <Table.Td><code>{s.text}</code></Table.Td>
-                            <Table.Td>{s.dvr ? s.dvr.replace("T", " ") : "—"}</Table.Td>
+                            <Table.Td>
+                              {s.dvr ? s.dvr.replace("T", " ") : "—"}
+                              {s.date_inferred && (
+                                <Badge size="xs" ml={4} variant="light" color="yellow"
+                                  title="Só a hora era legível neste frame; a data veio das outras leituras">data inferida</Badge>
+                              )}
+                            </Table.Td>
                             <Table.Td>{s.inlier ? <Badge size="xs" color="green">ok</Badge>
                               : <Badge size="xs" color="gray">descartada</Badge>}</Table.Td>
                           </Table.Tr>

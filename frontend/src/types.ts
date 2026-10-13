@@ -45,6 +45,7 @@ export interface ClockSample {
   text: string;
   dvr: string | null;
   inlier?: boolean;
+  date_inferred?: boolean;
 }
 
 export interface ClockCalibration {

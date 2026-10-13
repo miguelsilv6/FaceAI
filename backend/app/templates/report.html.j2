@@ -69,7 +69,7 @@ perito, tendo em conta a qualidade das imagens, a iluminação, o ângulo, as oc
   <tr><td>{{ v.id }}</td>
   {% if v.dvr_start %}
       <td>{{ real_at(v, 0) }}</td><td>{{ real_at(v, v.duration_s) }}</td>
-      <td>{{ {"ocr": "OCR da data/hora na imagem", "manual": "acerto manual"}.get(v.time_source, v.time_source) }}{% if v.clock_offset_s %} · desvio do DVR {{ "%+.1f"|format(v.clock_offset_s) }} s{% endif %}{% if v.time_source == "ocr" and v.time_calibration %} · {{ v.time_calibration.inliers }}/{{ v.time_calibration.samples|length }} leituras consistentes · erro máx. {{ v.time_calibration.max_residual_s }} s{% if v.dvr_rate != 1.0 %} · taxa {{ "%.4f"|format(v.dvr_rate) }}{% endif %}{% endif %}</td>
+      <td>{{ {"ocr": "OCR da data/hora na imagem", "manual": "acerto manual"}.get(v.time_source, v.time_source) }}{% if v.clock_offset_s %} · desvio do DVR {{ "%+.1f"|format(v.clock_offset_s) }} s{% endif %}{% if v.time_source == "ocr" and v.time_calibration %} · {{ v.time_calibration.inliers }}/{{ v.time_calibration.samples|length }} leituras consistentes{% if v.time_calibration.inferred_dates %} ({{ v.time_calibration.inferred_dates }} com data inferida das restantes){% endif %} · erro máx. {{ v.time_calibration.max_residual_s }} s{% if v.dvr_rate != 1.0 %} · taxa {{ "%.4f"|format(v.dvr_rate) }}{% endif %}{% endif %}</td>
       <td>{{ v.time_note or "—" }}</td>
   {% else %}
       <td colspan="4" class="muted">Hora real não acertada — os tempos são relativos ao início do ficheiro.</td>

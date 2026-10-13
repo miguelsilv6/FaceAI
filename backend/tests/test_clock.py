@@ -14,6 +14,13 @@ from app.services.clock import ClockSample, fit_clock, normalize_ocr, parse_date
     ("CAM1 12 Out 2026 14:03:27", "DMY", datetime(2026, 10, 12, 14, 3, 27)),
     ("2026-1O-12 l4:O3:27", "DMY", datetime(2026, 10, 12, 14, 3, 27)),  # confusões de OCR
     ("14:03:27 2026-10-12", "DMY", datetime(2026, 10, 12, 14, 3, 27)),
+    # OCR de zona recortada: data e hora coladas, ';' em vez de ':'
+    ("2026-10-1214:03:27", "DMY", datetime(2026, 10, 12, 14, 3, 27)),
+    ("12-10-202614:03:27", "DMY", datetime(2026, 10, 12, 14, 3, 27)),
+    ("12-10-2614:03:27", "DMY", datetime(2026, 10, 12, 14, 3, 27)),
+    ("2026-10-514:03:27", "DMY", datetime(2026, 10, 5, 14, 3, 27)),
+    ("2026/10/12 14;03;27", "DMY", datetime(2026, 10, 12, 14, 3, 27)),
+    ("10/12/202602:03:27PM", "MDY", datetime(2026, 10, 12, 14, 3, 27)),
 ])
 def test_parse_datetime(text, order, expected):
     assert parse_datetime(text, order) == expected
@@ -67,3 +74,19 @@ def test_real_time():
     start = datetime(2026, 10, 12, 14, 0, 0)
     assert real_time(start, 1.0, -180, 65.5) == datetime(2026, 10, 12, 13, 58, 5, 500000)
     assert real_time(None, 1.0, 0, 10) is None
+
+
+def test_parse_time_only_and_infer_dates():
+    from app.services.clock import infer_missing_dates, parse_time_only
+
+    assert parse_time_only("202 -10-1214:03:27") == (14, 3, 27)
+    assert parse_time_only("12.10.26") is None
+    base = datetime(2026, 10, 12, 23, 59, 50)
+    readings = [(0.0, "ok", base), (5.0, "2O2 -1O-12 23:59:55", None), (20.0, "?? 00:00:10", None),
+                (30.0, "lixo", None)]
+    out = infer_missing_dates(readings)
+    assert out[0] == (base, False)
+    assert out[1] == (datetime(2026, 10, 12, 23, 59, 55), True)
+    assert out[2] == (datetime(2026, 10, 13, 0, 0, 10), True)  # passou a meia-noite
+    assert out[3] == (None, False)
+    assert infer_missing_dates([(0.0, "14:00:00", None)]) == [(None, False)]  # sem nenhuma data completa

@@ -20,7 +20,10 @@ _MONTHS = {
     "ago": 8, "aug": 8, "set": 9, "sep": 9, "out": 10, "oct": 10, "nov": 11, "dez": 12, "dec": 12,
 }
 
-_TIME = re.compile(r"(?<!\d)(\d{1,2})\s*[:.]\s*(\d{2})\s*[:.]\s*(\d{2})(?!\d)(?:\s*([AaPp])\.?\s*[Mm]\.?)?")
+_TIME = re.compile(r"(?<!\d)(\d{1,2})\s*[:.;]\s*(\d{2})\s*[:.;]\s*(\d{2})(?!\d)(?:\s*([AaPp])\.?\s*[Mm]\.?)?")
+# O OCR de uma zona recortada perde muitas vezes o espaço entre a data e a hora ("2026-10-1214:03:27"): com ':'
+# como separador, a hora de 2 dígitos pode vir colada a outros dígitos.
+_TIME_GLUED = re.compile(r"(\d{2})\s*[:;]\s*(\d{2})\s*[:;]\s*(\d{2})(?!\d)(?:\s*([AaPp])\.?\s*[Mm]\.?)?")
 _DATE_YMD = re.compile(r"(?<!\d)(\d{4})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{1,2})(?!\d)")
 _DATE_XXY = re.compile(r"(?<!\d)(\d{1,2})\s*[-/.]\s*(\d{1,2})\s*[-/.]\s*(\d{4}|\d{2})(?!\d)")
 _DATE_NAMED = re.compile(r"(?<!\d)(\d{1,2})\s*[-/ .]\s*([A-Za-z]{3})[A-Za-z]*\.?\s*[-/ .]\s*(\d{4})(?!\d)")
@@ -39,8 +42,8 @@ def parse_datetime(text: str, date_order: str = "DMY") -> datetime | None:
     """Extrai a data e hora de um texto de OCR de CCTV (vários formatos comuns). Devolve None se não houver."""
     t = normalize_ocr(text)
     # A data também pode ter o formato dd.mm.aa: escolhe a 1.ª hora válida, preferindo a separada por ':'.
-    candidates = [m for m in _TIME.finditer(t) if int(m.group(1)) < 24 and int(m.group(2)) < 60
-                  and int(m.group(3)) < 60]
+    candidates = [m for rx in (_TIME, _TIME_GLUED) for m in rx.finditer(t)
+                  if int(m.group(1)) < 24 and int(m.group(2)) < 60 and int(m.group(3)) < 60]
     candidates.sort(key=lambda m: ":" not in m.group(0))
     if not candidates:
         return None
@@ -58,6 +61,49 @@ def parse_datetime(text: str, date_order: str = "DMY") -> datetime | None:
         return datetime(date[0], date[1], date[2], hh, mi, ss)
     except ValueError:
         return None
+
+
+def parse_time_only(text: str) -> tuple[int, int, int] | None:
+    """Só a hora (HH:MM:SS), para quando a data é ilegível num frame mas legível nos restantes."""
+    t = normalize_ocr(text)
+    for rx in (_TIME, _TIME_GLUED):
+        for m in rx.finditer(t):
+            hh, mi, ss = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            ampm = (m.group(4) or "").lower()
+            if ampm == "p" and hh < 12:
+                hh += 12
+            elif ampm == "a" and hh == 12:
+                hh = 0
+            # só separadores ':'/';' — "12.10.26" é uma data, não uma hora
+            if hh < 24 and mi < 60 and ss < 60 and any(c in m.group(0) for c in ":;"):
+                return hh, mi, ss
+    return None
+
+
+def infer_missing_dates(readings: list[tuple[float, str, datetime | None]]
+                        ) -> list[tuple[datetime | None, bool]]:
+    """Completa leituras em que só a hora é legível com a data das leituras completas mais próximas no vídeo.
+
+    Escolhe o dia (anterior, igual ou seguinte) que fica mais perto do esperado, para lidar com a meia-noite.
+    Devolve (data/hora, inferida?) por leitura.
+    """
+    complete = [(v, d) for v, _, d in readings if d is not None]
+    out: list[tuple[datetime | None, bool]] = []
+    for video_s, text, dvr in readings:
+        if dvr is not None or not complete:
+            out.append((dvr, False))
+            continue
+        hms = parse_time_only(text)
+        if hms is None:
+            out.append((None, False))
+            continue
+        ref_v, ref_d = min(complete, key=lambda c: abs(c[0] - video_s))
+        expected = ref_d + timedelta(seconds=video_s - ref_v)
+        base = expected.replace(hour=hms[0], minute=hms[1], second=hms[2], microsecond=0)
+        best = min((base + timedelta(days=k) for k in (-1, 0, 1)),
+                   key=lambda c: abs((c - expected).total_seconds()))
+        out.append((best, True))
+    return out
 
 
 def _parse_date(t: str, order: str) -> tuple[int, int, int] | None:
