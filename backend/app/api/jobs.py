@@ -19,6 +19,7 @@ from ..models import Detection, Job, JobStatus, ReferenceImage, ReviewStatus, Tr
 from ..schemas import JobCreate, JobDelete, PersonMerge, ReviewUpdate, TrackPerson
 from ..services import reports
 from ..services.audit import log_event
+from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.face_engine import default_threshold, get_engine
 from ..services.frames import extract_frame
 from ..services.imageio import read_image, write_jpeg
@@ -52,6 +53,12 @@ def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorD
     discover = params.mode == "discover"
     if discover:
         params.tracking = True  # as pessoas formam-se a partir dos tracks
+        params.clothing = False  # o vestuário parte das correspondências faciais (modo "procurar uma pessoa")
+    if params.clothing:
+        params.person_detector = params.person_detector or DEFAULT_PERSON_DETECTOR
+        if params.person_detector not in PERSON_DETECTORS:
+            raise HTTPException(422, f"Detetor de pessoas desconhecido: {params.person_detector}")
+        params.reid_threshold = params.reid_threshold or DEFAULT_REID_THRESHOLD
 
     videos = list(session.exec(select(Video).where(Video.case_id == case_id)))
     video_ids = [v.id for v in videos if body.video_ids is None or v.id in body.video_ids]
@@ -139,9 +146,12 @@ def list_detections(
     video_id: int | None = None,
     only_matches: bool = False,
     min_similarity: float | None = None,
+    kind: str | None = None,
 ) -> list[Detection]:
     get_job_or_404(session, job_id)
     q = select(Detection).where(Detection.job_id == job_id)
+    if kind is not None:
+        q = q.where(Detection.kind == kind)
     if video_id is not None:
         q = q.where(Detection.video_id == video_id)
     if only_matches:
@@ -167,9 +177,11 @@ def list_segments(job_id: int, session: SessionDep, gap_s: float | None = None,
 
 @router.get("/jobs/{job_id}/tracks", response_model=list[Track])
 def list_tracks(job_id: int, session: SessionDep, video_id: int | None = None,
-                person_id: int | None = None) -> list[Track]:
+                person_id: int | None = None, kind: str | None = None) -> list[Track]:
     get_job_or_404(session, job_id)
     q = select(Track).where(Track.job_id == job_id)
+    if kind is not None:
+        q = q.where(Track.kind == kind)
     if video_id is not None:
         q = q.where(Track.video_id == video_id)
     if person_id is not None:
@@ -357,7 +369,8 @@ def detection_original_frame(det_id: int, session: SessionDep, actor: ActorDep, 
             method, err = "cache", None
     else:
         try:
-            extracted = extract_frame(video.stored_path, det.frame_index, det.crop_path, (det.x, det.y, det.w, det.h))
+            extracted = extract_frame(video.stored_path, det.frame_index, det.crop_path, (det.x, det.y, det.w, det.h),
+                                      margin=0.05 if det.kind == "body" else 0.25)
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         ok, buf = cv2.imencode(".png", extracted.image)
@@ -408,6 +421,8 @@ def detection_as_reference(det_id: int, session: SessionDep, actor: ActorDep) ->
     det = session.get(Detection, det_id)
     if det is None:
         raise HTTPException(404, "Deteção não encontrada.")
+    if det.kind == "body":
+        raise HTTPException(422, "Só uma face pode ser usada como imagem de referência (esta deteção é de corpo).")
     job = session.get(Job, det.job_id)
     if job is None or not Path(det.crop_path).exists():
         raise HTTPException(404, "O recorte desta deteção já não está disponível.")

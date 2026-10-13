@@ -26,6 +26,7 @@ Inclui ainda:
 | Motor alternativo | **[DeepFace](https://github.com/serengil/deepface)** (MIT), com `FACEAI_ENGINE=deepface` | CompreFace, facenet-pytorch |
 | Vídeo | **OpenCV** (amostragem, pré-filtro de movimento) + **ffmpeg** (cópia de reprodução) | PyAV, decord |
 | Comparação / tracking | Distância de cosseno em NumPy; tracker IoU + embedding | FAISS; ByteTrack/DeepSORT |
+| Vestuário (complemento) | **YOLOX** (deteção de pessoas, Apache-2.0) + **OSNet-AIN x1.0** treinado no MSMT17 (ReID, torchreid, MIT) + histogramas de cor HSV | YOLOv8 (AGPL), FastReID, CLIP-ReID |
 | Backend | **FastAPI** + SQLModel/SQLite | Flask, Django |
 | Frontend | **React + Vite + Mantine** | Gradio/Streamlit, PySide6 |
 | Relatórios | **Jinja2 + WeasyPrint** | ReportLab |
@@ -152,6 +153,38 @@ Os embeddings dos tracks ficam em `jobs/job_NNNNN/track_embeddings.npz`. O relat
 
 > O agrupamento é uma ferramenta de **triagem**. A mesma pessoa pode surgir em mais de um grupo (ângulos, iluminação, oclusões) e pessoas parecidas podem ficar juntas. Um limiar mais baixo separa mais.
 
+### Complemento por vestuário (re-identificação pelo corpo)
+
+Quando a face só é boa numa ou noutra câmara (de costas, de lado, longe, com boné), a **roupa** permite seguir a pessoa nas restantes câmaras do estabelecimento, na mesma visita. Ativa-se com o interruptor **"Complementar com vestuário"** no modo "Procurar uma pessoa".
+
+1. Em cada frame analisado (incluindo os que não têm faces), o **YOLOX** deteta as pessoas de corpo inteiro e o **OSNet-AIN** calcula um embedding de aparência. Os corpos são seguidos entre frames (tracks de corpo).
+2. Cada face é associada ao corpo a que pertence (centro da face no terço superior da caixa do corpo).
+3. **Amostras** — o corpo nos frames em que a **face teve correspondência**. Não é preciso marcar nada à mão.
+4. No fim, os outros tracks de corpo dos vídeos da análise são comparados com as amostras:
+   - **distância ReID** (mediana das 5 melhores distâncias de cosseno) ≤ limiar, **e**
+   - **distância de cor** do tronco e das pernas ≤ limiar de cor. A cor é um veto explicável: o relatório diz, por exemplo, "tronco laranja, pernas azul-escuro". O tom de cada câmara é normalizado pelo frame inteiro (gray-world).
+   - Um corpo cuja face foi vista e é claramente **de outra pessoa** nunca conta: a face prevalece.
+   - Só se comparam corpos dentro da **janela temporal** (por omissão ±12 h em torno das amostras, pela hora real do DVR). Se algum vídeo não tiver a hora acertada, a janela não é verificada e isso fica escrito na aparição.
+   - Duas pessoas com a mesma roupa ao mesmo tempo no mesmo vídeo (fardas) são marcadas como **ambíguas**.
+5. **Calibração no próprio caso:** os corpos cuja face é de outra pessoa são negativos conhecidos. O limiar ReID baixa até ficar abaixo das distâncias deles (≤ 5 % de falsos positivos nesses negativos). O relatório mostra o limiar usado e as distâncias.
+6. **Resultados:**
+   - os segmentos e a linha temporal passam a indicar a evidência: face (vermelho), face + vestuário (laranja) ou só vestuário (roxo);
+   - a vista **Vestuário** mostra as amostras e as aparições só pela roupa, com o recorte do corpo, as cores, as distâncias e a revisão;
+   - o relatório tem uma secção própria, com aviso;
+   - o CSV e o JSON têm `kind`, `evidence` e `colors`.
+
+**Limiar por omissão (0,27).** Foi medido com 30 pessoas sob degradações típicas de CCTV (baixa resolução, desfoque, JPEG, outro tom, espelho): deu cerca de 0,06 % de falsos positivos entre pessoas diferentes. Deve ser validado com imagens reais do estabelecimento.
+
+> ⚠️ **Evidência complementar e indicativa.** A roupa não identifica uma pessoa:
+> - fardas ou uniformes de funcionários;
+> - roupa escura ou muito comum;
+> - mudanças de casaco ou mochila;
+> - iluminações muito diferentes entre câmaras.
+>
+> Tudo isto produz erros. As aparições "só vestuário" ficam sempre **por rever** e servem para reconstituir o percurso, não para identificar a pessoa.
+
+Desempenho em CPU (4 vCPU): o YOLOX-s demora cerca de 80 ms por frame e o YOLOX-nano cerca de 10 ms. O OSNet demora 10 a 80 ms por pessoa. Os modelos (YOLOX ~36 MB, OSNet ~9 MB) são descarregados na primeira análise com vestuário e verificados por SHA-256. O OSNet é exportado para ONNX pelo workflow `.github/workflows/reid-model.yml` (`tools/export_reid_onnx.py`) e publicado no release `models-reid-v1` do repositório.
+
 ### Download do frame
 
 No frame completo de uma deteção (🔍) há dois downloads:
@@ -218,6 +251,7 @@ backend/
       quality.py            score de qualidade da face
       tracking.py           tracker IoU + embedding
       clustering.py, persons.py   modo descoberta: agrupamento de tracks em pessoas
+      body_engine.py, body_analysis.py, clothing.py   complemento por vestuário (YOLOX + OSNet + cores)
       frames.py             extração verificada do frame original para download
       jobs.py               pipeline de análise em background (movimento → cascata → deteção → qualidade → tracking)
       matcher.py, segments.py, references.py, video_processor.py, reports.py, transcode.py, audit.py

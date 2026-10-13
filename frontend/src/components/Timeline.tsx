@@ -3,6 +3,13 @@ import { Box, Tooltip } from "@mantine/core";
 import { formatTime } from "../api";
 import type { Detection, Segment } from "../types";
 
+/** Cor do segmento pela evidência: face (vermelho), face + vestuário (laranja), só vestuário (roxo). */
+export const EVIDENCE_COLOR: Record<string, string> = {
+  face: "var(--mantine-color-red-6)",
+  "face+vestuário": "var(--mantine-color-orange-6)",
+  "vestuário": "var(--mantine-color-grape-6)",
+};
+
 interface Props {
   realTime?: (seconds: number) => string;
   duration: number;
@@ -32,7 +39,8 @@ export default function Timeline({ duration, segments, detections, currentTime, 
     >
       {segments.map((s, i) => (
         <Tooltip key={i} label={`${realTime?.(s.start_s) ? `${realTime(s.start_s)} → ${realTime(s.end_s).slice(11)} · ` : ""}`
-          + `${formatTime(s.start_s)} → ${formatTime(s.end_s)} · ${s.count} deteções · sim. ${s.best_similarity.toFixed(3)}`}>
+          + `${formatTime(s.start_s)} → ${formatTime(s.end_s)} · ${s.count} deteções`
+          + (s.evidence && s.evidence !== "face" ? ` · evidência: ${s.evidence}` : ` · sim. ${s.best_similarity.toFixed(3)}`)}>
           <Box
             pos="absolute"
             top={4}
@@ -40,7 +48,7 @@ export default function Timeline({ duration, segments, detections, currentTime, 
             left={pct(s.start_s)}
             style={{
               width: `max(6px, calc(${pct(s.end_s - s.start_s)}))`,
-              background: "var(--mantine-color-red-6)",
+              background: EVIDENCE_COLOR[s.evidence ?? "face"],
               opacity: 0.75,
               borderRadius: 4,
             }}

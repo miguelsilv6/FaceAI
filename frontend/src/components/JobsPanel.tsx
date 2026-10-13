@@ -124,6 +124,31 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                 checked={params.tracking || discover} disabled={discover}
                 onChange={(e) => set("tracking", e.currentTarget.checked)} />
             </SimpleGrid>
+            {!discover && (
+              <Card withBorder padding="sm" bg="var(--mantine-color-default-hover)">
+                <Switch label="Complementar com vestuário (re-identificação pelo corpo)"
+                  description="Usa a roupa da pessoa nos frames em que a face teve correspondência para a procurar noutras câmaras, mesmo de costas ou longe. Evidência complementar: fica sempre por rever."
+                  checked={params.clothing} onChange={(e) => set("clothing", e.currentTarget.checked)} />
+                {params.clothing && (
+                  <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }} mt="sm">
+                    <NumberInput label="Janela temporal (± h)" description="Em torno das amostras (hora real); 0 = sem"
+                      min={0} step={1} decimalScale={1} value={params.clothing_window_h}
+                      onChange={(v) => set("clothing_window_h", num(v, 12))} />
+                    <NumberInput label="Limiar ReID (corpo)" description="Menor = mais restritivo; ajustado no caso"
+                      min={0.05} max={0.9} step={0.01} decimalScale={3} value={params.reid_threshold ?? ""}
+                      onChange={(v) => set("reid_threshold", num(v, 0.27))} />
+                    <NumberInput label="Limiar de cor" description="Tronco/pernas: veto de roupa diferente"
+                      min={0.05} max={1} step={0.05} decimalScale={2} value={params.color_threshold}
+                      onChange={(v) => set("color_threshold", num(v, 0.6))} />
+                    <Select label="Detetor de pessoas" data={system.person_detectors ?? ["yolox_s"]}
+                      description="yolox_s: preciso · nano: rápido" value={params.person_detector} allowDeselect={false}
+                      onChange={(d) => d && set("person_detector", d)} />
+                    <NumberInput label="Altura mínima do corpo (px)" min={16} step={10} value={params.min_body_height}
+                      onChange={(v) => set("min_body_height", num(v, 80))} />
+                  </SimpleGrid>
+                )}
+              </Card>
+            )}
             <Accordion variant="contained">
               <Accordion.Item value="adv">
                 <Accordion.Control>Parâmetros avançados</Accordion.Control>

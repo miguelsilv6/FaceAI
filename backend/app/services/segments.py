@@ -22,6 +22,7 @@ class Interval:
     best_distance: float
     best_detection_id: int | None
     detection_ids: tuple[int, ...]
+    evidence: tuple[str, ...] = ("face",)  # "face" | "vestuário"
 
 
 @dataclass
@@ -32,6 +33,7 @@ class Segment:
     best_distance: float
     best_detection_id: int | None
     detection_ids: list[int] = field(default_factory=list)
+    evidence: set[str] = field(default_factory=lambda: {"face"})
 
     @property
     def duration_s(self) -> float:
@@ -39,6 +41,7 @@ class Segment:
 
     def to_dict(self) -> dict:
         d = asdict(self)
+        d["evidence"] = "+".join(e for e in ("face", "vestuário") if e in self.evidence)
         d["duration_s"] = round(self.duration_s, 3)
         d["best_similarity"] = round(1.0 - self.best_distance, 4)
         d["count"] = len(self.detection_ids)
@@ -58,6 +61,7 @@ def merge_intervals(intervals: Iterable[Interval], max_gap_s: float = 2.0) -> li
             if current is not None and iv.start_s - current.end_s <= max_gap_s:
                 current.end_s = max(current.end_s, iv.end_s)
                 current.detection_ids.extend(d for d in iv.detection_ids if d not in current.detection_ids)
+                current.evidence.update(iv.evidence)
                 if iv.best_distance < current.best_distance:
                     current.best_distance, current.best_detection_id = iv.best_distance, iv.best_detection_id
                 continue
@@ -65,7 +69,7 @@ def merge_intervals(intervals: Iterable[Interval], max_gap_s: float = 2.0) -> li
                 segments.append(current)
             current = Segment(video_id=video_id, start_s=iv.start_s, end_s=iv.end_s,
                               best_distance=iv.best_distance, best_detection_id=iv.best_detection_id,
-                              detection_ids=list(iv.detection_ids))
+                              detection_ids=list(iv.detection_ids), evidence=set(iv.evidence))
         if current is not None:
             segments.append(current)
     for seg in segments:

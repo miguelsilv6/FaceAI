@@ -102,6 +102,12 @@ export interface JobParams {
   cascade: boolean;
   fast_detector: string | null;
   tracking: boolean;
+  clothing: boolean;
+  clothing_window_h: number;
+  reid_threshold: number | null;
+  color_threshold: number;
+  person_detector: string | null;
+  min_body_height: number;
   track_gap_s: number;
 }
 
@@ -125,6 +131,8 @@ export interface Job {
   frames_skipped_noface: number;
   tracks: number;
   persons: number;
+  clothing_samples: number;
+  clothing_summary: ClothingSummary | null;
   eta_s: number | null;
   message: string;
   created_by: string;
@@ -134,6 +142,20 @@ export interface Job {
 }
 
 export type ReviewStatus = "pending" | "confirmed" | "rejected";
+
+export interface ClothingSummary {
+  body_tracks?: number;
+  persons_detected?: number;
+  samples?: number;
+  known_negatives?: number;
+  excluded_by_window?: number;
+  clothing_matches?: number;
+  gallery_colors?: Record<string, string>;
+  calibration?: { threshold_used?: number; negatives?: number; negatives_min?: number; positives_median?: number };
+  note?: string;
+}
+
+export type Evidence = "face" | "vestuário" | "face+vestuário";
 
 export interface Detection {
   id: number;
@@ -151,6 +173,8 @@ export interface Detection {
   similarity: number;
   is_match: boolean;
   track_id: number | null;
+  kind: "face" | "body";
+  colors: Record<string, string> | null;
   quality: number;
   sharpness: number;
   size_score: number;
@@ -167,6 +191,13 @@ export interface Track {
   video_id: number;
   reference_id: number | null;
   person_id: number | null;
+  kind: "face" | "body";
+  evidence: "" | "face+vestuário" | "vestuário";
+  reid_distance: number | null;
+  color_distance: number | null;
+  face_track_id: number | null;
+  colors: Record<string, string> | null;
+  note: string;
   start_s: number;
   end_s: number;
   n_faces: number;
@@ -193,6 +224,7 @@ export interface Segment {
   detection_ids: number[];
   count: number;
   person_id?: number | null;
+  evidence?: Evidence;
 }
 
 /** Modo descoberta: pessoa distinta = grupo de tracks com faces semelhantes. */
@@ -226,6 +258,7 @@ export interface SystemInfo {
   environment: Record<string, unknown> & { device?: string };
   models: { name: string; default_threshold: number; description: string }[];
   detectors: string[];
+  person_detectors: string[];
   defaults: JobParams;
   upload_chunk_bytes: number;
 }
