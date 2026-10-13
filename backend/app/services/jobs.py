@@ -6,7 +6,9 @@ import bisect
 import logging
 import math
 import threading
+import time
 import traceback
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -136,6 +138,7 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
 
             total = sum(frames_for(v) for v in videos)
             done = 0
+            eta = EtaEstimator(total)
 
             for video in videos:
                 job.current_video_id = video.id
@@ -147,6 +150,7 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                     done += 1
                     if done % PROGRESS_COMMIT_EVERY == 0:
                         job.progress = min(0.999, done / total)
+                        job.eta_s = eta.update(done)
                         s.add(job)
                         s.commit()
                 s.commit()
@@ -198,6 +202,7 @@ def _finish(s: Session, job: Job, status: JobStatus, message: str) -> None:
     job.message = message.strip()
     job.finished_at = utcnow()
     job.current_video_id = None
+    job.eta_s = None
     s.add(job)
     s.commit()
     log_event(s, f"job.{status.value}", case_id=job.case_id, actor=job.created_by or "sistema",
@@ -205,6 +210,33 @@ def _finish(s: Session, job: Job, status: JobStatus, message: str) -> None:
                        "frames_sampled": job.frames_sampled, "frames_processed": job.frames_processed,
                        "frames_skipped_motion": job.frames_skipped_motion,
                        "frames_skipped_noface": job.frames_skipped_noface, "tracks": job.tracks})
+
+
+class EtaEstimator:
+    """Tempo restante estimado pelo ritmo recente (janela móvel), que reflete a fase atual do vídeo: frames sem
+    movimento ou sem faces são muito mais rápidos do que frames com várias faces."""
+
+    WINDOW_S = 60.0
+    MIN_ELAPSED_S = 5.0
+
+    def __init__(self, total: int, clock=time.monotonic):
+        self.total, self.clock = total, clock
+        self.start = clock()
+        self.history: deque[tuple[float, int]] = deque()
+
+    def update(self, done: int) -> float | None:
+        now = self.clock()
+        self.history.append((now, done))
+        while len(self.history) > 2 and now - self.history[0][0] > self.WINDOW_S:
+            self.history.popleft()
+        if now - self.start < self.MIN_ELAPSED_S or done <= 0:
+            return None
+        t0, d0 = self.history[0]
+        if now - t0 >= self.MIN_ELAPSED_S and done > d0:
+            rate = (done - d0) / (now - t0)
+        else:
+            rate = done / (now - self.start)
+        return round(max(0, self.total - done) / rate, 1) if rate > 0 else None
 
 
 TRACK_TOP_K = 3  # o match do track decide-se pela média das K melhores distâncias

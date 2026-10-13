@@ -123,9 +123,9 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 
      O aviso mostra o diagnóstico: erro do browser, contentor e codec reais do original, e codecs suportados pelo browser.
    - O `ffprobe` também deteta as exportações de DVR com extensão `.mp4` que são, na verdade, H.264 "cru".
-4. **Análises:** escolhe o modo (**procurar uma pessoa** com amostra, ou **descobrir todas as faces** sem amostra), os vídeos, as referências, o modelo, os fps e o limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo.
+4. **Análises:** escolhe o modo (**procurar uma pessoa** com amostra, ou **descobrir todas as faces** sem amostra), os vídeos, as referências, o modelo, os fps e o limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo, com o **tempo restante estimado** e a hora prevista de fim. A estimativa usa o ritmo do último minuto, porque frames sem movimento ou sem faces são muito mais rápidos do que frames com várias faces.
 5. **Resultados:**
-   - player com linha temporal e tabela de segmentos;
+   - player com linha temporal e tabela de segmentos, e botões ◀ ▶ para passar ao vídeo anterior ou seguinte;
    - **vista por tracks**: um cartão por pessoa ou trajetória, com revisão do track inteiro;
    - **vista por deteções**, ordenável por tempo, semelhança ou **qualidade**;
    - **frame completo** (botão 🔍): com marcação ou original, e download de qualquer um deles. Ver [Download do frame](#download-do-frame).

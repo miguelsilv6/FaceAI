@@ -6,7 +6,7 @@ import { IconInfoCircle, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { api, formatDate } from "../api";
+import { api, formatDate, formatEta } from "../api";
 import { notifyError } from "../notify";
 import type { Job, JobMode, JobParams, ReferenceImage, SystemInfo, Video } from "../types";
 import DeleteJobModal from "./DeleteJobModal";
@@ -189,7 +189,12 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                   <Table.Tr key={j.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/jobs/${j.id}`)}>
                     <Table.Td>{j.id}</Table.Td>
                     <Table.Td><JobStatusBadge status={j.status} /></Table.Td>
-                    <Table.Td w={160}><Progress value={j.progress * 100} animated={j.status === "running"} /></Table.Td>
+                    <Table.Td w={200}>
+                      <Progress value={j.progress * 100} animated={j.status === "running"} />
+                      {j.status === "running" && (
+                        <Text size="xs" c="dimmed" mt={2}>{Math.round(j.progress * 100)}% · {formatEta(j.eta_s)}</Text>
+                      )}
+                    </Table.Td>
                     <Table.Td>{j.params.model} / {j.params.detector}</Table.Td>
                     <Table.Td>{j.params.mode === "discover" ? `${j.persons} pessoas (descoberta)` : j.matches}</Table.Td>
                     <Table.Td>{formatDate(j.created_at)}</Table.Td>
