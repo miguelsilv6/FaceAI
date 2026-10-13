@@ -1,6 +1,13 @@
 # FaceAI — deteção de uma pessoa em vídeos de CCTV
 
-Aplicação web local para apoio à investigação forense digital. A partir de uma ou mais **imagens de referência** da face de uma pessoa, analisa **vídeos de CCTV** importados e indica **se** essa pessoa aparece, **quando** (timestamps e intervalos) e **com que grau de semelhança**. Inclui revisão humana dos resultados, relatório PDF/HTML, exportação CSV/JSON/ZIP e log de auditoria.
+Aplicação web local para apoio à investigação forense digital. A partir de uma ou mais **imagens de referência** da face de uma pessoa, analisa **vídeos de CCTV** importados e indica **se** essa pessoa aparece, **quando** (timestamps e intervalos) e **com que grau de semelhança**.
+
+Inclui ainda:
+- tracking de faces e revisão humana dos resultados (por track ou por deteção);
+- score de qualidade de cada face;
+- relatório PDF/HTML e exportação CSV/JSON/ZIP;
+- log de auditoria;
+- upload em blocos com retoma.
 
 > ⚠️ Os resultados de reconhecimento facial são **indicativos**. Não constituem identificação conclusiva e têm de ser validados por um perito.
 
@@ -10,112 +17,127 @@ Aplicação web local para apoio à investigação forense digital. A partir de 
 
 | Camada | Escolha | Alternativas consideradas |
 |---|---|---|
-| Deteção facial | **RetinaFace** (via DeepFace) | MTCNN, YuNet, CenterFace, YOLOv8-face, SCRFD (InsightFace) |
-| Reconhecimento (embeddings) | **ArcFace** (via DeepFace) | Facenet512, VGG-Face, GhostFaceNet, SFace; InsightFace `buffalo_l` (muito preciso, mas os modelos são só para uso não comercial); dlib/`face_recognition` (simples, mais fraco em CCTV) |
-| Framework de reconhecimento | **[DeepFace](https://github.com/serengil/deepface)** (MIT) | InsightFace, CompreFace (serviço REST pronto), facenet-pytorch |
-| Vídeo | **OpenCV** (amostragem de frames) + **ffmpeg** (cópia de reprodução) | PyAV, decord |
-| Comparação | Distância de cosseno em NumPy | FAISS / Milvus, para milhões de faces |
+| Runtime de inferência | **ONNX Runtime** (CPU, ou GPU NVIDIA com `onnxruntime-gpu`) | TensorFlow (motor DeepFace, opcional), PyTorch |
+| Deteção facial | **SCRFD-10G** (InsightFace), com **SCRFD-500M** como 1.ª passagem rápida | RetinaFace, YuNet, MTCNN, YOLOv8-face |
+| Reconhecimento (embeddings) | **ArcFace ResNet-50 / MobileFaceNet**, treinados no WebFace600K (InsightFace `buffalo_l` / `buffalo_sc`) | Facenet512, VGG-Face (via DeepFace) |
+| Motor alternativo | **[DeepFace](https://github.com/serengil/deepface)** (MIT), com `FACEAI_ENGINE=deepface` | CompreFace, facenet-pytorch |
+| Vídeo | **OpenCV** (amostragem, pré-filtro de movimento) + **ffmpeg** (cópia de reprodução) | PyAV, decord |
+| Comparação / tracking | Distância de cosseno em NumPy; tracker IoU + embedding | FAISS; ByteTrack/DeepSORT |
 | Backend | **FastAPI** + SQLModel/SQLite | Flask, Django |
-| Frontend | **React + Vite + Mantine** | Gradio/Streamlit (protótipo), PySide6 (desktop) |
+| Frontend | **React + Vite + Mantine** | Gradio/Streamlit, PySide6 |
 | Relatórios | **Jinja2 + WeasyPrint** | ReportLab |
-
-A escolha do DeepFace permite trocar de **modelo** e de **detetor** na interface sem mudar código. Isto é útil para comparar resultados (por exemplo, confirmar um match ArcFace com Facenet512).
 
 ---
 
 ## Como funciona
 
 ```
-Imagens de referência ──► detetor ──► embedding (ArcFace 512-d) ──┐
-                                                                  ├─► distância de cosseno ──► limiar ──► deteção
-Vídeo ──► frames a N fps ──► detetor ──► embedding de cada face ──┘                                          │
-                                                                                                             ▼
-                       segmentos de aparição ◄── agrupamento temporal ◄── revisão humana (confirmar/rejeitar)
+Referências ──► SCRFD ──► alinhamento (5 pontos) ──► ArcFace (512-d) ─────────────────────────┐
+                                                                                              ▼
+Vídeo ─► frames a N fps ─► [1] filtro de movimento ─► [2] SCRFD-500M rápido ─► [3] SCRFD-10G + ArcFace
+                             (saltar se estático)       (saltar se sem faces)            │
+                                                                                         ▼
+                 [4] qualidade da face ─► [5] tracking ─► distância de cosseno às referências
+                                                                                         │
+           segmentos de aparição ◄── tracks / deteções com match ◄── revisão humana ◄────┘
 ```
 
-1. **Referências.** Cada imagem tem de conter **exatamente uma face**. As imagens com 0 ou mais de 1 face ficam marcadas como inválidas e não são usadas. Ter várias imagens (ângulos, iluminação, idades diferentes) aumenta a sensibilidade.
-2. **Vídeo.** Os frames são amostrados a uma taxa configurável (por omissão 2 fps). Os restantes frames são apenas descodificados (`grab`), o que poupa tempo.
-3. **Comparação.** Cada face do frame é comparada com todas as referências e conta a menor distância. Há **match** quando `distância ≤ limiar`. Os limiares por omissão são os do DeepFace (ArcFace: 0,68). As faces até `limiar + margem` ficam guardadas como **candidatos** para revisão.
-4. **Segmentos.** Matches separados por menos de *N* segundos são agrupados em intervalos de aparição.
-5. **Prova.** Por cada deteção são guardados o recorte da face, o frame completo anotado, o timestamp, o nº de frame, a bounding box, a confiança do detetor, a distância e a similaridade.
+1. **Referências.** Cada imagem tem de conter **exatamente uma face**. As imagens com 0 ou mais de 1 face ficam marcadas como inválidas. Ter várias imagens (ângulos, iluminação, idades diferentes) aumenta a sensibilidade.
+2. **Pré-filtro de movimento.** Cada frame amostrado é comparado, numa versão pequena e desfocada, com o último frame analisado. Se a imagem não mudou (por omissão, menos de 0,2 % dos píxeis), o frame é saltado. Um *frame-chave* periódico (5 s) garante que cenas paradas continuam a ser verificadas. Quando um frame é saltado por ser idêntico, as faces do último frame analisado continuam presentes, por isso o track de alguém parado mantém a duração correta.
+3. **Cascata de deteção.** O SCRFD-500M (~13 ms/frame) verifica primeiro se há faces. O detetor principal e o reconhecimento só correm nos frames com faces.
+4. **Comparação.** Cada face é alinhada com 5 pontos, convertida num embedding ArcFace e comparada com todas as referências; conta a menor distância de cosseno. Há **match** quando `distância ≤ limiar`. O limiar por omissão é 0,65, calibrado com 300 pares rotulados: mesma pessoa até 0,45; pessoas diferentes a partir de 0,78.
+5. **Qualidade da face (0–100).** É a média geométrica de três componentes: **nitidez** (variância do Laplaciano), **tamanho** e **frontalidade** (posição do nariz face aos olhos). Serve para ordenar e filtrar deteções, e para explicar porque um match é fraco.
+6. **Tracking.** As deteções da mesma face em frames consecutivos são agrupadas num *track*, por semelhança do embedding e sobreposição das caixas. O match do track decide-se pela **média das 3 melhores distâncias**, mais robusta do que frames isolados. Depois de um track ter uma correspondência, os frames seguintes da mesma face também são guardados, mesmo os de perfil ou desfocados, o que dá ao perito a trajetória completa. **Na revisão, um track inteiro confirma-se ou rejeita-se de uma vez.**
+7. **Segmentos e prova.** Os tracks e as deteções com match formam os intervalos de aparição. Por cada deteção ficam guardados: recorte da face, frame anotado, timestamp, nº de frame, caixa, confiança, distância, qualidade e track.
+
+### Desempenho (CPU, 4 vCPU)
+
+| | DeepFace (versão anterior) | ONNX (atual) |
+|---|---|---|
+| Deteção + reconhecimento, por frame | ~1,6 s | ~0,07 s de deteção + ~0,08 s por face (R50); ~0,01 s por face com MobileFaceNet |
+| Vídeo de teste de 20 s, 5 fps, 3 pessoas | — | 28,5 s sem filtros → **3,6 s** com movimento + cascata + tracking, com os **mesmos segmentos** |
+| RAM | ~1,4 GB | ~0,56 GB |
+| Instalação | ~2,8 GB (TensorFlow) | ~0,5 GB + 198 MB de modelos |
+
+Em CCTV real, o ganho do pré-filtro depende do movimento na cena: quanto mais estática a câmara, maior.
 
 ---
 
 ## Instalação
 
-📄 **Guia completo:** [`docs/INSTALACAO.md`](docs/INSTALACAO.md). Inclui os requisitos da VM, a instalação nativa passo a passo, o Docker, a GPU, um posto offline, o serviço systemd e a resolução de problemas.
+📄 **Guia completo:** [`docs/INSTALACAO.md`](docs/INSTALACAO.md). Cobre os requisitos da VM, a instalação nativa, Docker, GPU, posto offline, systemd, Cloudflare Tunnel e a resolução de problemas.
 
 ### Resumo (desenvolvimento)
 
-Requisitos: Python 3.11+, Node 20+, `ffmpeg` (opcional mas recomendado) e as bibliotecas do WeasyPrint (Pango).
+Requisitos: Python 3.11+, Node 20+, `ffmpeg` (recomendado) e as bibliotecas do WeasyPrint (Pango).
 
 ```bash
-# Backend
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e "backend[cpu,dev]"        # ou "backend[gpu,dev]" com GPU NVIDIA (CUDA)
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e "backend[cpu,dev]"        # GPU NVIDIA: "backend[gpu,dev]"; motor DeepFace: acrescentar ",deepface"
 cd backend && uvicorn app.main:app --reload --port 8000
 
-# Frontend (noutro terminal)
-cd frontend
-npm install
-npm run dev                               # http://localhost:5173 (encaminha /api para :8000)
+cd frontend && npm install && npm run dev   # http://localhost:5173 (encaminha /api para :8000)
 ```
 
 Para usar só o backend a servir a interface, corre `npm run build` em `frontend/` e abre `http://localhost:8000`.
 
-Na primeira análise, o DeepFace descarrega os pesos dos modelos (~250 MB) para `~/.deepface` (ou `$DEEPFACE_HOME`). Num posto **offline**, copia essa pasta antes.
+Na primeira utilização, os pesos ONNX (~198 MB) são descarregados dos *releases* do InsightFace para `~/.faceai/models` (ou para `$FACEAI_MODELS_DIR`). Cada ficheiro é **verificado por SHA-256**, e os hashes ficam fixados no código e registados no relatório. Num posto **offline**, copia essa pasta antes.
 
 ### Docker
 
 ```bash
-docker compose up --build                            # CPU
-docker compose --profile gpu up --build faceai-gpu   # GPU NVIDIA (requer nvidia-container-toolkit)
+docker compose up --build -d                            # CPU
+docker compose --profile gpu up --build -d faceai-gpu   # GPU NVIDIA (requer nvidia-container-toolkit)
 ```
 
-Os dados ficam em `./data` e os modelos num volume Docker. A porta só fica exposta em `127.0.0.1`.
+Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, que é ignorado pelo git. Assim, o `git pull` não entra em conflito com a tua configuração.
 
-### GPU / CPU
+### Configuração (variáveis de ambiente)
 
-A deteção é automática: se o TensorFlow encontrar uma GPU, usa-a. O dispositivo aparece no cabeçalho da interface e fica registado no relatório. Em CPU, conta com ~1–2 s por frame com RetinaFace + ArcFace. Ajusta *frames por segundo* conforme a duração do vídeo.
+| Variável | Por omissão | Descrição |
+|---|---|---|
+| `FACEAI_DATA_DIR` | `./data` | Casos, evidências, base de dados, `audit.jsonl` |
+| `FACEAI_ENGINE` | `onnx` | `onnx` ou `deepface` (este exige o extra `deepface`) |
+| `FACEAI_MODELS_DIR` | `~/.faceai/models` | Pesos ONNX |
+| `FACEAI_UPLOAD_CHUNK_MB` | `8` | Tamanho de cada bloco do upload (o Cloudflare limita os pedidos a 100 MB) |
+| `FACEAI_PRELOAD_MODELS` | `1` | Descarregar/carregar os modelos em segundo plano no arranque |
 
 ---
 
 ## Utilização
 
-1. **Novo caso:** indica o nome ou referência do processo e o teu nome de analista (no cabeçalho; fica nos registos).
+1. **Novo caso:** indica o nome ou referência do processo e o teu nome de analista (no cabeçalho).
 2. **Referências:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
-3. **Vídeos:** arrasta os ficheiros de CCTV. São extraídos os metadados (duração, fps, resolução, codec). Se o codec não for reproduzível no browser e houver `ffmpeg`, é criada uma **cópia H.264 só para visualização**. A análise usa sempre o original.
-4. **Análises:** escolhe vídeos, referências, modelo, detetor, fps e limiar, e inicia. O progresso é atualizado ao vivo e a análise pode ser cancelada.
+3. **Vídeos:** arrasta os ficheiros de CCTV. O envio é **em blocos e retomável**: se a ligação cair, volta a largar o mesmo ficheiro e o upload continua de onde parou, mesmo depois de recarregar a página. Os metadados são extraídos automaticamente. Se o codec não for reproduzível no browser e houver `ffmpeg`, é criada uma **cópia H.264 só para visualização**. A análise usa sempre o original.
+4. **Análises:** escolhe vídeos, referências, modelo, fps e limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo.
 5. **Resultados:**
-   - player com uma linha temporal (os segmentos a vermelho são clicáveis);
-   - tabela de segmentos;
-   - galeria com cada deteção lado a lado com a referência mais próxima;
-   - filtro por similaridade e opção para mostrar os candidatos;
-   - botões **Confirmar / Rejeitar**, que ficam registados com o analista e a hora;
+   - player com linha temporal e tabela de segmentos;
+   - **vista por tracks**: um cartão por pessoa ou trajetória, com revisão do track inteiro;
+   - **vista por deteções**, ordenável por tempo, semelhança ou **qualidade**;
    - frame completo anotado.
-6. **Exportar:** relatório PDF ou HTML, CSV, JSON, ou ZIP (relatório + CSV + JSON + recortes + frames + referências + auditoria).
+6. **Exportar:** relatório PDF ou HTML, com estatísticas, parâmetros, tracks e qualidade; CSV; JSON; ou ZIP.
 
 ### Afinação para CCTV
 
 | Situação | Ajuste |
 |---|---|
-| Faces pequenas (câmara afastada) | `Ampliação dos frames` 1,5–2 e `Tamanho mínimo` 12–16 px |
-| Muitos falsos positivos | baixar o limiar (ex.: 0,60 em ArcFace) ou aumentar a confiança mínima |
-| A pessoa passa muito depressa | aumentar *frames por segundo* (4–5) |
-| Vídeos longos em CPU | 0,5–1 fps numa primeira passagem, depois analisar só os vídeos com resultados |
-| Validação cruzada | repetir a análise com `Facenet512` e comparar |
+| Faces pequenas (câmara afastada) | `Ampliação da deteção` 1,5–2 (aumenta a resolução de entrada do SCRFD) e `Tamanho mínimo` 12–16 px |
+| Muitos falsos positivos | baixar o limiar (ex.: 0,55) e/ou usar `Qualidade mínima` 0,3 |
+| A pessoa passa muito depressa | aumentar os *frames por segundo* (4–5); o filtro de movimento mantém o custo baixo |
+| Câmara com ruído, chuva ou árvores (o filtro de movimento não poupa) | aumentar o `Limiar de movimento` (0,005–0,01) |
+| Validação cruzada | repetir com `arcface_mbf` ou com o motor DeepFace (`Facenet512`) |
 
 ---
 
 ## Considerações forenses e legais
 
-- **Auditoria:** todas as ações (criação de caso, uploads, parâmetros, início/fim de análise, revisões, exportações) ficam registadas com utilizador e hora UTC na base de dados e em `data/audit.jsonl` (append-only). O registo é incluído no relatório e no ZIP.
-- **Reprodutibilidade:** o relatório inclui os parâmetros completos e as versões do Python, DeepFace, TensorFlow, OpenCV e NumPy, bem como o dispositivo usado.
+- **Auditoria:** todas as ações ficam registadas com utilizador e hora UTC, na base de dados e em `data/audit.jsonl` (append-only). Inclui criação do caso, uploads (incluindo blocos iniciados ou cancelados), parâmetros, início e fim de análise, revisões de deteções e de tracks, e exportações. O registo é incluído no relatório e no ZIP.
+- **Reprodutibilidade:** o relatório inclui os parâmetros completos (filtro de movimento, cascata, tracking, limiares) e as versões do Python, ONNX Runtime, OpenCV e NumPy. Inclui também o **SHA-256 de cada modelo** usado e o dispositivo.
 - **Evidências:** os ficheiros originais são guardados sem alterações. A cópia de reprodução é um ficheiro separado.
-- **Limitações:** a precisão cai muito com baixa resolução, compressão forte, perfil, oclusões (máscaras, bonés), iluminação infravermelha e *motion blur*. Os modelos têm enviesamentos demográficos documentados na literatura. Um "não encontrado" **não prova ausência**.
-- **Proteção de dados:** a análise biométrica é tratamento de dados de categoria especial (RGPD art. 9.º; Lei n.º 59/2019 no contexto de investigação criminal). Usa a ferramenta apenas com base legal adequada. Os dados ficam locais: nenhuma imagem é enviada para serviços externos (só os pesos dos modelos são descarregados).
-- **Licenças:** o código do DeepFace é MIT. Os pesos pré-treinados têm licenças próprias, definidas pelos respetivos autores. Para uso académico não há restrição prática, mas convém verificar antes de qualquer uso comercial.
+- **Transparência dos filtros:** o relatório indica quantos frames foram saltados por falta de movimento e por não terem faces na 1.ª passagem. Um frame saltado não foi analisado pelo modelo completo. Se for preciso, repete a análise com os filtros desligados.
+- **Limitações:** a precisão cai muito com baixa resolução, compressão forte, perfil, oclusões, iluminação infravermelha e *motion blur*. O score de qualidade ajuda a identificar estes casos. Os modelos têm enviesamentos demográficos documentados. Um "não encontrado" **não prova ausência**.
+- **Proteção de dados:** a análise biométrica é tratamento de dados de categoria especial (RGPD art. 9.º; Lei n.º 59/2019 no contexto de investigação criminal). Os dados ficam locais. Se publicares a app (por exemplo, com Cloudflare Tunnel), protege-a com autenticação (Cloudflare Access).
+- **Licenças:** o código desta aplicação e o pós-processamento SCRFD e ArcFace (adaptado do InsightFace) são MIT. Os **pesos pré-treinados do InsightFace** (`buffalo_l`, `buffalo_sc`) são disponibilizados **apenas para investigação e uso não comercial**. Para uso comercial, usa o motor DeepFace ou modelos com licença adequada.
 
 ---
 
@@ -125,40 +147,37 @@ A deteção é automática: se o TensorFlow encontrar uma GPU, usa-a. O disposit
 backend/
   app/
     main.py                 FastAPI (+ serve frontend/dist)
-    config.py, db.py, models.py, schemas.py
-    api/                    cases.py (casos, referências, vídeos, auditoria), jobs.py (análises, revisão, exportação), system.py
+    config.py, db.py        configuração; SQLite com migração aditiva automática
+    models.py, schemas.py   Case, ReferenceImage, Video, Job, Detection, Track, Upload, AuditEvent
+    api/                    cases.py, jobs.py (análises, tracks, revisão, exportação), uploads.py (blocos), system.py
     services/
-      face_engine.py        wrapper DeepFace, deteção GPU/CPU, versões
-      references.py         validação e embeddings das referências
-      video_processor.py    leitura/amostragem OpenCV, recortes, anotação
-      matcher.py            distância de cosseno
-      segments.py           agrupamento temporal
-      jobs.py               fila em background, progresso, cancelamento
-      reports.py            HTML/PDF/CSV/JSON/ZIP
-      transcode.py          cópia de reprodução H.264 (ffmpeg)
-      audit.py              log de auditoria
+      face_engine.py        interface comum dos motores e seleção do motor ativo
+      engine_onnx.py        SCRFD + ArcFace (ONNX Runtime), download verificado por SHA-256
+      engine_deepface.py    motor DeepFace/TensorFlow (opcional)
+      motion.py             pré-filtro de movimento
+      quality.py            score de qualidade da face
+      tracking.py           tracker IoU + embedding
+      jobs.py               pipeline de análise em background (movimento → cascata → deteção → qualidade → tracking)
+      matcher.py, segments.py, references.py, video_processor.py, reports.py, transcode.py, audit.py
     templates/report.html.j2
-  tests/                    pytest (motor falso rápido + teste e2e com modelos reais)
+  tests/                    pytest (motor falso + testes com modelos reais)
 frontend/src/
   pages/                    CaseList, CaseView, Results
-  components/               ReferencesPanel, VideosPanel, JobsPanel, Timeline, DetectionCard, AuditPanel, ...
+  components/               JobsPanel, TrackCard, DetectionCard, QualityBadge, Timeline, ...
 ```
 
 ## Testes
 
 ```bash
 cd backend
-pytest                                   # rápidos, com motor facial falso (sem TensorFlow)
-FACEAI_E2E_DATASET=/caminho/deepface/tests/unit/dataset pytest -m e2e   # RetinaFace + ArcFace reais
+pytest                                   # rápidos, com motor facial falso
+FACEAI_E2E_DATASET=/caminho/deepface/tests/unit/dataset pytest -m e2e   # modelos reais do motor ativo
 ```
-
-O teste e2e gera um vídeo sintético em que a pessoa procurada aparece só entre os 4 e os 8 s, ao lado de outra pessoa. Verifica que é reportado exatamente esse segmento e nunca a outra pessoa.
 
 ## Próximos passos possíveis
 
-- Hash SHA-256 das evidências no momento da importação (cadeia de custódia).
-- Tracking (ByteTrack/SORT) para agrupar deteções da mesma pessoa e reduzir trabalho de revisão.
-- Score de qualidade da face (desfoque, pose) para ordenar e filtrar deteções.
-- Pesquisa "inversa": agrupar (clustering) todas as faces de um vídeo sem referência.
-- Suporte direto a formatos proprietários de DVR (`.dav`, …) via conversão automática.
-- Índice FAISS para pesquisar várias pessoas em grandes volumes de vídeo.
+- Hash SHA-256 das evidências na importação e log de auditoria encadeado.
+- Identidade do analista a partir do Cloudflare Access.
+- Pesquisa "inversa": agrupar (clustering) as faces de um vídeo sem referência.
+- Várias pessoas por caso numa única passagem pelo vídeo.
+- Timestamp real do CCTV (OCR da data/hora gravada na imagem).

@@ -35,15 +35,23 @@ export interface Video {
 }
 
 export interface JobParams {
-  model: string;
-  detector: string;
+  model: string | null;
+  detector: string | null;
   sample_fps: number;
   threshold: number | null;
   candidate_margin: number;
   min_face_size: number;
   min_confidence: number;
+  min_quality: number;
   upscale: number;
   segment_gap_s: number;
+  motion_filter: boolean;
+  motion_threshold: number;
+  keyframe_interval_s: number;
+  cascade: boolean;
+  fast_detector: string | null;
+  tracking: boolean;
+  track_gap_s: number;
 }
 
 export type JobStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
@@ -61,6 +69,10 @@ export interface Job {
   frames_processed: number;
   faces_detected: number;
   matches: number;
+  frames_sampled: number;
+  frames_skipped_motion: number;
+  frames_skipped_noface: number;
+  tracks: number;
   message: string;
   created_by: string;
   created_at: string;
@@ -84,6 +96,31 @@ export interface Detection {
   face_confidence: number;
   distance: number;
   similarity: number;
+  is_match: boolean;
+  track_id: number | null;
+  quality: number;
+  sharpness: number;
+  size_score: number;
+  frontal: number | null;
+  review_status: ReviewStatus;
+  review_note: string;
+  reviewed_by: string;
+  reviewed_at: string | null;
+}
+
+export interface Track {
+  id: number;
+  job_id: number;
+  video_id: number;
+  reference_id: number | null;
+  start_s: number;
+  end_s: number;
+  n_faces: number;
+  n_saved: number;
+  best_detection_id: number | null;
+  best_distance: number;
+  track_distance: number;
+  best_quality: number;
   is_match: boolean;
   review_status: ReviewStatus;
   review_note: string;
@@ -114,8 +151,10 @@ export interface AuditEvent {
 
 export interface SystemInfo {
   version: string;
+  engine: string;
   environment: Record<string, unknown> & { device?: string };
-  models: { name: string; default_threshold: number }[];
+  models: { name: string; default_threshold: number; description: string }[];
   detectors: string[];
   defaults: JobParams;
+  upload_chunk_bytes: number;
 }

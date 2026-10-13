@@ -11,17 +11,36 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from app.services.face_engine import FaceObservation
+from app.services.face_engine import FaceObservation, ModelInfo
 
 RED, BLUE, GREEN = (0, 0, 255), (255, 0, 0), (0, 255, 0)
 
 
 class FakeEngine:
+    name = "fake"
+
     def __init__(self) -> None:
         self.calls = 0
+        self.count_calls = 0
+
+    def count_faces(self, image_bgr, *, detector):
+        self.count_calls += 1
+        return len(self._find(image_bgr))
+
+    def models(self):
+        return [ModelInfo("fake_model", 0.05, "motor de teste")]
+
+    def detectors(self):
+        return ["fake_det", "fake_fast"]
+
+    def default_fast_detector(self):
+        return "fake_fast"
 
     def detect(self, image_bgr, *, model, detector, upscale=1.0):
         self.calls += 1
+        return self._find(image_bgr)
+
+    def _find(self, image_bgr):
         mask = (image_bgr.max(axis=2) > 40).astype(np.uint8)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         faces = []
@@ -31,7 +50,10 @@ class FakeEngine:
                 continue
             color = image_bgr[y + h // 2, x + w // 2].astype(np.float32)
             emb = np.concatenate([color, [300.0]])  # componente constante: cores diferentes ficam a distância ~0.4
-            faces.append(FaceObservation(x=x, y=y, w=w, h=h, confidence=0.99, embedding=emb))
+            # landmarks frontais sintéticos (olhos, nariz, boca)
+            lm = np.array([[x + 0.3 * w, y + 0.4 * h], [x + 0.7 * w, y + 0.4 * h], [x + 0.5 * w, y + 0.6 * h],
+                           [x + 0.35 * w, y + 0.8 * h], [x + 0.65 * w, y + 0.8 * h]], dtype=np.float32)
+            faces.append(FaceObservation(x=x, y=y, w=w, h=h, confidence=0.99, embedding=emb, landmarks=lm))
         return faces
 
     def environment(self):

@@ -41,6 +41,49 @@ def _store_upload(upload: UploadFile, dest_dir: Path, allowed: set[str]) -> tupl
     return dest, dest.stat().st_size
 
 
+def register_reference(session, case_id: int, path: Path, filename: str, size: int, actor: str) -> ReferenceImage:
+    """Regista uma imagem de referência já gravada em disco e valida-a (exatamente uma face)."""
+    engine = get_engine()
+    ref = ReferenceImage(case_id=case_id, filename=filename, stored_path=str(path), size_bytes=size)
+    session.add(ref)
+    session.commit()
+    session.refresh(ref)
+    try:
+        validate_reference(ref, engine, model=engine.models()[0].name, detector=engine.detectors()[0],
+                           crop_dir=path.parent)
+    except Exception as exc:
+        ref.valid, ref.message = False, f"Erro ao processar a imagem: {exc}"
+    session.add(ref)
+    session.commit()
+    session.refresh(ref)
+    log_event(session, "reference.uploaded", case_id=case_id, actor=actor,
+              details={"reference_id": ref.id, "filename": ref.filename, "size_bytes": size,
+                       "face_count": ref.face_count, "valid": ref.valid, "message": ref.message})
+    return ref
+
+
+def register_video(session, case_id: int, path: Path, filename: str, size: int, actor: str) -> Video:
+    """Regista um vídeo já gravado em disco (metadados via OpenCV) e pede a cópia de reprodução, se útil."""
+    try:
+        info = probe(path)
+    except ValueError as exc:
+        path.unlink(missing_ok=True)
+        raise HTTPException(422, f"{filename}: {exc}") from exc
+    video = Video(case_id=case_id, filename=filename, stored_path=str(path), size_bytes=size,
+                  duration_s=round(info.duration_s, 3), fps=round(info.fps, 3), frame_count=info.frame_count,
+                  width=info.width, height=info.height, codec=info.codec)
+    session.add(video)
+    session.commit()
+    session.refresh(video)
+    log_event(session, "video.uploaded", case_id=case_id, actor=actor,
+              details=video.model_dump(mode="json", exclude={"stored_path", "playback_path"}))
+    if schedule_playback_copy(video):
+        log_event(session, "video.playback_copy_requested", case_id=case_id, actor="sistema",
+                  details={"video_id": video.id,
+                           "note": "cópia H.264 apenas para visualização; o original é o analisado"})
+    return video
+
+
 # ---------------------------------------------------------------- casos
 @router.post("/cases", response_model=Case, status_code=201)
 def create_case(body: CaseCreate, session: SessionDep, actor: ActorDep) -> Case:
@@ -77,27 +120,10 @@ def upload_references(
 ) -> list[ReferenceImage]:
     get_case_or_404(session, case_id)
     ref_dir = settings.case_dir(case_id) / "references"
-    engine = get_engine()
     created: list[ReferenceImage] = []
     for upload in files:
         path, size = _store_upload(upload, ref_dir, IMAGE_EXT)
-        ref = ReferenceImage(case_id=case_id, filename=Path(upload.filename or "").name,
-                             stored_path=str(path), size_bytes=size)
-        session.add(ref)
-        session.commit()
-        session.refresh(ref)
-        try:
-            validate_reference(ref, engine, model=settings.default_model,
-                               detector=settings.default_detector, crop_dir=ref_dir)
-        except Exception as exc:
-            ref.valid, ref.message = False, f"Erro ao processar a imagem: {exc}"
-        session.add(ref)
-        session.commit()
-        session.refresh(ref)
-        log_event(session, "reference.uploaded", case_id=case_id, actor=actor,
-                  details={"reference_id": ref.id, "filename": ref.filename, "size_bytes": size,
-                           "face_count": ref.face_count, "valid": ref.valid, "message": ref.message})
-        created.append(ref)
+        created.append(register_reference(session, case_id, path, Path(upload.filename or "").name, size, actor))
     return created
 
 
@@ -137,24 +163,7 @@ def upload_videos(case_id: int, files: list[UploadFile], session: SessionDep, ac
     created: list[Video] = []
     for upload in files:
         path, size = _store_upload(upload, vid_dir, VIDEO_EXT)
-        try:
-            info = probe(path)
-        except ValueError as exc:
-            path.unlink(missing_ok=True)
-            raise HTTPException(422, f"{upload.filename}: {exc}") from exc
-        video = Video(case_id=case_id, filename=Path(upload.filename or "").name, stored_path=str(path),
-                      size_bytes=size, duration_s=round(info.duration_s, 3), fps=round(info.fps, 3),
-                      frame_count=info.frame_count, width=info.width, height=info.height, codec=info.codec)
-        session.add(video)
-        session.commit()
-        session.refresh(video)
-        log_event(session, "video.uploaded", case_id=case_id, actor=actor,
-                  details=video.model_dump(mode="json", exclude={"stored_path", "playback_path"}))
-        if schedule_playback_copy(video):
-            log_event(session, "video.playback_copy_requested", case_id=case_id, actor="sistema",
-                      details={"video_id": video.id,
-                               "note": "cópia H.264 apenas para visualização; o original é o analisado"})
-        created.append(video)
+        created.append(register_video(session, case_id, path, Path(upload.filename or "").name, size, actor))
     return created
 
 

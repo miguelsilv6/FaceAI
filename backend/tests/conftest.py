@@ -13,6 +13,7 @@ from .fakes import FakeEngine
 def client(tmp_path, monkeypatch):
     monkeypatch.setenv("FACEAI_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("FACEAI_FRONTEND_DIST", str(tmp_path / "no-frontend"))
+    monkeypatch.setenv("FACEAI_PRELOAD_MODELS", "0")
     # Recarrega a configuração e a base de dados para usar a pasta temporária.
     import app.config
     import app.db

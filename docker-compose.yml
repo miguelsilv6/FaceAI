@@ -3,19 +3,19 @@ services:
     build:
       context: .
       args:
-        TF_EXTRA: cpu
+        EXTRA: cpu
     ports:
       - "127.0.0.1:8000:8000"   # só acessível localmente
     volumes:
       - ./data:/data            # casos, evidências, resultados e auditoria
-      - faceai-models:/models   # pesos dos modelos DeepFace (descarregados na 1.ª utilização)
+      - faceai-models:/models   # pesos ONNX (descarregados na 1.ª utilização e verificados por SHA-256)
 
   faceai-gpu:
     profiles: ["gpu"]
     build:
       context: .
       args:
-        TF_EXTRA: gpu
+        EXTRA: gpu
     ports:
       - "127.0.0.1:8000:8000"
     volumes:

@@ -1,5 +1,5 @@
 import type {
-  AuditEvent, Case, Detection, Job, JobParams, ReferenceImage, ReviewStatus, Segment, SystemInfo, Video,
+  AuditEvent, Case, Detection, Job, JobParams, ReferenceImage, ReviewStatus, Segment, SystemInfo, Track, Video,
 } from "./types";
 
 const ANALYST_KEY = "faceai.analyst";
@@ -49,31 +49,94 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
   return res.json() as Promise<T>;
 }
 
-/** Upload multipart com progresso (XMLHttpRequest, porque o fetch não expõe progresso de envio). */
-export function uploadFiles<T>(url: string, files: File[], onProgress?: (fraction: number) => void): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const form = new FormData();
-    files.forEach((f) => form.append("files", f, f.name));
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", url);
-    Object.entries(headers()).forEach(([k, v]) => xhr.setRequestHeader(k, v));
-    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress?.(e.loaded / e.total);
-    xhr.onload = () => {
-      let body: unknown = null;
+interface UploadStatus {
+  id: string;
+  received_bytes: number;
+  size_bytes: number;
+  chunk_size: number;
+  completed: boolean;
+}
+
+class HttpError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+  }
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+function storage(op: "get" | "set" | "remove", key: string, value?: string): string | null {
+  try {
+    if (op === "get") return localStorage.getItem(key);
+    if (op === "set") localStorage.setItem(key, value ?? "");
+    else localStorage.removeItem(key);
+  } catch {
+    /* armazenamento indisponível: perde-se só a retoma após recarregar a página */
+  }
+  return null;
+}
+
+/**
+ * Upload em blocos com retoma. Cada bloco é um pedido separado (abaixo do limite de 100 MB do Cloudflare).
+ * Falhas de rede são repetidas com espera crescente; ao voltar a largar o mesmo ficheiro (mesmo depois de
+ * recarregar a página), o upload continua de onde ficou.
+ */
+async function uploadChunked<T>(caseId: number, kind: "video" | "reference", file: File,
+  onBytes: (sent: number) => void): Promise<T> {
+  const key = `faceai.upload.${caseId}.${kind}.${file.name}.${file.size}.${file.lastModified}`;
+  let status: UploadStatus | null = null;
+  const saved = storage("get", key);
+  if (saved) {
+    try {
+      status = await request<UploadStatus>("GET", `/api/uploads/${saved}`);
+      if (status.completed) status = null;
+    } catch {
+      status = null;
+    }
+  }
+  if (!status) {
+    status = await request<UploadStatus>("POST", `/api/cases/${caseId}/uploads`,
+      { kind, filename: file.name, size_bytes: file.size });
+    storage("set", key, status.id);
+  }
+  let offset = status.received_bytes;
+  onBytes(offset);
+  while (offset < file.size) {
+    const blob = file.slice(offset, offset + status.chunk_size);
+    for (let attempt = 1; ; attempt++) {
       try {
-        body = JSON.parse(xhr.responseText);
-      } catch {
-        /* resposta vazia */
+        const res = await fetch(`/api/uploads/${status.id}?offset=${offset}`, {
+          method: "PUT", headers: headers({ "Content-Type": "application/octet-stream" }), body: blob,
+        });
+        const body = await res.json().catch(() => ({}));
+        if ((res.ok || res.status === 409) && typeof body.received_bytes === "number") {
+          offset = body.received_bytes; // 409: o servidor indica de onde continuar
+          break;
+        }
+        throw new HttpError(res.status, typeof body.detail === "string" ? body.detail : `${res.status}`);
+      } catch (e) {
+        const permanent = e instanceof HttpError && e.status >= 400 && e.status < 500;
+        if (permanent || attempt >= 6) throw e;
+        await sleep(Math.min(30_000, 1000 * 2 ** attempt));
       }
-      if (xhr.status >= 200 && xhr.status < 300) resolve(body as T);
-      else {
-        const detail = (body as { detail?: unknown } | null)?.detail;
-        reject(new Error(typeof detail === "string" ? detail : `${xhr.status} ${xhr.statusText}`));
-      }
-    };
-    xhr.onerror = () => reject(new Error("Falha de rede durante o envio."));
-    xhr.send(form);
-  });
+    }
+    onBytes(offset);
+  }
+  const result = await request<T>("POST", `/api/uploads/${status.id}/complete`);
+  storage("remove", key);
+  return result;
+}
+
+async function uploadMany<T>(caseId: number, kind: "video" | "reference", files: File[],
+  onProgress?: (fraction: number) => void): Promise<T[]> {
+  const total = files.reduce((n, f) => n + f.size, 0) || 1;
+  let done = 0;
+  const results: T[] = [];
+  for (const f of files) {
+    results.push(await uploadChunked<T>(caseId, kind, f, (sent) => onProgress?.((done + sent) / total)));
+    done += f.size;
+  }
+  return results;
 }
 
 export const api = {
@@ -86,13 +149,13 @@ export const api = {
 
   references: (caseId: number) => request<ReferenceImage[]>("GET", `/api/cases/${caseId}/references`),
   uploadReferences: (caseId: number, files: File[], onProgress?: (f: number) => void) =>
-    uploadFiles<ReferenceImage[]>(`/api/cases/${caseId}/references`, files, onProgress),
+    uploadMany<ReferenceImage>(caseId, "reference", files, onProgress),
   deleteReference: (id: number) => request<void>("DELETE", `/api/references/${id}`),
   referenceImageUrl: (id: number, face = false) => `/api/references/${id}/image${face ? "?face=true" : ""}`,
 
   videos: (caseId: number) => request<Video[]>("GET", `/api/cases/${caseId}/videos`),
   uploadVideos: (caseId: number, files: File[], onProgress?: (f: number) => void) =>
-    uploadFiles<Video[]>(`/api/cases/${caseId}/videos`, files, onProgress),
+    uploadMany<Video>(caseId, "video", files, onProgress),
   videoUrl: (id: number) => `/api/videos/${id}/stream`,
 
   jobs: (caseId: number) => request<Job[]>("GET", `/api/cases/${caseId}/jobs`),
@@ -106,6 +169,9 @@ export const api = {
   cancelJob: (id: number) => request<Job>("POST", `/api/jobs/${id}/cancel`),
   detections: (jobId: number) => request<Detection[]>("GET", `/api/jobs/${jobId}/detections`),
   segments: (jobId: number) => request<Segment[]>("GET", `/api/jobs/${jobId}/segments`),
+  tracks: (jobId: number) => request<Track[]>("GET", `/api/jobs/${jobId}/tracks`),
+  reviewTrack: (trackId: number, status: ReviewStatus, note = "") =>
+    request<Track>("PATCH", `/api/tracks/${trackId}/review`, { status, note }),
   review: (detId: number, status: ReviewStatus, note = "") =>
     request<Detection>("PATCH", `/api/detections/${detId}/review`, { status, note }),
   detectionImageUrl: (id: number, kind: "crop" | "frame") => `/api/detections/${id}/${kind}`,

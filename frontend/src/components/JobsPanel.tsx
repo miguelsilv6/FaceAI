@@ -1,5 +1,6 @@
 import {
-  Accordion, Button, Card, Group, MultiSelect, NumberInput, Progress, Select, SimpleGrid, Stack, Table, Text, Title,
+  Accordion, Button, Card, Group, MultiSelect, NumberInput, Progress, Select, SimpleGrid, Stack, Switch, Table, Text,
+  Title,
 } from "@mantine/core";
 import { IconPlayerPlay } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
@@ -78,8 +79,8 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                 value={refIds} onChange={setRefIds} placeholder="Selecione as referências" />
             </SimpleGrid>
             <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }}>
-              <Select label="Modelo de reconhecimento" data={system.models.map((m) => m.name)} value={params.model}
-                allowDeselect={false}
+              <Select label="Modelo de reconhecimento" value={params.model} allowDeselect={false}
+                data={system.models.map((m) => ({ value: m.name, label: m.description ? `${m.name} — ${m.description}` : m.name }))}
                 onChange={(m) => m && setParams({ ...params, model: m,
                   threshold: system.models.find((x) => x.name === m)?.default_threshold ?? params.threshold })} />
               <Select label="Detetor facial" data={system.detectors} value={params.detector} allowDeselect={false}
@@ -90,24 +91,50 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                 description="Menor = mais restritivo" value={params.threshold ?? ""}
                 onChange={(v) => set("threshold", num(v, 0.68))} />
             </SimpleGrid>
+            <SimpleGrid cols={{ base: 1, sm: 3 }}>
+              <Switch label="Pré-filtro de movimento" description="Só analisa frames onde a imagem mudou"
+                checked={params.motion_filter} onChange={(e) => set("motion_filter", e.currentTarget.checked)} />
+              <Switch label="Cascata de deteção" description="Detetor rápido primeiro; o principal só se houver faces"
+                checked={params.cascade} onChange={(e) => set("cascade", e.currentTarget.checked)} />
+              <Switch label="Tracking de faces" description="Agrupa a mesma face entre frames"
+                checked={params.tracking} onChange={(e) => set("tracking", e.currentTarget.checked)} />
+            </SimpleGrid>
             <Accordion variant="contained">
               <Accordion.Item value="adv">
                 <Accordion.Control>Parâmetros avançados</Accordion.Control>
                 <Accordion.Panel>
-                  <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }}>
-                    <NumberInput label="Margem de candidatos" description="Guardar para revisão até limiar + margem"
-                      min={0} max={0.5} step={0.01} decimalScale={3} value={params.candidate_margin}
-                      onChange={(v) => set("candidate_margin", num(v, 0.08))} />
-                    <NumberInput label="Tamanho mínimo da face (px)" min={0} value={params.min_face_size}
-                      onChange={(v) => set("min_face_size", num(v, 20))} />
-                    <NumberInput label="Confiança mínima do detetor" min={0} max={1} step={0.05} decimalScale={2}
-                      value={params.min_confidence} onChange={(v) => set("min_confidence", num(v, 0.5))} />
-                    <NumberInput label="Ampliação dos frames" description="Ajuda com faces pequenas (mais lento)"
-                      min={1} max={4} step={0.5} decimalScale={1} value={params.upscale}
-                      onChange={(v) => set("upscale", num(v, 1))} />
-                    <NumberInput label="Intervalo máx. no segmento (s)" min={0} step={0.5} decimalScale={1}
-                      value={params.segment_gap_s} onChange={(v) => set("segment_gap_s", num(v, 2))} />
-                  </SimpleGrid>
+                  <Stack>
+                    <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }}>
+                      <NumberInput label="Margem de candidatos" description="Guardar para revisão até limiar + margem"
+                        min={0} max={0.5} step={0.01} decimalScale={3} value={params.candidate_margin}
+                        onChange={(v) => set("candidate_margin", num(v, 0.08))} />
+                      <NumberInput label="Tamanho mínimo da face (px)" min={0} value={params.min_face_size}
+                        onChange={(v) => set("min_face_size", num(v, 20))} />
+                      <NumberInput label="Confiança mínima do detetor" min={0} max={1} step={0.05} decimalScale={2}
+                        value={params.min_confidence} onChange={(v) => set("min_confidence", num(v, 0.5))} />
+                      <NumberInput label="Qualidade mínima da face" description="0 = sem filtro"
+                        min={0} max={1} step={0.05} decimalScale={2} value={params.min_quality}
+                        onChange={(v) => set("min_quality", num(v, 0))} />
+                      <NumberInput label="Ampliação da deteção" description="Ajuda com faces pequenas (mais lento)"
+                        min={1} max={4} step={0.5} decimalScale={1} value={params.upscale}
+                        onChange={(v) => set("upscale", num(v, 1))} />
+                    </SimpleGrid>
+                    <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }}>
+                      <NumberInput label="Limiar de movimento" description="Fração de píxeis alterados"
+                        disabled={!params.motion_filter} min={0} max={1} step={0.001} decimalScale={4}
+                        value={params.motion_threshold} onChange={(v) => set("motion_threshold", num(v, 0.002))} />
+                      <NumberInput label="Frame-chave a cada (s)" description="Analisa mesmo sem movimento"
+                        disabled={!params.motion_filter} min={0} step={1} decimalScale={1}
+                        value={params.keyframe_interval_s} onChange={(v) => set("keyframe_interval_s", num(v, 5))} />
+                      <Select label="Detetor rápido (cascata)" disabled={!params.cascade} data={system.detectors}
+                        value={params.fast_detector} allowDeselect={false}
+                        onChange={(d) => d && set("fast_detector", d)} />
+                      <NumberInput label="Intervalo máx. no track (s)" disabled={!params.tracking} min={0} step={0.5}
+                        decimalScale={1} value={params.track_gap_s} onChange={(v) => set("track_gap_s", num(v, 2))} />
+                      <NumberInput label="Intervalo máx. no segmento (s)" min={0} step={0.5} decimalScale={1}
+                        value={params.segment_gap_s} onChange={(v) => set("segment_gap_s", num(v, 2))} />
+                    </SimpleGrid>
+                  </Stack>
                 </Accordion.Panel>
               </Accordion.Item>
             </Accordion>

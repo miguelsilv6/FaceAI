@@ -1,6 +1,9 @@
 import numpy as np
+import pytest
 
-from app.services import face_engine
+pytest.importorskip("deepface")
+
+from app.services.engine_deepface import DeepFaceEngine  # noqa: E402
 
 
 def test_no_detection_placeholder_is_ignored(monkeypatch):
@@ -15,7 +18,7 @@ def test_no_detection_placeholder_is_ignored(monkeypatch):
         ]
 
     monkeypatch.setattr(df, "represent", fake_represent)
-    faces = face_engine.DeepFaceEngine().detect(np.zeros((200, 300, 3), np.uint8), model="ArcFace", detector="x")
+    faces = DeepFaceEngine().detect(np.zeros((200, 300, 3), np.uint8), model="ArcFace", detector="x")
     assert [(f.x, f.y, f.w, f.h) for f in faces] == [(10, 20, 30, 40)]
 
 
@@ -25,6 +28,6 @@ def test_upscale_maps_boxes_back(monkeypatch):
     monkeypatch.setattr(df, "represent", lambda img_path, **_: [
         {"facial_area": {"x": 20, "y": 40, "w": 60, "h": 80}, "face_confidence": 0.9, "embedding": [1.0]}
     ])
-    faces = face_engine.DeepFaceEngine().detect(np.zeros((100, 100, 3), np.uint8), model="ArcFace", detector="x",
+    faces = DeepFaceEngine().detect(np.zeros((100, 100, 3), np.uint8), model="ArcFace", detector="x",
                                                 upscale=2.0)
     assert (faces[0].x, faces[0].y, faces[0].w, faces[0].h) == (10, 20, 30, 40)

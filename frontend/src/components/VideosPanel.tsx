@@ -40,7 +40,7 @@ export default function VideosPanel({ caseId, videos, onChange }: Props) {
       <UploadZone accept={VIDEO_ACCEPT} onDrop={upload} progress={progress}
         icon={<IconMovie size={40} stroke={1.5} />}
         title="Arraste vídeos de CCTV"
-        hint="MP4, AVI, MKV, MOV, … Os formatos proprietários de DVR (ex.: .dav) podem ter de ser convertidos com ffmpeg." />
+        hint="MP4, AVI, MKV, MOV, … Envio em blocos: se a ligação falhar, volte a largar o mesmo ficheiro para continuar de onde parou." />
       <Card withBorder p={0}>
         {videos.length === 0 ? (
           <Text c="dimmed" p="md">Sem vídeos importados.</Text>

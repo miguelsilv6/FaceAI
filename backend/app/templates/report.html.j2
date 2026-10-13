@@ -69,9 +69,12 @@ perito, tendo em conta a qualidade das imagens, a iluminação, o ângulo, as oc
   <tr><th>Detetor facial</th><td>{{ job.params.detector }}</td></tr>
   <tr><th>Métrica / limiar</th><td>distância de cosseno ≤ {{ job.params.threshold }} (candidatos até {{ "%.3f"|format(job.params.threshold + job.params.candidate_margin) }})</td></tr>
   <tr><th>Amostragem</th><td>{{ job.params.sample_fps }} frames/s · ampliação ×{{ job.params.upscale }}</td></tr>
-  <tr><th>Filtros</th><td>face ≥ {{ job.params.min_face_size }} px · confiança do detetor ≥ {{ job.params.min_confidence }}</td></tr>
+  <tr><th>Filtros</th><td>face ≥ {{ job.params.min_face_size }} px · confiança do detetor ≥ {{ job.params.min_confidence }} · qualidade ≥ {{ job.params.get("min_quality", 0) }}</td></tr>
+  <tr><th>Pré-filtro de movimento</th><td>{% if job.params.get("motion_filter") %}ativo · limiar {{ job.params.motion_threshold }} (fração de píxeis alterados) · frame-chave a cada {{ job.params.keyframe_interval_s }} s{% else %}desativado{% endif %}</td></tr>
+  <tr><th>Cascata de deteção</th><td>{% if job.params.get("cascade") and job.params.get("fast_detector") %}1.ª passagem com {{ job.params.fast_detector }}, deteção completa com {{ job.params.detector }} só quando há faces{% else %}desativada{% endif %}</td></tr>
+  <tr><th>Tracking</th><td>{% if job.params.get("tracking") %}ativo · intervalo máx. {{ job.params.track_gap_s }} s · match do track pela média das 3 melhores distâncias{% else %}desativado{% endif %}</td></tr>
   <tr><th>Agrupamento em segmentos</th><td>intervalo ≤ {{ job.params.segment_gap_s }} s</td></tr>
-  <tr><th>Estatísticas</th><td>{{ job.frames_processed }} frames analisados · {{ job.faces_detected }} faces válidas · {{ job.matches }} correspondências · {{ candidates }} candidatos abaixo do limiar de revisão</td></tr>
+  <tr><th>Estatísticas</th><td>{{ job.frames_sampled }} frames amostrados · {{ job.frames_skipped_motion }} saltados (sem movimento) · {{ job.frames_skipped_noface }} saltados (sem faces na 1.ª passagem) · {{ job.frames_processed }} com deteção completa · {{ job.faces_detected }} faces válidas · {{ job.matches }} correspondências em frames · {{ tracks|length }} tracks com correspondência · {{ candidates }} candidatos/continuações</td></tr>
   <tr><th>Ambiente</th><td>{% for k, v in job.environment.items() %}<code>{{ k }}={{ v }}</code>{% if not loop.last %} · {% endif %}{% endfor %}</td></tr>
 </table>
 
@@ -89,23 +92,39 @@ perito, tendo em conta a qualidade das imagens, a iluminação, o ângulo, as oc
 </div>
 {% endfor %}
 
-<h2>6. Correspondências detalhadas</h2>
+{% if job.params.get("tracking") %}
+<h2>6. Tracks com correspondência</h2>
+<p class="muted">Um track agrupa as deteções da mesma face em frames consecutivos. A decisão usa a média das (até) 3 melhores distâncias do track.</p>
+{% if not tracks %}<p>Nenhum track com correspondência.</p>{% else %}
+<table class="det">
+  <colgroup><col style="width:62px"><col style="width:7%"><col><col style="width:14%"><col style="width:14%"><col style="width:8%"><col style="width:11%"><col style="width:9%"><col style="width:12%"></colgroup>
+  <tr><th>Face</th><th>Track</th><th>Vídeo</th><th>Início</th><th>Fim</th><th>Faces</th><th>Dist. track</th><th>Qualid.</th><th>Revisão</th></tr>
+  {% for x in tracks %}
+  <tr><td>{% if x.crop_img %}<img src="{{ x.crop_img }}" alt="">{% endif %}</td><td>#{{ x.t.id }}</td><td>{{ x.video.filename if x.video else x.t.video_id }}</td>
+      <td>{{ x.t.start_s | ts }}</td><td>{{ x.t.end_s | ts }}</td><td>{{ x.t.n_faces }}</td><td>{{ "%.3f"|format(x.t.track_distance) }}</td><td>{{ "%.2f"|format(x.t.best_quality) }}</td>
+      <td class="{{ {'confirmed':'ok','rejected':'bad'}.get(x.t.review_status.value, 'pend') }}">{{ {'confirmed':'Confirmado','rejected':'Rejeitado'}.get(x.t.review_status.value, 'Por rever') }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endif %}
+
+<h2>{{ 7 if job.params.get("tracking") else 6 }}. Correspondências detalhadas</h2>
 <p class="muted">Revisão humana: <span class="ok">{{ review_counts.confirmed }} confirmadas</span> ·
   <span class="bad">{{ review_counts.rejected }} rejeitadas</span> · <span class="pend">{{ review_counts.pending }} por rever</span>.
   {% if rows|length > max_images %}Só os primeiros {{ max_images }} recortes estão incluídos como imagem.{% endif %}</p>
 <table class="det">
-  <colgroup><col style="width:62px"><col style="width:6%"><col><col style="width:13%"><col style="width:7%"><col style="width:10%"><col style="width:9%"><col style="width:13%"><col style="width:13%"></colgroup>
-  <tr><th>Face</th><th>#</th><th>Vídeo</th><th>Tempo</th><th>Frame</th><th>Similaridade</th><th>Distância</th><th>Referência</th><th>Revisão</th></tr>
+  <colgroup><col style="width:62px"><col style="width:6%"><col><col style="width:14%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:7%"><col style="width:7%"><col style="width:12%"></colgroup>
+  <tr><th>Face</th><th>#</th><th>Vídeo</th><th>Tempo</th><th>Frame</th><th>Simil.</th><th>Dist.</th><th>Q</th><th>Track</th><th>Revisão</th></tr>
   {% for r in rows %}
   <tr><td>{% if r.crop_img %}<img src="{{ r.crop_img }}" alt="">{% endif %}</td><td>{{ r.detection_id }}</td><td>{{ r.video_filename }}</td>
       <td>{{ r.timestamp }}</td><td>{{ r.frame_index }}</td><td>{{ "%.3f"|format(r.similarity) }}</td><td>{{ "%.3f"|format(r.distance) }}</td>
-      <td>{{ r.reference_filename }}</td>
+      <td>{{ "%.2f"|format(r.quality) }}</td><td>{{ ("#" ~ r.track_id) if r.track_id != "" else "—" }}</td>
       <td class="{{ {'confirmed':'ok','rejected':'bad'}.get(r.review_status, 'pend') }}">{{ {'confirmed':'Confirmada','rejected':'Rejeitada'}.get(r.review_status, 'Por rever') }}
         {% if r.reviewed_by %}<br><span class="muted">{{ r.reviewed_by }}</span>{% endif %}{% if r.review_note %}<br>{{ r.review_note }}{% endif %}</td></tr>
   {% endfor %}
 </table>
 
-<h2>7. Registo de auditoria do caso</h2>
+<h2>{{ 8 if job.params.get("tracking") else 7 }}. Registo de auditoria do caso</h2>
 <table>
   <tr><th>#</th><th>Data/hora (UTC)</th><th>Utilizador</th><th>Ação</th><th>Detalhes</th></tr>
   {% for e in audit %}

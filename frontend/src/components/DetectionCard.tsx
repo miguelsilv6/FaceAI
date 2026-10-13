@@ -2,6 +2,7 @@ import { ActionIcon, Badge, Card, Group, Image, Stack, Text, Tooltip } from "@ma
 import { IconCheck, IconPhotoSearch, IconX } from "@tabler/icons-react";
 
 import { api, formatTime } from "../api";
+import QualityBadge from "./QualityBadge";
 import type { Detection, ReviewStatus } from "../types";
 
 interface Props {
@@ -34,7 +35,13 @@ export default function DetectionCard({ det, onSeek, onReview, onOpenFrame }: Pr
             {(det.similarity * 100).toFixed(1)}%
           </Badge>
         </Group>
-        <Text size="xs" c="dimmed">frame {det.frame_index} · dist. {det.distance.toFixed(3)}{det.is_match ? "" : " · candidato"}</Text>
+        <Group gap={6} wrap="nowrap">
+          <QualityBadge quality={det.quality} sharpness={det.sharpness} sizeScore={det.size_score} frontal={det.frontal} />
+          <Text size="xs" c="dimmed" truncate>
+            fr. {det.frame_index} · d {det.distance.toFixed(3)}{det.track_id != null ? ` · T${det.track_id}` : ""}
+            {det.is_match ? "" : " · cand."}
+          </Text>
+        </Group>
         <Group justify="space-between" wrap="nowrap">
           <Tooltip label={det.reviewed_by ? `${det.reviewed_by}${det.review_note ? `: ${det.review_note}` : ""}` : "Sem revisão"}>
             <Badge color={color} variant="light" size="sm">{label}</Badge>
