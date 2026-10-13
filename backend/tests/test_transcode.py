@@ -154,3 +154,11 @@ def test_webm_copy_for_browsers_without_h264(client, tmp_path, with_ffmpeg):
     stream = client.get(f"/api/videos/{v['id']}/stream")
     assert stream.headers["content-type"] == "video/webm" and stream.content[:4] == b"\x1aE\xdf\xa3"  # EBML
     assert stream.headers["cache-control"] == "no-cache"  # o mesmo URL passa do original para a cópia
+
+
+def test_progress_parsing():
+    assert transcode._progress_seconds("out_time_us", "2500000") == 2.5
+    assert transcode._progress_seconds("out_time_ms", "1000000") == 1.0
+    assert transcode._progress_seconds("out_time", "00:01:02.500000") == 62.5
+    assert transcode._progress_seconds("out_time_us", "N/A") is None
+    assert transcode._progress_seconds("frame", "10") is None

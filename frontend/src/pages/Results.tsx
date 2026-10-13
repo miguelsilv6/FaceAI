@@ -1,14 +1,14 @@
 import {
-  Alert, Anchor, Breadcrumbs, Button, Card, Group, Image, Menu, Modal, Progress, SegmentedControl, Select, SimpleGrid,
-  Slider, Stack, Switch, Table, Text, Title,
+  ActionIcon, Alert, Anchor, Breadcrumbs, Button, Card, Group, Image, Menu, Modal, Progress, SegmentedControl, Select,
+  SimpleGrid, Slider, Stack, Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconAlertTriangle, IconDownload, IconInfoCircle, IconPhoto, IconPlayerStop, IconTrash, IconUserPlus,
+  IconAlertTriangle, IconChevronLeft, IconChevronRight, IconDownload, IconInfoCircle, IconPhoto, IconPlayerStop, IconTrash, IconUserPlus,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { api, browserCodecs, formatTime, realTime } from "../api";
+import { api, browserCodecs, formatEta, formatTime, realTime } from "../api";
 import DeleteJobModal from "../components/DeleteJobModal";
 import DetectionCard from "../components/DetectionCard";
 import PersonCard from "../components/PersonCard";
@@ -91,13 +91,26 @@ export default function Results() {
 
   const video = videos.find((v) => v.id === videoId) ?? null;
   const converting = video?.playback_status === "pending" || video?.playback_status === "running";
+  // Atualiza o estado da cópia de reprodução. Depende só do caso e dos vídeos (valores estáveis): o objeto `job`
+  // é substituído a cada 2 s enquanto a análise decorre, o que reiniciava o intervalo antes de ele disparar.
+  const caseId = job?.case_id;
+  const jobVideoIds = job?.video_ids.join(",") ?? "";
   useEffect(() => {
-    if (!converting || !job) return;
+    if (!converting || caseId == null) return;
+    const ids = new Set(jobVideoIds.split(",").map(Number));
     const t = setInterval(() => {
-      api.videos(job.case_id).then((vs) => setVideos(vs.filter((v) => job.video_ids.includes(v.id))));
-    }, 3000);
+      api.videos(caseId).then((vs) => setVideos(vs.filter((v) => ids.has(v.id)))).catch(() => undefined);
+    }, 2000);
     return () => clearInterval(t);
-  }, [converting, job]);
+  }, [converting, caseId, jobVideoIds]);
+  const videoIndex = videos.findIndex((v) => v.id === videoId);
+  const goToVideo = (delta: number) => {
+    const next = videos[videoIndex + delta];
+    if (next) {
+      setVideoId(next.id);
+      setCurrentTime(0);
+    }
+  };
   const createPlaybackCopy = async (format?: "mp4" | "webm") => {
     if (!video) return;
     try {
@@ -291,6 +304,9 @@ export default function Results() {
               ? `${persons.length} pessoas distintas · ${tracks.length} tracks · ${detections.length} faces guardadas (descoberta, sem amostra)`
               : <>{counts.matches} correspondências ({counts.confirmed} confirmadas, {counts.rejected} rejeitadas)
                 {job.params.tracking ? ` · ${counts.tracks} tracks com correspondência` : ""}</>}
+            {running && (
+              <Text span size="sm" fw={600} c="blue"> · {Math.round(job.progress * 100)}% · {formatEta(job.eta_s)}</Text>
+            )}
           </Text>
         </div>
         <Group>
@@ -323,9 +339,21 @@ export default function Results() {
         <Card withBorder>
           <Stack gap="xs">
             {videos.length > 1 && (
-              <Select label="Vídeo" value={videoId ? String(videoId) : null} allowDeselect={false}
-                data={videos.map((v) => ({ value: String(v.id), label: `#${v.id} ${v.filename}` }))}
-                onChange={(v) => v && setVideoId(Number(v))} />
+              <Group gap="xs" align="flex-end" wrap="nowrap">
+                <Tooltip label="Vídeo anterior">
+                  <ActionIcon variant="default" size="lg" aria-label="Vídeo anterior" disabled={videoIndex <= 0}
+                    onClick={() => goToVideo(-1)}><IconChevronLeft size={18} /></ActionIcon>
+                </Tooltip>
+                <Select label={`Vídeo (${videoIndex + 1} de ${videos.length})`} style={{ flex: 1 }}
+                  value={videoId ? String(videoId) : null} allowDeselect={false}
+                  data={videos.map((v) => ({ value: String(v.id), label: `#${v.id} ${v.filename}` }))}
+                  onChange={(v) => v && setVideoId(Number(v))} />
+                <Tooltip label="Vídeo seguinte">
+                  <ActionIcon variant="default" size="lg" aria-label="Vídeo seguinte"
+                    disabled={videoIndex < 0 || videoIndex >= videos.length - 1}
+                    onClick={() => goToVideo(1)}><IconChevronRight size={18} /></ActionIcon>
+                </Tooltip>
+              </Group>
             )}
             {video && (
               <>

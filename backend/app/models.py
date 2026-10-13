@@ -97,6 +97,7 @@ class Job(SQLModel, table=True):
     frames_skipped_noface: int = 0
     tracks: int = 0
     persons: int = 0  # modo descoberta: pessoas distintas (grupos de tracks)
+    eta_s: float | None = None  # tempo restante estimado (s) enquanto a análise decorre
     message: str = ""
     created_by: str = ""
     created_at: datetime = Field(default_factory=utcnow)

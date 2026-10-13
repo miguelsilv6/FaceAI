@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import queue
 import shutil
 import subprocess
@@ -170,6 +171,26 @@ def _work() -> None:
                 _queued.discard(video_id)
 
 
+def _lower_priority() -> None:  # pragma: no cover - corre no processo filho
+    try:
+        os.nice(10)
+    except OSError:
+        pass
+
+
+def _progress_seconds(key: str, value: str) -> float | None:
+    """Tempo já convertido a partir das linhas de `ffmpeg -progress` (as chaves variam entre versões)."""
+    try:
+        if key in ("out_time_us", "out_time_ms") and value.lstrip("-").isdigit():
+            return int(value) / 1e6  # out_time_ms também está em microssegundos (histórico do ffmpeg)
+        if key == "out_time" and value.count(":") == 2:
+            h, m, sec = value.split(":")
+            return int(h) * 3600 + int(m) * 60 + float(sec)
+    except ValueError:
+        return None
+    return None
+
+
 def _set(video_id: int, **fields) -> Video | None:
     with Session(get_engine(), expire_on_commit=False) as s:
         video = s.get(Video, video_id)
@@ -195,22 +216,28 @@ def _transcode(video_id: int) -> None:
                  "-crf", "33", "-b:v", "0"]
     else:
         codec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart"]
+    threads = str(max(1, (os.cpu_count() or 2) // 2))
     cmd = [
-        "ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-i", str(src),
-        "-map", "0:v:0", "-an", *codec, "-pix_fmt", "yuv420p", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", str(tmp),
+        "ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
+        "-threads", threads, "-i", str(src), "-map", "0:v:0", "-an", *codec, "-threads", threads,
+        "-pix_fmt", "yuv420p", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", str(tmp),
     ]
     duration = video.duration_s or 0.0
     started, last_update = time.monotonic(), 0.0
     errlog = tempfile.TemporaryFile(mode="w+")  # ficheiros de DVR danificados podem gerar muitos erros
     try:
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errlog, text=True)
+        # Prioridade baixa e metade dos núcleos: a conversão (só para visualização) não deve atrasar as análises
+        # nem deixar a interface sem resposta.
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errlog, text=True,
+                                preexec_fn=_lower_priority if os.name == "posix" else None)
         for line in proc.stdout:  # type: ignore[union-attr]
             key, _, value = line.strip().partition("=")
-            if key == "out_time_us" and duration > 0 and value.isdigit():
+            seconds = _progress_seconds(key, value)
+            if seconds is not None and duration > 0:
                 now = time.monotonic()
-                if now - last_update >= 3:
+                if now - last_update >= 2:
                     last_update = now
-                    _set(video_id, playback_progress=round(min(0.99, int(value) / 1e6 / duration), 3))
+                    _set(video_id, playback_progress=round(min(0.99, max(0.0, seconds / duration)), 3))
             if time.monotonic() - started > 6 * 3600:
                 proc.kill()
                 raise TimeoutError("a conversão excedeu 6 h")

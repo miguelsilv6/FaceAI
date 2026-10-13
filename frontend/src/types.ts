@@ -125,6 +125,7 @@ export interface Job {
   frames_skipped_noface: number;
   tracks: number;
   persons: number;
+  eta_s: number | null;
   message: string;
   created_by: string;
   created_at: string;

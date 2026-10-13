@@ -251,6 +251,21 @@ export function formatTime(seconds: number): string {
   return `${pad(h)}:${pad(m)}:${pad(s)}.${pad(rest, 3)}`;
 }
 
+/** Duração aproximada legível: "45 s", "3 min 20 s", "1 h 05 min". */
+export function formatDuration(seconds: number): string {
+  const s = Math.max(0, Math.round(seconds));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s`;
+  return `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")} min`;
+}
+
+/** Tempo restante de uma análise a decorrer, com a hora prevista de fim (hora local do browser). */
+export function formatEta(etaS: number | null | undefined): string {
+  if (etaS == null) return "a calcular o tempo restante…";
+  const end = new Date(Date.now() + etaS * 1000).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
+  return `faltam ≈ ${formatDuration(etaS)} (fim ≈ ${end})`;
+}
+
 export function formatBytes(bytes: number): string {
   const units = ["B", "KB", "MB", "GB", "TB"];
   let i = 0;
