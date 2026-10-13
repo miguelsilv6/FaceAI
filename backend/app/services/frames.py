@@ -29,8 +29,9 @@ class ExtractedFrame:
     crop_error: float | None  # erro do recorte; None = recorte indisponível
 
 
-def crop_error(frame: np.ndarray, expected_crop: np.ndarray, bbox: tuple[int, int, int, int]) -> float:
-    crop = crop_with_margin(frame, *bbox)
+def crop_error(frame: np.ndarray, expected_crop: np.ndarray, bbox: tuple[int, int, int, int],
+               margin: float = 0.25) -> float:
+    crop = crop_with_margin(frame, *bbox, margin=margin)
     if crop.shape != expected_crop.shape:
         return float("inf")
     return float(np.abs(crop.astype(np.int16) - expected_crop.astype(np.int16)).mean())
@@ -66,7 +67,8 @@ def _read_sequential(path: str, index: int) -> np.ndarray | None:
 
 
 def extract_frame(video_path: str | Path, frame_index: int, crop_path: str | Path | None,
-                  bbox: tuple[int, int, int, int]) -> ExtractedFrame:
+                  bbox: tuple[int, int, int, int], margin: float = 0.25) -> ExtractedFrame:
+    """margin: margem do recorte guardado (faces 0.25; corpos 0.05)."""
     path = str(video_path)
     expected = None
     if crop_path and Path(crop_path).exists():
@@ -84,14 +86,14 @@ def extract_frame(video_path: str | Path, frame_index: int, crop_path: str | Pat
                 raise ValueError(f"Não foi possível ler o frame {frame_index}.")
             return ExtractedFrame(frame, "seek (sem verificação)", None)
         if frame is not None:
-            err = crop_error(frame, expected, bbox)
+            err = crop_error(frame, expected, bbox, margin)
             if err <= MAX_CROP_ERROR:
                 return ExtractedFrame(frame, "seek", round(err, 2))
         # Vizinhos: o seek pode ter caído alguns frames ao lado. Só se aceita um vizinho se for o único que
         # coincide; numa cena parada vários coincidem e não há forma de saber qual é o N → leitura sequencial.
         start = max(0, frame_index - NEIGHBOURS)
         found = [(err, f) for f in _read_range(cap, start, frame_index - start + NEIGHBOURS + 1)
-                 if (err := crop_error(f, expected, bbox)) <= MAX_CROP_ERROR]
+                 if (err := crop_error(f, expected, bbox, margin)) <= MAX_CROP_ERROR]
         if len(found) == 1:
             return ExtractedFrame(found[0][1], "vizinho", round(found[0][0], 2))
     finally:
@@ -99,4 +101,4 @@ def extract_frame(video_path: str | Path, frame_index: int, crop_path: str | Pat
     frame = _read_sequential(path, frame_index)
     if frame is None:
         raise ValueError(f"Não foi possível ler o frame {frame_index}.")
-    return ExtractedFrame(frame, "sequencial", round(crop_error(frame, expected, bbox), 2))
+    return ExtractedFrame(frame, "sequencial", round(crop_error(frame, expected, bbox, margin), 2))

@@ -11,12 +11,19 @@ from fastapi.responses import FileResponse
 from sqlmodel import select
 
 from ..config import settings
-from ..models import AuditEvent, Case, Detection, ReferenceImage, Video
-from ..schemas import CaseCreate, CaseUpdate
+from ..models import AuditEvent, Case, Detection, Job, JobStatus, ReferenceImage, Track, Upload, Video
+from ..schemas import CaseCreate, CaseDelete, CaseUpdate
 from ..services.audit import log_event
 from ..services.face_engine import get_engine
 from ..services.references import validate_reference
-from ..services.transcode import FORMATS, READY, probe_stream, request_playback_copy
+from ..services.transcode import (
+    FORMATS,
+    READY,
+    cancel_copies,
+    probe_stream,
+    request_case_copies,
+    request_playback_copy,
+)
 from ..services.video_processor import probe
 from .deps import ActorDep, SessionDep, get_case_or_404
 
@@ -125,6 +132,64 @@ def update_case(case_id: int, body: CaseUpdate, session: SessionDep, actor: Acto
     return case
 
 
+@router.delete("/cases/{case_id}", status_code=204)
+def delete_case(case_id: int, body: CaseDelete, session: SessionDep, actor: ActorDep) -> None:
+    """Elimina o caso e tudo o que lhe pertence: vídeos originais e cópias de reprodução, imagens de referência,
+    análises (deteções, tracks, recortes, frames) e uploads por concluir.
+
+    A auditoria é append-only: os eventos do caso mantêm-se (base de dados e audit.jsonl) e é acrescentado um
+    "case.deleted" com o resumo do que foi apagado e o motivo.
+    """
+    case = get_case_or_404(session, case_id)
+    if body.confirm_case_id != case_id:
+        raise HTTPException(422, "Confirmação inválida: indique o número do caso a eliminar.")
+    jobs = list(session.exec(select(Job).where(Job.case_id == case_id)))
+    if any(j.status in (JobStatus.queued, JobStatus.running) for j in jobs):
+        raise HTTPException(409, "Há análises a decorrer neste caso. Cancele-as primeiro.")
+    videos = list(session.exec(select(Video).where(Video.case_id == case_id)))
+    refs = list(session.exec(select(ReferenceImage).where(ReferenceImage.case_id == case_id)))
+    uploads = list(session.exec(select(Upload).where(Upload.case_id == case_id)))
+    cancel_copies([v.id for v in videos])
+
+    job_ids = [j.id for j in jobs] or [-1]
+    detections = list(session.exec(select(Detection).where(Detection.job_id.in_(job_ids))))
+    tracks = list(session.exec(select(Track).where(Track.job_id.in_(job_ids))))
+    files = [Path(p) for v in videos for p in (v.stored_path, v.playback_path) if p]
+    files += [Path(p) for r in refs for p in (r.stored_path, r.face_crop_path) if p]
+    files += [Path(u.temp_path) for u in uploads]
+    summary = {
+        "case_id": case_id, "name": case.name, "description": case.description, "reason": body.reason.strip(),
+        "videos": [{"id": v.id, "filename": v.filename, "size_bytes": v.size_bytes,
+                    "playback_copy": bool(v.playback_path)} for v in videos],
+        "references": [{"id": r.id, "filename": r.filename} for r in refs],
+        "jobs": [j.id for j in jobs], "detections": len(detections), "tracks": len(tracks),
+        "pending_uploads": len(uploads),
+    }
+    for rows in (detections, tracks, jobs, uploads, refs, videos):
+        for row in rows:
+            session.delete(row)
+        session.flush()
+    session.delete(case)
+    session.commit()
+
+    # Ficheiros: tudo o que está na pasta do caso + qualquer ficheiro do caso guardado fora dela.
+    removed_bytes = 0
+    for f in files:
+        try:
+            if f.is_file():
+                removed_bytes += f.stat().st_size
+                f.unlink()
+        except OSError:
+            pass
+    folder = settings.case_dir(case_id)
+    if folder.exists():
+        removed_bytes += sum(f.stat().st_size for f in folder.rglob("*") if f.is_file())
+        shutil.rmtree(folder, ignore_errors=True)
+    summary["files_removed_bytes"] = removed_bytes
+    summary["folder_removed"] = not folder.exists()
+    log_event(session, "case.deleted", case_id=case_id, actor=actor, details=summary)
+
+
 @router.get("/cases/{case_id}/audit", response_model=list[AuditEvent])
 def case_audit(case_id: int, session: SessionDep) -> list[AuditEvent]:
     get_case_or_404(session, case_id)
@@ -221,6 +286,18 @@ def create_playback_copy(video_id: int, session: SessionDep, actor: ActorDep, fo
     request_playback_copy(session, video, force=True, actor=actor, fmt=format)
     session.refresh(video)
     return video
+
+
+@router.post("/cases/{case_id}/playback", response_model=list[Video])
+def create_case_playback_copies(case_id: int, session: SessionDep, actor: ActorDep, format: str = "mp4") -> list[Video]:
+    """Cria a cópia de reprodução de todos os vídeos do caso (ex.: o browser não reproduziu um deles)."""
+    get_case_or_404(session, case_id)
+    if format not in FORMATS:
+        raise HTTPException(422, f"Formato desconhecido: {format} (use mp4 ou webm).")
+    videos = request_case_copies(session, case_id, fmt=format, actor=actor)
+    for v in videos:
+        session.refresh(v)
+    return videos
 
 
 @router.get("/videos/{video_id}/probe")

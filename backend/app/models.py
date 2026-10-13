@@ -98,6 +98,9 @@ class Job(SQLModel, table=True):
     tracks: int = 0
     persons: int = 0  # modo descoberta: pessoas distintas (grupos de tracks)
     eta_s: float | None = None  # tempo restante estimado (s) enquanto a análise decorre
+    # Análise complementar por vestuário: amostras usadas, calibração e resumo (ver services/body_analysis.py)
+    clothing_samples: int = 0
+    clothing_summary: dict[str, Any] | None = Field(default_factory=dict, sa_column=Column(JSON))
     message: str = ""
     created_by: str = ""
     created_at: datetime = Field(default_factory=utcnow)
@@ -128,6 +131,8 @@ class Detection(SQLModel, table=True):
     crop_path: str
     frame_path: str
     track_id: int | None = Field(default=None, index=True)
+    kind: str = "face"  # "face" | "body" (vestuário: caixa do corpo inteiro, distância ReID às amostras)
+    colors: dict[str, Any] | None = Field(default_factory=dict, sa_column=Column(JSON))  # corpo: cores nomeadas
     quality: float = 0.0
     sharpness: float = 0.0
     size_score: float = 0.0
@@ -146,6 +151,14 @@ class Track(SQLModel, table=True):
     video_id: int = Field(foreign_key="video.id", index=True)
     reference_id: int | None = Field(default=None, foreign_key="referenceimage.id")
     person_id: int | None = Field(default=None, index=True)  # modo descoberta: n.º da pessoa nesta análise
+    kind: str = "face"  # "face" | "body"
+    # Corpo: "face+vestuário" (amostra: corpo de uma face com correspondência) | "vestuário" (só pela roupa)
+    evidence: str = ""
+    reid_distance: float | None = None
+    color_distance: float | None = None
+    face_track_id: int | None = None
+    colors: dict[str, Any] | None = Field(default_factory=dict, sa_column=Column(JSON))
+    note: str = ""
     start_s: float
     end_s: float
     n_faces: int = 0  # faces associadas ao track (incluindo as não guardadas)

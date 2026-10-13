@@ -26,6 +26,7 @@ Inclui ainda:
 | Motor alternativo | **[DeepFace](https://github.com/serengil/deepface)** (MIT), com `FACEAI_ENGINE=deepface` | CompreFace, facenet-pytorch |
 | Vídeo | **OpenCV** (amostragem, pré-filtro de movimento) + **ffmpeg** (cópia de reprodução) | PyAV, decord |
 | Comparação / tracking | Distância de cosseno em NumPy; tracker IoU + embedding | FAISS; ByteTrack/DeepSORT |
+| Vestuário (complemento) | **YOLOX** (deteção de pessoas, Apache-2.0) + **OSNet-AIN x1.0** treinado no MSMT17 (ReID, torchreid, MIT) + histogramas de cor HSV | YOLOv8 (AGPL), FastReID, CLIP-ReID |
 | Backend | **FastAPI** + SQLModel/SQLite | Flask, Django |
 | Frontend | **React + Vite + Mantine** | Gradio/Streamlit, PySide6 |
 | Relatórios | **Jinja2 + WeasyPrint** | ReportLab |
@@ -116,7 +117,8 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
    - A decisão usa o `ffprobe` (codec e formato de cor), e não só a extensão.
    - As conversões correm numa fila, uma de cada vez. A coluna **Reprodução no browser** mostra o estado e o progresso: em fila, a converter, pronta ou falhou.
    - As conversões interrompidas por um reinício são retomadas no arranque. Os vídeos importados por versões anteriores são avaliados nessa altura.
-   - O botão ↻ cria ou recria a cópia manualmente.
+   - O botão ↻ cria ou recria a cópia de um vídeo. "Criar cópias de reprodução de todos os vídeos" faz o mesmo para o caso inteiro.
+   - Se o browser não reproduzir um vídeo, ficam logo em fila as cópias de **todos os vídeos do caso**, porque os vídeos do mesmo DVR têm o mesmo formato.
    - Se, mesmo assim, o browser não reproduzir o vídeo nos resultados, a cópia certa é pedida **automaticamente**:
      - H.264/MP4 por omissão;
      - **VP9/WebM** se o browser não tiver H.264, como alguns Firefox/Chromium em Linux.
@@ -129,8 +131,9 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
    - **vista por tracks**: um cartão por pessoa ou trajetória, com revisão do track inteiro;
    - **vista por deteções**, ordenável por tempo, semelhança ou **qualidade**;
    - **frame completo** (botão 🔍): com marcação ou original, e download de qualquer um deles. Ver [Download do frame](#download-do-frame).
-6. **Eliminar uma análise** (🗑 na lista de análises ou "Eliminar" nos resultados): pede o motivo e a confirmação, escrevendo o número da análise. Apaga as deteções, os tracks, as revisões e os ficheiros gerados. Os vídeos e as referências do caso mantêm-se. A auditoria é *append-only*: guarda o histórico da análise e regista a eliminação (quem, quando, motivo, parâmetros e totais). Não é possível eliminar uma análise a decorrer; é preciso cancelá-la primeiro.
-7. **Exportar:** relatório PDF ou HTML, com estatísticas, parâmetros, tracks e qualidade; CSV; JSON; ou ZIP.
+6. **Eliminar um caso** (🗑 na lista de casos ou ao lado do nome do caso): pede o motivo e a confirmação, escrevendo o número do caso. Recusa se houver análises a decorrer. Cancela as conversões em curso e apaga do servidor os **vídeos originais e as cópias de reprodução**, as referências, as análises (deteções, recortes, frames) e os uploads por concluir. A auditoria mantém o histórico e regista um `case.deleted` com o motivo e a lista dos ficheiros apagados. Exporta antes os relatórios de que precises.
+7. **Eliminar uma análise** (🗑 na lista de análises ou "Eliminar" nos resultados): pede o motivo e a confirmação, escrevendo o número da análise. Apaga as deteções, os tracks, as revisões e os ficheiros gerados. Os vídeos e as referências do caso mantêm-se. A auditoria é *append-only*: guarda o histórico da análise e regista a eliminação (quem, quando, motivo, parâmetros e totais). Não é possível eliminar uma análise a decorrer; é preciso cancelá-la primeiro.
+8. **Exportar:** relatório PDF ou HTML, com estatísticas, parâmetros, tracks e qualidade; CSV; JSON; ou ZIP.
 
 ### Modo descoberta (sem amostra)
 
@@ -149,6 +152,38 @@ Quando não há nenhuma fotografia da pessoa (por exemplo, para saber *quem* pas
 Os embeddings dos tracks ficam em `jobs/job_NNNNN/track_embeddings.npz`. O relatório, o CSV (`person_id`) e o JSON (`persons`, com as aparições e a hora real) incluem as pessoas.
 
 > O agrupamento é uma ferramenta de **triagem**. A mesma pessoa pode surgir em mais de um grupo (ângulos, iluminação, oclusões) e pessoas parecidas podem ficar juntas. Um limiar mais baixo separa mais.
+
+### Complemento por vestuário (re-identificação pelo corpo)
+
+Quando a face só é boa numa ou noutra câmara (de costas, de lado, longe, com boné), a **roupa** permite seguir a pessoa nas restantes câmaras do estabelecimento, na mesma visita. Ativa-se com o interruptor **"Complementar com vestuário"** no modo "Procurar uma pessoa".
+
+1. Em cada frame analisado (incluindo os que não têm faces), o **YOLOX** deteta as pessoas de corpo inteiro e o **OSNet-AIN** calcula um embedding de aparência. Os corpos são seguidos entre frames (tracks de corpo).
+2. Cada face é associada ao corpo a que pertence (centro da face no terço superior da caixa do corpo).
+3. **Amostras** — o corpo nos frames em que a **face teve correspondência**. Não é preciso marcar nada à mão.
+4. No fim, os outros tracks de corpo dos vídeos da análise são comparados com as amostras:
+   - **distância ReID** (mediana das 5 melhores distâncias de cosseno) ≤ limiar, **e**
+   - **distância de cor** do tronco e das pernas ≤ limiar de cor. A cor é um veto explicável: o relatório diz, por exemplo, "tronco laranja, pernas azul-escuro". O tom de cada câmara é normalizado pelo frame inteiro (gray-world).
+   - Um corpo cuja face foi vista e é claramente **de outra pessoa** nunca conta: a face prevalece.
+   - Só se comparam corpos dentro da **janela temporal** (por omissão ±12 h em torno das amostras, pela hora real do DVR). Se algum vídeo não tiver a hora acertada, a janela não é verificada e isso fica escrito na aparição.
+   - Duas pessoas com a mesma roupa ao mesmo tempo no mesmo vídeo (fardas) são marcadas como **ambíguas**.
+5. **Calibração no próprio caso:** os corpos cuja face é de outra pessoa são negativos conhecidos. O limiar ReID baixa até ficar abaixo das distâncias deles (≤ 5 % de falsos positivos nesses negativos). O relatório mostra o limiar usado e as distâncias.
+6. **Resultados:**
+   - os segmentos e a linha temporal passam a indicar a evidência: face (vermelho), face + vestuário (laranja) ou só vestuário (roxo);
+   - a vista **Vestuário** mostra as amostras e as aparições só pela roupa, com o recorte do corpo, as cores, as distâncias e a revisão;
+   - o relatório tem uma secção própria, com aviso;
+   - o CSV e o JSON têm `kind`, `evidence` e `colors`.
+
+**Limiar por omissão (0,27).** Foi medido com 30 pessoas sob degradações típicas de CCTV (baixa resolução, desfoque, JPEG, outro tom, espelho): deu cerca de 0,06 % de falsos positivos entre pessoas diferentes. Deve ser validado com imagens reais do estabelecimento.
+
+> ⚠️ **Evidência complementar e indicativa.** A roupa não identifica uma pessoa:
+> - fardas ou uniformes de funcionários;
+> - roupa escura ou muito comum;
+> - mudanças de casaco ou mochila;
+> - iluminações muito diferentes entre câmaras.
+>
+> Tudo isto produz erros. As aparições "só vestuário" ficam sempre **por rever** e servem para reconstituir o percurso, não para identificar a pessoa.
+
+Desempenho em CPU (4 vCPU): o YOLOX-s demora cerca de 80 ms por frame e o YOLOX-nano cerca de 10 ms. O OSNet demora 10 a 80 ms por pessoa. Os modelos (YOLOX ~36 MB, OSNet ~9 MB) são descarregados na primeira análise com vestuário e verificados por SHA-256. O OSNet é exportado para ONNX pelo workflow `.github/workflows/reid-model.yml` (`tools/export_reid_onnx.py`) e publicado no release `models-reid-v1` do repositório.
 
 ### Download do frame
 
@@ -216,6 +251,7 @@ backend/
       quality.py            score de qualidade da face
       tracking.py           tracker IoU + embedding
       clustering.py, persons.py   modo descoberta: agrupamento de tracks em pessoas
+      body_engine.py, body_analysis.py, clothing.py   complemento por vestuário (YOLOX + OSNet + cores)
       frames.py             extração verificada do frame original para download
       jobs.py               pipeline de análise em background (movimento → cascata → deteção → qualidade → tracking)
       matcher.py, segments.py, references.py, video_processor.py, reports.py, transcode.py, audit.py

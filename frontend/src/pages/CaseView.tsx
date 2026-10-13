@@ -1,12 +1,13 @@
 import {
   ActionIcon, Anchor, Badge, Breadcrumbs, Button, Group, Modal, Stack, Tabs, Text, TextInput, Textarea, Title, Tooltip,
 } from "@mantine/core";
-import { IconActivity, IconHistory, IconMovie, IconPencil, IconPhoto } from "@tabler/icons-react";
+import { IconActivity, IconHistory, IconMovie, IconPencil, IconPhoto, IconTrash } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { api, formatDate } from "../api";
 import AuditPanel from "../components/AuditPanel";
+import DeleteCaseModal from "../components/DeleteCaseModal";
 import JobsPanel from "../components/JobsPanel";
 import ReferencesPanel from "../components/ReferencesPanel";
 import VideosPanel from "../components/VideosPanel";
@@ -22,6 +23,8 @@ export default function CaseView() {
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [tab, setTab] = useState<string | null>("references");
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const navigate = useNavigate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [saving, setSaving] = useState(false);
@@ -83,10 +86,16 @@ export default function CaseView() {
           <Tooltip label="Editar nome e descrição do caso">
             <ActionIcon variant="subtle" onClick={startEdit} aria-label="Editar caso"><IconPencil size={18} /></ActionIcon>
           </Tooltip>
+          <Tooltip label="Eliminar o caso (vídeos, cópias, referências e análises)">
+            <ActionIcon variant="subtle" color="red" onClick={() => setDeleting(true)} aria-label="Eliminar caso">
+              <IconTrash size={18} />
+            </ActionIcon>
+          </Tooltip>
         </Group>
         <Text c="dimmed" size="sm">{kase.description || "Sem descrição"} · criado em {formatDate(kase.created_at)}
           {kase.analyst ? ` por ${kase.analyst}` : ""}</Text>
       </div>
+      <DeleteCaseModal kase={deleting ? kase : null} onClose={() => setDeleting(false)} onDeleted={() => navigate("/")} />
       <Modal opened={editing} onClose={() => setEditing(false)} title={`Editar caso #${kase.id}`}>
         <Stack>
           <TextInput label="Nome / referência do processo" required value={name} data-autofocus

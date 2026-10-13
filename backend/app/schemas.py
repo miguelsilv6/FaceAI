@@ -20,6 +20,11 @@ class CaseUpdate(BaseModel):
     description: str | None = None
 
 
+class CaseDelete(BaseModel):
+    confirm_case_id: int = Field(description="Número do caso, repetido como confirmação do pedido")
+    reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")
+
+
 class JobDelete(BaseModel):
     confirm_job_id: int = Field(description="Número da análise, repetido como confirmação do pedido")
     reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")
@@ -49,6 +54,13 @@ class JobParams(BaseModel):
     # Cascata: detetor rápido primeiro; o detetor principal só corre se houver faces
     cascade: bool = True
     fast_detector: str | None = None
+    # Complemento por vestuário (re-identificação pelo corpo): amostras = corpos das correspondências faciais
+    clothing: bool = False
+    clothing_window_h: float = Field(12.0, ge=0, description="Janela temporal em torno das amostras (h); 0 = sem")
+    reid_threshold: float | None = Field(None, gt=0, lt=1, description="Distância ReID máxima (vazio = omissão)")
+    color_threshold: float = Field(0.6, gt=0, le=1, description="Distância de cor máxima (tronco/pernas)")
+    person_detector: str | None = None
+    min_body_height: int = Field(80, ge=16, description="Altura mínima do corpo (px)")
     # Tracking
     tracking: bool = True
     track_gap_s: float = Field(2.0, ge=0, description="Tempo máximo sem ver a face antes de fechar o track")

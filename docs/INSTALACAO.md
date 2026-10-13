@@ -106,6 +106,23 @@ print('Modelos prontos. Dispositivo:', _environment()['device'])
 
 Os pesos ficam em `~/.faceai/models/`. Para mudar o local, define `FACEAI_MODELS_DIR`.
 
+O **complemento por vestuário** usa mais dois modelos, descarregados na primeira análise que o ativa (~45 MB):
+- YOLOX dos releases do projeto YOLOX → `models/yolox/`;
+- OSNet-AIN do release `models-reid-v1` deste repositório → `models/reid/`.
+
+Para os descarregar já:
+
+```bash
+python -c "
+import numpy as np
+from app.services.body_engine import OnnxBodyEngine
+e = OnnxBodyEngine()
+e.detect_persons(np.zeros((200, 200, 3), np.uint8), detector='yolox_s')
+e.embed([np.zeros((256, 128, 3), np.uint8)])
+print('Modelos do vestuário prontos.')
+"
+```
+
 Cada ficheiro é verificado por SHA-256 contra os hashes fixados em `backend/app/services/engine_onnx.py`. Se algum não coincidir, é descartado.
 
 ### 7. Arrancar

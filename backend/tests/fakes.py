@@ -48,7 +48,7 @@ class FakeEngine:
         faces = []
         for c in contours:
             x, y, w, h = cv2.boundingRect(c)
-            if w < 8 or h < 8:
+            if w < 8 or h < 8 or h > 1.5 * w:  # retângulos altos são corpos (FakeBodyEngine), não faces
                 continue
             color = image_bgr[y + h // 2, x + w // 2].astype(np.float32)
             emb = np.concatenate([color, [300.0]])  # componente constante: cores diferentes ficam a distância ~0.4
@@ -82,6 +82,63 @@ def make_video(path: Path, timeline: list[tuple[float, float, tuple]], duration_
             if start <= t < end:
                 x0 = 30 + k * 120
                 cv2.rectangle(frame, (x0, 80), (x0 + 70, 150), color, -1)
+        writer.write(frame)
+    writer.release()
+    return path
+
+
+class FakeBodyEngine:
+    """Corpos = retângulos altos (tronco + pernas de cores diferentes). A caixa da pessoa estende-se para cima, para
+    incluir a cabeça (a "face" do FakeEngine, desenhada por cima do corpo). O embedding é a cor do tronco e das
+    pernas, por isso a mesma roupa dá a mesma "pessoa"."""
+
+    name = "fake-body"
+
+    def detect_persons(self, image_bgr, *, detector, min_confidence=0.5):
+        from app.services.body_engine import PersonObservation
+
+        mask = (image_bgr.max(axis=2) > 40).astype(np.uint8)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        persons = []
+        for c in contours:
+            x, y, w, h = cv2.boundingRect(c)
+            if h <= 1.5 * w or h < 20:
+                continue
+            top = max(0, y - int(0.4 * h))
+            persons.append(PersonObservation(x, top, w, y + h - top, 0.9))
+        return persons
+
+    def embed(self, crops):
+        out = []
+        for c in crops:
+            h, w = c.shape[:2]
+            torso = c[int(h * 0.5), w // 2].astype(np.float32)
+            legs = c[int(h * 0.9), w // 2].astype(np.float32)
+            v = np.concatenate([torso, legs, [200.0]])
+            out.append(v / np.linalg.norm(v))
+        return np.stack(out) if out else np.zeros((0, 7), np.float32)
+
+    def detectors(self):
+        return ["yolox_s", "yolox_nano"]
+
+    def environment(self):
+        return {"engine": "fake-body"}
+
+
+def make_people_video(path: Path, people: list[dict], duration_s: float = 6.0, fps: int = 10) -> Path:
+    """Vídeo com "pessoas": {x, start, end, torso, legs, head (cor da face ou None = de costas)}."""
+    w, h = 320, 240
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
+    for i in range(int(duration_s * fps)):
+        t = i / fps
+        frame = np.zeros((h, w, 3), np.uint8)
+        for p in people:
+            if p["start"] <= t < p["end"]:
+                x = p["x"]
+                if p.get("head"):
+                    cv2.rectangle(frame, (x + 8, 40), (x + 32, 64), p["head"], -1)  # face 25×25
+                cv2.rectangle(frame, (x, 70), (x + 40, 120), p["torso"], -1)
+                cv2.rectangle(frame, (x, 121), (x + 40, 170), p["legs"], -1)
         writer.write(frame)
     writer.release()
     return path

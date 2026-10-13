@@ -101,6 +101,9 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
   <tr><th>Amostragem</th><td>{{ job.params.sample_fps }} frames/s · ampliação ×{{ job.params.upscale }}</td></tr>
   <tr><th>Filtros</th><td>face ≥ {{ job.params.min_face_size }} px · confiança do detetor ≥ {{ job.params.min_confidence }} · qualidade ≥ {{ job.params.get("min_quality", 0) }}</td></tr>
   <tr><th>Pré-filtro de movimento</th><td>{% if job.params.get("motion_filter") %}ativo · limiar {{ job.params.motion_threshold }} (fração de píxeis alterados) · frame-chave a cada {{ job.params.keyframe_interval_s }} s{% else %}desativado{% endif %}</td></tr>
+  {% if job.params.get("clothing") %}
+  <tr><th>Complemento por vestuário</th><td>ativo · deteção de pessoas {{ job.params.get("person_detector") or "yolox_s" }} (YOLOX) · embedding de aparência OSNet-AIN x1.0 (MSMT17) · limiar ReID {{ (job.clothing_summary or {}).get("calibration", {}).get("threshold_used", job.params.get("reid_threshold")) }} · limiar de cor {{ job.params.get("color_threshold") }} · janela temporal ±{{ job.params.get("clothing_window_h") }} h · corpo ≥ {{ job.params.get("min_body_height") }} px</td></tr>
+  {% endif %}
   <tr><th>Cascata de deteção</th><td>{% if job.params.get("cascade") and job.params.get("fast_detector") %}1.ª passagem com {{ job.params.fast_detector }}, deteção completa com {{ job.params.detector }} só quando há faces{% else %}desativada{% endif %}</td></tr>
   <tr><th>Tracking</th><td>{% if job.params.get("tracking") %}ativo · intervalo máx. {{ job.params.track_gap_s }} s · {% if discover %}obrigatório no modo descoberta{% else %}match do track pela média das 3 melhores distâncias{% endif %}{% else %}desativado{% endif %}</td></tr>
   <tr><th>Agrupamento em segmentos</th><td>intervalo ≤ {{ job.params.segment_gap_s }} s</td></tr>
@@ -173,6 +176,35 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
         {% if r.reviewed_by %}<br><span class="muted">{{ r.reviewed_by }}</span>{% endif %}{% if r.review_note %}<br>{{ r.review_note }}{% endif %}</td></tr>
   {% endfor %}
 </table>
+
+{% if job.params.get("clothing") %}
+{{ h("Correspondências por vestuário — evidência complementar") }}
+<div class="warn"><strong>Evidência complementar e indicativa.</strong> Estas aparições foram encontradas pela
+semelhança do vestuário (embedding de aparência do corpo e cores do tronco/pernas) com o corpo da pessoa nos frames
+em que a face teve correspondência. Não identificam a pessoa: roupa semelhante (fardas, roupa escura ou comum) pode
+pertencer a outra pessoa, e a roupa pode mudar (casaco, mochila). Cada aparição tem de ser revista por um perito.</div>
+{% set cs = job.clothing_summary or {} %}
+<p>{{ job.clothing_samples }} amostra(s) de vestuário{% if cs.get("gallery_colors") %} — tronco <strong>{{ cs.gallery_colors.tronco }}</strong>, pernas <strong>{{ cs.gallery_colors.pernas }}</strong>{% endif %} ·
+{{ cs.get("body_tracks", 0) }} tracks de corpo analisados · {{ cs.get("known_negatives", 0) }} corpos com face de outra pessoa (negativos conhecidos) ·
+{{ cs.get("excluded_by_window", 0) }} excluídos pela janela temporal.
+{% if cs.get("calibration") %}Calibração no caso: limiar usado {{ cs.calibration.threshold_used }}{% if cs.calibration.get("negatives_min") is not none %} · distância mínima dos negativos {{ cs.calibration.negatives_min }}{% endif %}{% if cs.calibration.get("positives_median") is not none %} · mediana entre amostras {{ cs.calibration.positives_median }}{% endif %}.{% endif %}
+{% if cs.get("note") %}<br><strong>{{ cs.note }}</strong>{% endif %}</p>
+{% if clothing %}
+<table class="det">
+  <colgroup><col style="width:62px"><col style="width:18%"><col><col style="width:16%"><col style="width:16%"><col style="width:9%"><col style="width:9%"><col style="width:12%"></colgroup>
+  <tr><th>Corpo</th><th>Evidência</th><th>Vídeo</th><th>Início</th><th>Fim</th><th>Dist. ReID</th><th>Dist. cor</th><th>Revisão</th></tr>
+  {% for x in clothing %}
+  <tr><td>{% if x.crop_img %}<img src="{{ x.crop_img }}" alt="" style="height:80px;width:auto">{% endif %}</td>
+      <td>{{ "Amostra (face + vestuário)" if x.t.evidence == "face+vestuário" else "Só vestuário" }}<br><span class="muted">tronco {{ (x.t.colors or {}).get("tronco", "?") }}, pernas {{ (x.t.colors or {}).get("pernas", "?") }}</span>{% if x.t.note %}<br><span class="muted">{{ x.t.note }}</span>{% endif %}</td>
+      <td>{{ x.video.filename if x.video else x.t.video_id }}</td>
+      <td>{{ x.t.start_s | ts }}{% if x.real_start %}<br><strong>{{ x.real_start }}</strong>{% endif %}</td>
+      <td>{{ x.t.end_s | ts }}{% if x.real_end %}<br><strong>{{ x.real_end }}</strong>{% endif %}</td>
+      <td>{{ "%.3f"|format(x.t.reid_distance or 0) }}</td><td>{{ "%.3f"|format(x.t.color_distance or 0) }}</td>
+      <td class="{{ {'confirmed':'ok','rejected':'bad'}.get(x.t.review_status.value, 'pend') }}">{{ {'confirmed':'Confirmado','rejected':'Rejeitado'}.get(x.t.review_status.value, 'Por rever') }}</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endif %}
 
 {{ h("Registo de auditoria do caso") }}
 <table>

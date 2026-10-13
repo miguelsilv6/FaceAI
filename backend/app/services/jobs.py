@@ -20,6 +20,8 @@ from ..config import settings
 from ..db import get_engine as get_db_engine
 from ..models import Detection, Job, JobStatus, ReferenceImage, Track, Video, utcnow
 from .audit import log_event
+from .body_analysis import BodyCollector, ClothingParams, FaceLink
+from .body_engine import get_body_engine
 from .clustering import centroids_of, cluster_embeddings
 from .face_engine import FaceEngine, get_engine
 from .imageio import write_jpeg
@@ -129,6 +131,11 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
             videos = [v for v in (s.get(Video, vid) for vid in job.video_ids) if v is not None]
             if not videos:
                 raise ValueError("Nenhum vídeo selecionado.")
+            body = None
+            if p.get("clothing") and not discover:
+                body_engine = get_body_engine()
+                body = BodyCollector(body_engine, ClothingParams.from_params(p), job_dir(job))
+                job.environment = {**job.environment, "body": body_engine.environment()}
 
             ctx = _AnalysisContext.from_params(p, engine, reference_set, used_refs, job_dir(job))
 
@@ -142,7 +149,9 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
 
             for video in videos:
                 job.current_video_id = video.id
-                analyzer = _VideoAnalyzer(ctx, s, job, video)
+                if body is not None:
+                    body.start_video(video, ctx.track_gap_s)
+                analyzer = _VideoAnalyzer(ctx, s, job, video, body)
                 for frame in sample_frames(video.stored_path, ctx.sample_fps, fps=video.fps or None):
                     if cancel.is_set():
                         raise JobCancelled()
@@ -168,6 +177,14 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                 summary = f"{job.matches} correspondência(s) em {frames}"
                 if ctx.tracking:
                     summary += f"; {len(matched_tracks)} track(s) com correspondência"
+                if body is not None:
+                    s.flush()
+                    clothing = body.finalize(s, job)
+                    job.clothing_samples, job.clothing_summary = clothing.get("samples", 0), clothing
+                    summary += (f"; vestuário: {clothing.get('samples', 0)} amostra(s), "
+                                f"{clothing.get('clothing_matches', 0)} aparição(ões) só pelo vestuário")
+                    if clothing.get("note"):
+                        summary += f" ({clothing['note']})"
             job.progress = 1.0
             _finish(s, job, JobStatus.completed, (job.message + " " if job.message else "") + summary + ".")
         except JobCancelled:
@@ -313,27 +330,40 @@ class _TrackState:
 class _VideoAnalyzer:
     """Processa os frames amostrados de um vídeo: movimento → cascata → deteção → qualidade → tracking → match."""
 
-    def __init__(self, ctx: _AnalysisContext, s: Session, job: Job, video: Video):
+    def __init__(self, ctx: _AnalysisContext, s: Session, job: Job, video: Video,
+                 body: BodyCollector | None = None):
         self.ctx, self.s, self.job, self.video = ctx, s, job, video
+        self.body = body
         self.gate = MotionGate(ctx.motion_threshold, ctx.keyframe_interval_s) if ctx.motion_filter else None
         self.tracker = FaceTracker(max_gap_s=ctx.track_gap_s) if ctx.tracking else None
         self.tracks: dict[int, _TrackState] = {}
         self.visible_tids: list[int] = []  # tracks vistos no último frame analisado
 
     def process(self, frame: SampledFrame) -> None:
-        ctx, job = self.ctx, self.job
-        job.frames_sampled += 1
+        self.job.frames_sampled += 1
         if self.gate is not None and not self.gate.check(frame.image, frame.timestamp_s).analyze:
-            job.frames_skipped_motion += 1
-            if self.tracker is not None:
-                # A imagem é igual à do último frame analisado: as faces que lá estavam continuam presentes.
-                self.tracker.keep_alive(frame.timestamp_s, self.visible_tids)
-                for tid in self.visible_tids:
-                    st = self.tracks[tid]
-                    st.end_s = frame.timestamp_s
-                    if st.row is not None:
-                        self._refresh_track_row(st)
+            self._skip_static(frame)
             return
+        faces: list[FaceLink] = []
+        self._process_faces(frame, faces)
+        if self.body is not None:  # também nos frames sem faces (pessoa de costas): é aí que o vestuário ajuda
+            self.body.process(frame, faces)
+
+    def _skip_static(self, frame: SampledFrame) -> None:
+        self.job.frames_skipped_motion += 1
+        if self.body is not None:
+            self.body.keep_alive(frame.timestamp_s)
+        if self.tracker is not None:
+            # A imagem é igual à do último frame analisado: as faces que lá estavam continuam presentes.
+            self.tracker.keep_alive(frame.timestamp_s, self.visible_tids)
+            for tid in self.visible_tids:
+                st = self.tracks[tid]
+                st.end_s = frame.timestamp_s
+                if st.row is not None:
+                    self._refresh_track_row(st)
+
+    def _process_faces(self, frame: SampledFrame, links: list[FaceLink]) -> None:
+        ctx, job = self.ctx, self.job
         self.visible_tids = []
         if ctx.fast_detector and ctx.engine.count_faces(frame.image, detector=ctx.fast_detector,
                                                         upscale=ctx.upscale) == 0:
@@ -368,6 +398,7 @@ class _VideoAnalyzer:
             result = ctx.reference_set.best_match(face.embedding)
             ref = ctx.refs[result.reference_index]
             state = self._track_state(tid, frame.timestamp_s, result.distance, ref.id, q.score)
+            links.append(FaceLink((face.x, face.y, face.w, face.h), result.distance, state))
             continuation = state is not None and state.row is not None
             if result.distance > ctx.candidate_threshold and not continuation:
                 continue

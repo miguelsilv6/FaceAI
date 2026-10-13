@@ -41,6 +41,8 @@ _queue: queue.Queue[int] = queue.Queue()
 _queued: set[int] = set()
 _lock = threading.Lock()
 _worker: threading.Thread | None = None
+_running: dict[int, subprocess.Popen] = {}  # conversões em curso (para poderem ser canceladas)
+_cancelled: set[int] = set()
 
 
 def ffmpeg_available() -> bool:
@@ -117,6 +119,33 @@ def request_playback_copy(s: Session, video: Video, *, force: bool = False, acto
     return video.playback_status
 
 
+def request_case_copies(s: Session, case_id: int, *, fmt: str = "mp4", actor: str = "sistema") -> list[Video]:
+    """Põe na fila a cópia de reprodução de todos os vídeos do caso (ex.: o browser não reproduziu um deles, e os
+    restantes vídeos do mesmo DVR terão o mesmo formato). Salta os que já têm a cópia nesse formato ou estão na fila."""
+    videos = list(s.exec(select(Video).where(Video.case_id == case_id).order_by(Video.id)))
+    for video in videos:
+        if video.playback_status in (PENDING, RUNNING, UNAVAILABLE):
+            continue
+        if video.playback_status == READY and (video.playback_format or "mp4") == fmt:
+            continue
+        if not Path(video.stored_path).exists():
+            continue
+        request_playback_copy(s, video, force=True, actor=actor, fmt=fmt)
+    return videos
+
+
+def cancel_copies(video_ids: list[int]) -> None:
+    """Cancela as conversões (na fila ou em curso) destes vídeos, ex.: antes de eliminar o caso."""
+    with _lock:
+        for vid in video_ids:
+            if vid not in _queued and vid not in _running:
+                continue  # nada a cancelar (e o id pode vir a ser reutilizado por um vídeo novo)
+            _cancelled.add(vid)
+            proc = _running.get(vid)
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+
+
 def resume_pending_copies() -> None:
     """No arranque: retoma conversões interrompidas e avalia vídeos importados por versões anteriores."""
     if not ffmpeg_available():
@@ -163,12 +192,17 @@ def _work() -> None:
                     return
             continue
         try:
-            _transcode(video_id)
+            with _lock:
+                skip = video_id in _cancelled
+            if not skip:
+                _transcode(video_id)
         except Exception:  # noqa: BLE001
             log.exception("Falha inesperada na conversão do vídeo %s", video_id)
         finally:
             with _lock:
                 _queued.discard(video_id)
+                _cancelled.discard(video_id)
+                _running.pop(video_id, None)
 
 
 def _lower_priority() -> None:  # pragma: no cover - corre no processo filho
@@ -230,6 +264,10 @@ def _transcode(video_id: int) -> None:
         # nem deixar a interface sem resposta.
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=errlog, text=True,
                                 preexec_fn=_lower_priority if os.name == "posix" else None)
+        with _lock:
+            _running[video_id] = proc
+            if video_id in _cancelled:  # cancelada entretanto (ex.: o caso foi eliminado)
+                proc.kill()
         for line in proc.stdout:  # type: ignore[union-attr]
             key, _, value = line.strip().partition("=")
             seconds = _progress_seconds(key, value)
@@ -249,6 +287,9 @@ def _transcode(video_id: int) -> None:
     except Exception as exc:  # noqa: BLE001
         errlog.close()
         tmp.unlink(missing_ok=True)
+        with _lock:
+            if video_id in _cancelled:
+                return
         log.warning("Falha ao criar cópia de reprodução do vídeo %s: %s", video_id, exc)
         video = _set(video_id, playback_status=FAILED, playback_error=str(exc)[:500])
         if video is not None:

@@ -23,6 +23,8 @@ def test_add_missing_columns(tmp_path, monkeypatch):
     with engine.connect() as conn:
         row = conn.exec_driver_sql("SELECT id, distance, quality, review_status FROM detection").one()
     assert tuple(row) == (1, 0.3, 0.0, "pending")
+    with engine.connect() as conn:  # colunas do vestuário: dados antigos ficam como faciais
+        assert conn.exec_driver_sql("SELECT kind FROM detection").scalar() == "face"
     assert "ix_detection_track_id" in {i["name"] for i in inspect(engine).get_indexes("detection")}
     monkeypatch.setattr(db, "_engine", None)
 
@@ -44,8 +46,8 @@ def test_reference_id_becomes_nullable(tmp_path, monkeypatch):
     con.execute("CREATE INDEX ix_detection_track_id ON detection (track_id)")
     con.execute("INSERT INTO detection (id, job_id, video_id, reference_id, frame_index, timestamp_s, x, y, w, h, "
                 "face_confidence, distance, similarity, is_match, crop_path, frame_path, quality, sharpness, "
-                "size_score, review_status, review_note, reviewed_by, track_id) "
-                "VALUES (7, 1, 1, 3, 0, 0, 0, 0, 1, 1, 1, 0.3, 0.7, 1, '', '', 0, 0, 0, 'pending', '', '', 2)")
+                "size_score, review_status, review_note, reviewed_by, track_id, kind) "
+                "VALUES (7, 1, 1, 3, 0, 0, 0, 0, 1, 1, 1, 0.3, 0.7, 1, '', '', 0, 0, 0, 'pending', '', '', 2, 'face')")
     con.commit()
     con.close()
     engine = create_engine(f"sqlite:///{path}")
@@ -58,8 +60,9 @@ def test_reference_id_becomes_nullable(tmp_path, monkeypatch):
             7, 3, 0.3, 2)
         conn.exec_driver_sql("INSERT INTO detection (job_id, video_id, reference_id, frame_index, timestamp_s, x, y, "
                              "w, h, face_confidence, distance, similarity, is_match, crop_path, frame_path, quality, "
-                             "sharpness, size_score, review_status, review_note, reviewed_by) "
-                             "VALUES (1, 1, NULL, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, '', '', 0, 0, 0, 'pending', '', '')")
+                             "sharpness, size_score, review_status, review_note, reviewed_by, kind) "
+                             "VALUES (1, 1, NULL, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0, '', '', 0, 0, 0, 'pending', '', '', "
+                             "'face')")
     names = {i["name"] for i in inspect(engine).get_indexes("detection")}
     assert {"ix_detection_track_id", "ix_detection_job_id"} <= names
     assert not inspect(engine).has_table("_old_detection")

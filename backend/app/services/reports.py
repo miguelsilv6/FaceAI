@@ -30,9 +30,10 @@ _TEMPLATES.filters["ts"] = format_timestamp
 
 CSV_FIELDS = [
     "detection_id", "video_id", "video_filename", "frame_index", "timestamp_s", "timestamp",
-    "real_time", "x", "y", "w", "h", "face_confidence", "reference_id", "reference_filename",
+    "real_time", "kind", "evidence", "x", "y", "w", "h", "face_confidence", "reference_id", "reference_filename",
     "distance", "similarity", "is_match", "track_id", "track_is_match", "person_id", "quality", "sharpness",
-    "size_score", "frontal", "review_status", "reviewed_by", "reviewed_at", "review_note", "crop_file", "frame_file",
+    "size_score", "frontal", "colors", "review_status", "reviewed_by", "reviewed_at", "review_note", "crop_file",
+    "frame_file",
 ]
 
 
@@ -68,7 +69,14 @@ def match_segments(detections: list[Detection], gap_s: float,
         end = max(times)
         if end >= last_saved.get(tid, end):
             end = max(end, t.end_s)
-        intervals.append(Interval(t.video_id, min(times), end, best.distance, best.id, tuple(d.id for d in dets)))
+        body = getattr(t, "kind", "face") == "body"
+        evidence = ("vestuário",) if body else ("face",)
+        if body:
+            # A distância ReID não é comparável à facial: o "melhor" frame do segmento continua a ser o facial.
+            intervals.append(Interval(t.video_id, min(times), end, 2.0, best.id, tuple(d.id for d in dets), evidence))
+            continue
+        intervals.append(Interval(t.video_id, min(times), end, best.distance, best.id, tuple(d.id for d in dets),
+                                  evidence))
     return [seg.to_dict() for seg in merge_intervals(intervals, max_gap_s=gap_s)]
 
 
@@ -125,6 +133,7 @@ def detection_row(d: Detection, data: dict[str, Any]) -> dict[str, Any]:
         "detection_id": d.id, "video_id": d.video_id, "video_filename": v.filename if v else "",
         "frame_index": d.frame_index, "timestamp_s": d.timestamp_s, "timestamp": format_timestamp(d.timestamp_s),
         "real_time": video_real_time(v, d.timestamp_s),
+        "kind": d.kind or "face", "evidence": (t.evidence if t is not None and t.kind == "body" else "face"),
         "x": d.x, "y": d.y, "w": d.w, "h": d.h, "face_confidence": d.face_confidence,
         "reference_id": d.reference_id, "reference_filename": r.filename if r else "",
         "distance": d.distance, "similarity": d.similarity, "is_match": d.is_match,
@@ -132,6 +141,7 @@ def detection_row(d: Detection, data: dict[str, Any]) -> dict[str, Any]:
         "track_is_match": bool(t and t.is_match), "person_id": t.person_id if t and t.person_id else "",
         "quality": d.quality, "sharpness": d.sharpness,
         "size_score": d.size_score, "frontal": "" if d.frontal is None else d.frontal,
+        "colors": "; ".join(f"{k}: {v}" for k, v in (d.colors or {}).items()),
         "review_status": d.review_status.value, "reviewed_by": d.reviewed_by,
         "reviewed_at": d.reviewed_at.isoformat() if d.reviewed_at else "", "review_note": d.review_note,
         "crop_file": f"crops/{Path(d.crop_path).name}", "frame_file": f"frames/{Path(d.frame_path).name}",
@@ -203,6 +213,22 @@ def _img_data_uri(path: str | None) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(Path(path).read_bytes()).decode()
 
 
+def clothing_for(data: dict[str, Any], by_id: dict[int, Detection]) -> list[dict[str, Any]]:
+    """Tracks de corpo (amostras e correspondências só pelo vestuário), por vídeo e hora."""
+    out = []
+    tracks = data.get("tracks", {})
+    for t in tracks.values():
+        if t.kind != "body":
+            continue
+        best = by_id.get(t.best_detection_id)
+        tv = data["videos"].get(t.video_id)
+        out.append({"t": t, "video": tv, "real_start": video_real_time(tv, t.start_s),
+                    "real_end": video_real_time(tv, t.end_s),
+                    "crop_img": _img_data_uri(best.crop_path if best else None),
+                    "frame_img": _img_data_uri(best.frame_path if best else None) if t.evidence == "vestuário" else ""})
+    return sorted(out, key=lambda x: (x["t"].evidence != "face+vestuário", x["t"].video_id, x["t"].start_s))
+
+
 def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
     job: Job = data["job"]
     detections: list[Detection] = data["detections"]
@@ -214,8 +240,9 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
         seg["crop_img"] = _img_data_uri(best.crop_path if best else None)
         seg["video"] = data["videos"].get(seg["video_id"])
     discover = is_discover(job)
+    face_dets = [d for d in detections if (d.kind or "face") == "face"]
     # No modo descoberta todas as faces guardadas são resultado; no modo de procura, só as correspondências.
-    matches = detections if discover else [d for d in detections if effective_match(d, data)]
+    matches = face_dets if discover else [d for d in face_dets if effective_match(d, data)]
     rows = []
     for i, d in enumerate(matches):
         row = detection_row(d, data)
@@ -226,9 +253,10 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
         best = by_id.get(person["best_detection_id"])
         person["crop_img"] = _img_data_uri(best.crop_path if best else None)
         person["frame_img"] = _img_data_uri(best.frame_path if best else None)
+    clothing = clothing_for(data, by_id)
     tracks = []
     for t in data.get("tracks", {}).values():
-        if not t.is_match and not discover:
+        if t.kind == "body" or (not t.is_match and not discover):
             continue
         best = by_id.get(t.best_detection_id)
         tv = data["videos"].get(t.video_id)
@@ -250,7 +278,8 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
         segments=segments,
         rows=rows,
         tracks=tracks,
-        candidates=0 if discover else sum(1 for d in detections if not effective_match(d, data)),
+        candidates=0 if discover else sum(1 for d in face_dets if not effective_match(d, data)),
+        clothing=clothing,
         discover=discover,
         persons=persons,
         review_counts=review_counts,

@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Alert, Anchor, Breadcrumbs, Button, Card, Group, Image, Menu, Modal, Progress, SegmentedControl, Select,
+  ActionIcon, Alert, Anchor, Badge, Breadcrumbs, Button, Card, Group, Image, Menu, Modal, Progress, SegmentedControl, Select,
   SimpleGrid, Slider, Stack, Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
 import {
@@ -10,6 +10,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { api, browserCodecs, formatEta, formatTime, realTime } from "../api";
 import DeleteJobModal from "../components/DeleteJobModal";
+import BodyTrackCard from "../components/BodyTrackCard";
 import DetectionCard from "../components/DetectionCard";
 import PersonCard from "../components/PersonCard";
 import TrackCard from "../components/TrackCard";
@@ -33,8 +34,12 @@ export default function Results() {
   const [detections, setDetections] = useState<Detection[]>([]);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
+  // Vestuário (corpos): separados das faces, para não mudar as contagens nem as vistas faciais.
+  const [bodyTracks, setBodyTracks] = useState<Track[]>([]);
+  const [bodyDets, setBodyDets] = useState<Detection[]>([]);
+  const [evidenceFilter, setEvidenceFilter] = useState<"all" | "face" | "vestuário">("all");
   const [persons, setPersons] = useState<Person[]>([]);
-  const [view, setView] = useState<"persons" | "tracks" | "detections">("tracks");
+  const [view, setView] = useState<"persons" | "tracks" | "detections" | "clothing">("tracks");
   const [trackFilter, setTrackFilter] = useState<number | null>(null);
   const [personFilter, setPersonFilter] = useState<number | null>(null);
   const [videoId, setVideoId] = useState<number | null>(null);
@@ -54,9 +59,11 @@ export default function Results() {
   const loadResults = useCallback(() => {
     Promise.all([api.detections(jobId), api.segments(jobId), api.tracks(jobId), api.persons(jobId)])
       .then(([d, s, t, p]) => {
-        setDetections(d);
+        setDetections(d.filter((x) => x.kind !== "body"));
+        setBodyDets(d.filter((x) => x.kind === "body"));
         setSegments(s);
-        setTracks(t);
+        setTracks(t.filter((x) => x.kind !== "body"));
+        setBodyTracks(t.filter((x) => x.kind === "body"));
         setPersons(p);
       })
       .catch(notifyError);
@@ -111,11 +118,13 @@ export default function Results() {
       setCurrentTime(0);
     }
   };
+  // Cópia de reprodução de todos os vídeos do caso: se o browser não reproduz um, os outros do mesmo DVR também não.
   const createPlaybackCopy = async (format?: "mp4" | "webm") => {
-    if (!video) return;
+    if (!video || !job) return;
     try {
-      const updated = await api.createPlaybackCopy(video.id, format);
-      setVideos((vs) => vs.map((v) => (v.id === updated.id ? updated : v)));
+      const updated = await api.createCaseCopies(job.case_id, format);
+      const byId = new Map(updated.map((v) => [v.id, v]));
+      setVideos((vs) => vs.map((v) => byId.get(v.id) ?? v));
       setPlayError(null);
     } catch (e) {
       notifyError(e);
@@ -181,8 +190,17 @@ export default function Results() {
   const hasTracks = tracks.length > 0;
   const showPersons = discover && view === "persons" && trackFilter == null;
   const showTracks = hasTracks && view === "tracks" && trackFilter == null;
+  const clothing = !!job?.params.clothing;
   const videoSegments = segments.filter((s) => s.video_id === videoId
-    && (personFilter == null || s.person_id === personFilter));
+    && (personFilter == null || s.person_id === personFilter)
+    && (evidenceFilter === "all" || (s.evidence ?? "face").includes(evidenceFilter)));
+  const sortedBodyTracks = useMemo(() => [...bodyTracks].sort((a, b) =>
+    Number(a.evidence !== "vestuário") - Number(b.evidence !== "vestuário") || a.video_id - b.video_id
+    || a.start_s - b.start_s), [bodyTracks]);
+  const seekBody = (t: Track) => {
+    if (t.video_id !== videoId) setVideoId(t.video_id);
+    setTimeout(() => seek(t.start_s), 0);
+  };
   const videoById = useMemo(() => new Map(videos.map((v) => [v.id, v])), [videos]);
 
   const seek = (t: number) => {
@@ -260,7 +278,7 @@ export default function Results() {
   };
 
   const openFrame = (detId: number) => {
-    const d = detections.find((x) => x.id === detId);
+    const d = detections.find((x) => x.id === detId) ?? bodyDets.find((x) => x.id === detId);
     if (d) setFrameDet(d);
   };
 
@@ -303,7 +321,8 @@ export default function Results() {
             {discover
               ? `${persons.length} pessoas distintas · ${tracks.length} tracks · ${detections.length} faces guardadas (descoberta, sem amostra)`
               : <>{counts.matches} correspondências ({counts.confirmed} confirmadas, {counts.rejected} rejeitadas)
-                {job.params.tracking ? ` · ${counts.tracks} tracks com correspondência` : ""}</>}
+                {job.params.tracking ? ` · ${counts.tracks} tracks com correspondência` : ""}
+                {clothing && !running ? ` · vestuário: ${job.clothing_samples} amostra(s), ${bodyTracks.filter((t) => t.evidence === "vestuário").length} aparição(ões) só pela roupa` : ""}</>}
             {running && (
               <Text span size="sm" fw={600} c="blue"> · {Math.round(job.progress * 100)}% · {formatEta(job.eta_s)}</Text>
             )}
@@ -330,6 +349,9 @@ export default function Results() {
       </Group>
 
       {running && <Progress value={job.progress * 100} animated striped size="lg" />}
+      {clothing && !running && job.clothing_summary?.note && (
+        <Alert color="orange" icon={<IconAlertTriangle size={18} />}>{job.clothing_summary.note}</Alert>
+      )}
       {job.message && (
         <Alert color={job.status === "failed" ? "red" : "blue"}
           icon={job.status === "failed" ? <IconAlertTriangle size={18} /> : <IconInfoCircle size={18} />}>{job.message}</Alert>
@@ -381,10 +403,10 @@ export default function Results() {
                     {video.playback_status !== "unavailable" && (
                       <Group gap="xs" mt="xs">
                         <Button size="compact-xs" variant="light" onClick={() => createPlaybackCopy("mp4")}>
-                          Criar cópia H.264 (MP4)
+                          Criar cópias H.264 (MP4) de todos os vídeos
                         </Button>
                         <Button size="compact-xs" variant="light" onClick={() => createPlaybackCopy("webm")}>
-                          Criar cópia VP9 (WebM)
+                          Criar cópias VP9 (WebM) de todos os vídeos
                         </Button>
                       </Group>
                     )}
@@ -413,6 +435,11 @@ export default function Results() {
               {discover ? `Aparições${personFilter != null ? ` da pessoa #${personFilter}` : " (todas as pessoas)"}` : "Segmentos de aparição"}
               {" "}({videoSegments.length})
             </Text>
+            {clothing && (
+              <SegmentedControl size="xs" value={evidenceFilter}
+                onChange={(v) => setEvidenceFilter(v as "all" | "face" | "vestuário")}
+                data={[{ value: "all", label: "Todas" }, { value: "face", label: "Face" }, { value: "vestuário", label: "Vestuário" }]} />
+            )}
             {personFilter != null && (
               <Button size="compact-xs" variant="light" onClick={() => setPersonFilter(null)}>Todas as pessoas</Button>
             )}
@@ -425,7 +452,8 @@ export default function Results() {
             <Table.ScrollContainer minWidth={420} mah={460}>
               <Table highlightOnHover>
                 <Table.Thead>
-                  <Table.Tr><Table.Th>Melhor face</Table.Th><Table.Th>Início</Table.Th><Table.Th>Fim</Table.Th>
+                  <Table.Tr><Table.Th>Melhor face</Table.Th>{clothing && <Table.Th>Evidência</Table.Th>}
+                    <Table.Th>Início</Table.Th><Table.Th>Fim</Table.Th>
                     {discover ? <><Table.Th>Pessoa</Table.Th><Table.Th>Faces</Table.Th></>
                       : <><Table.Th>Deteções</Table.Th><Table.Th>Melhor sim.</Table.Th></>}
                     {video?.dvr_start && <Table.Th>Hora real</Table.Th>}</Table.Tr>
@@ -434,6 +462,11 @@ export default function Results() {
                   {videoSegments.map((s, i) => (
                     <Table.Tr key={i} style={{ cursor: "pointer" }} onClick={() => seek(s.start_s)}>
                       <Table.Td><Image src={api.detectionImageUrl(s.best_detection_id, "crop")} w={48} h={48} radius="sm" /></Table.Td>
+                      {clothing && (
+                        <Table.Td><Badge size="xs" variant="light"
+                          color={s.evidence === "vestuário" ? "grape" : s.evidence === "face+vestuário" ? "orange" : "red"}>
+                          {s.evidence ?? "face"}</Badge></Table.Td>
+                      )}
                       <Table.Td ff="monospace">{formatTime(s.start_s)}</Table.Td>
                       <Table.Td ff="monospace">{formatTime(s.end_s)}</Table.Td>
                       {discover ? <><Table.Td>#{s.person_id}</Table.Td><Table.Td>{s.count}</Table.Td></>
@@ -453,14 +486,15 @@ export default function Results() {
       <Card withBorder>
         <Group justify="space-between" mb="sm" wrap="wrap">
           <Group gap="sm">
-            {hasTracks && (
+            {(hasTracks || clothing) && (
               <SegmentedControl size="xs" value={view}
-                onChange={(v) => { setView(v as "persons" | "tracks" | "detections"); setTrackFilter(null); }}
+                onChange={(v) => { setView(v as "persons" | "tracks" | "detections" | "clothing"); setTrackFilter(null); }}
                 data={[...(discover ? [{ value: "persons", label: `Pessoas (${persons.length})` }] : []),
                   { value: "tracks", label: `Tracks (${visibleTracks.length})` },
-                  { value: "detections", label: discover ? "Faces" : "Deteções" }]} />
+                  { value: "detections", label: discover ? "Faces" : "Deteções" },
+                  ...(clothing ? [{ value: "clothing", label: `Vestuário (${bodyTracks.filter((t) => t.evidence === "vestuário").length})` }] : [])]} />
             )}
-            {!showTracks && !showPersons && <Text fw={600}>{discover ? "Faces" : "Deteções"} ({visible.length})</Text>}
+            {!showTracks && !showPersons && view !== "clothing" && <Text fw={600}>{discover ? "Faces" : "Deteções"} ({visible.length})</Text>}
             {discover && personFilter != null && !showPersons && (
               <Button size="compact-xs" variant="light" onClick={() => setPersonFilter(null)}>
                 Pessoa #{personFilter} · mostrar todas
@@ -473,7 +507,7 @@ export default function Results() {
             )}
           </Group>
           <Group gap="lg" wrap="wrap">
-            {!discover && (
+            {!discover && view !== "clothing" && (
               <>
                 <Stack gap={2} w={220}>
                   <Text size="xs">Similaridade mínima: {(minSim * 100).toFixed(0)}%</Text>
@@ -488,7 +522,29 @@ export default function Results() {
                 { value: "quality", label: "Qualidade" }]} />
           </Group>
         </Group>
-        {showPersons ? (
+        {view === "clothing" && clothing ? (
+          <Stack gap="xs">
+            <Alert color="grape" variant="light" icon={<IconInfoCircle size={18} />}>
+              <b>Evidência complementar.</b> As amostras são o corpo da pessoa nos frames em que a face teve
+              correspondência (tronco {job.clothing_summary?.gallery_colors?.tronco ?? "?"}, pernas{" "}
+              {job.clothing_summary?.gallery_colors?.pernas ?? "?"}). As aparições "só vestuário" foram encontradas pela
+              roupa noutras câmaras/momentos e têm de ser revistas: roupa semelhante (fardas, roupa escura) pode ser de
+              outra pessoa. Limiar ReID usado: {job.clothing_summary?.calibration?.threshold_used ?? job.params.reid_threshold}
+              {job.clothing_summary?.excluded_by_window ? ` · ${job.clothing_summary.excluded_by_window} excluído(s) pela janela temporal` : ""}.
+            </Alert>
+            {sortedBodyTracks.length === 0 ? (
+              <Text c="dimmed">{running ? "O vestuário é comparado no fim da análise…" : "Sem amostras nem correspondências por vestuário."}</Text>
+            ) : (
+              <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
+                {sortedBodyTracks.map((t) => (
+                  <BodyTrackCard key={t.id} track={t} video={videoById.get(t.video_id)}
+                    realStart={realTime(videoById.get(t.video_id), t.start_s)} onSeek={seekBody}
+                    onReview={reviewTrack} onOpenFrame={openFrame} />
+                ))}
+              </SimpleGrid>
+            )}
+          </Stack>
+        ) : showPersons ? (
           visiblePersons.length === 0 ? (
             <Text c="dimmed">{running ? "As pessoas são agrupadas no fim da análise…" : "Não foram encontradas faces."}</Text>
           ) : (

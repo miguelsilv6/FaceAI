@@ -1,0 +1,49 @@
+name: Modelo ReID (OSNet-AIN → ONNX)
+
+# Exporta o modelo de re-identificação de pessoas para ONNX e publica-o no release "models-reid-v1".
+# O ficheiro publicado não é substituído depois de existir (a aplicação fixa o seu SHA-256).
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "claude/determined-cannon-c2q29b" ]
+    paths: [ "tools/export_reid_onnx.py", ".github/workflows/reid-model.yml" ]
+
+permissions:
+  contents: write
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TAG: models-reid-v1
+      ASSET: osnet_ain_x1_0_msmt17.onnx
+    steps:
+      - uses: actions/checkout@v4
+      - name: Já publicado?
+        id: check
+        run: |
+          if gh release view "$TAG" --json assets -q '.assets[].name' 2>/dev/null | grep -qx "$ASSET"; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.exists != 'true'
+        with:
+          python-version: "3.11"
+      - name: Exportar
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          pip install --index-url https://download.pytorch.org/whl/cpu torch==2.5.1
+          pip install "onnx<1.18" onnxruntime==1.20.1 gdown==5.2.0 "numpy<2.2"
+          git clone --depth 1 https://github.com/KaiyangZhou/deep-person-reid /tmp/dpr
+          git -C /tmp/dpr rev-parse HEAD > dpr_commit.txt
+          # OSNet-AIN x1.0, MSMT17 (combineall) — Model Zoo do torchreid, "Cross-domain ReID"
+          gdown 1SigwBE6mPdqiJMqhuIY4aqC7--5CsMal -O /tmp/osnet_ain_msmt17.pth
+          python tools/export_reid_onnx.py /tmp/dpr /tmp/osnet_ain_msmt17.pth "$ASSET"
+          sha256sum "$ASSET"
+      - name: Publicar no release
+        if: steps.check.outputs.exists != 'true'
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --title "Modelo ReID (OSNet-AIN x1.0, MSMT17)" \
+            --notes "OSNet-AIN x1.0 treinado no MSMT17 (combineall), do Model Zoo do torchreid (licença MIT), exportado para ONNX por tools/export_reid_onnx.py. Usado pela análise complementar por vestuário do FaceAI." --prerelease
+          gh release upload "$TAG" "$ASSET" "${ASSET%.onnx}.json" dpr_commit.txt
