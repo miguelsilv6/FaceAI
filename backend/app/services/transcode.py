@@ -2,7 +2,8 @@
 
 Os browsers só reproduzem alguns codecs/contentores (H.264 8 bits 4:2:0, VP8/VP9, AV1 em MP4/WebM). Ficheiros de
 DVR (H.265/HEVC, .dav, .avi com MPEG-4, H.264 10 bits ou 4:2:2, ...) dão "nenhum vídeo com formato e tipo MIME
-suportado". Para esses é criada uma cópia H.264 só para visualização, numa fila (uma conversão de cada vez) com
+suportado". Para esses é criada uma cópia só para visualização (H.264/MP4; ou VP9/WebM para browsers sem
+H.264, como alguns Firefox/Chromium em Linux), numa fila (uma conversão de cada vez) com
 estado e progresso guardados no vídeo. As conversões pendentes são retomadas no arranque do servidor.
 """
 
@@ -45,16 +46,23 @@ def ffmpeg_available() -> bool:
     return shutil.which("ffmpeg") is not None
 
 
+# Contentores (format_name do ffprobe) que os browsers abrem
+BROWSER_FORMATS = {"mov,mp4,m4a,3gp,3g2,mj2", "matroska,webm"}
+FORMATS = {"mp4": "video/mp4", "webm": "video/webm"}  # formatos da cópia de reprodução
+
+
 def probe_stream(path: str | Path) -> dict | None:
-    """codec_name, profile e pix_fmt do primeiro stream de vídeo (ffprobe), ou None se não for possível."""
+    """format_name e codec_name/profile/pix_fmt/width/height do 1.º stream de vídeo (ffprobe), ou None."""
     if shutil.which("ffprobe") is None:
         return None
     cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
-           "stream=codec_name,profile,pix_fmt", "-of", "json", str(path)]
+           "stream=codec_name,profile,pix_fmt,width,height:format=format_name", "-of", "json", str(path)]
     try:
-        out = subprocess.run(cmd, check=True, capture_output=True, timeout=60).stdout
-        streams = json.loads(out or b"{}").get("streams") or []
-        return streams[0] if streams else None
+        out = json.loads(subprocess.run(cmd, check=True, capture_output=True, timeout=60).stdout or b"{}")
+        streams = out.get("streams") or []
+        if not streams:
+            return None
+        return {**streams[0], "format_name": (out.get("format") or {}).get("format_name", "")}
     except Exception:  # noqa: BLE001 - ffprobe falhou: decide-se pelo FourCC
         return None
 
@@ -68,6 +76,10 @@ def needs_playback_copy(video: Video) -> tuple[bool, str]:
         ok = video.codec.lower() in BROWSER_CODECS
         return (not ok, "" if ok else f"codec {video.codec or 'desconhecido'} não suportado pelos browsers")
     codec, pix = (info.get("codec_name") or "").lower(), (info.get("pix_fmt") or "").lower()
+    fmt = info.get("format_name") or ""
+    if fmt and fmt not in BROWSER_FORMATS:
+        # ex.: H.264 "cru" exportado pelo DVR com extensão .mp4
+        return True, f"o ficheiro {ext} é na verdade {fmt}, que os browsers não abrem"
     if codec not in BROWSER_STREAM_CODECS:
         return True, f"codec {codec or 'desconhecido'} não suportado pelos browsers"
     if pix and pix not in BROWSER_PIX_FMTS:
@@ -75,8 +87,14 @@ def needs_playback_copy(video: Video) -> tuple[bool, str]:
     return False, ""
 
 
-def request_playback_copy(s: Session, video: Video, *, force: bool = False, actor: str = "sistema") -> str:
-    """Decide se o vídeo precisa de cópia de reprodução e, se sim, põe-na na fila. Devolve o novo estado."""
+def request_playback_copy(s: Session, video: Video, *, force: bool = False, actor: str = "sistema",
+                          fmt: str = "mp4") -> str:
+    """Decide se o vídeo precisa de cópia de reprodução e, se sim, põe-na na fila. Devolve o novo estado.
+
+    fmt: "mp4" (H.264, o mais compatível) ou "webm" (VP9, para browsers sem H.264, ex.: alguns em Linux).
+    """
+    if fmt not in FORMATS:
+        raise ValueError(f"Formato de reprodução desconhecido: {fmt}")
     if video.playback_status in (PENDING, RUNNING) and video.id in _queued:
         return video.playback_status
     if not ffmpeg_available():
@@ -85,14 +103,15 @@ def request_playback_copy(s: Session, video: Video, *, force: bool = False, acto
         need, reason = (True, "pedido manual") if force else needs_playback_copy(video)
         if need:
             video.playback_status, video.playback_error, video.playback_progress = PENDING, "", 0.0
+            video.playback_format = fmt
         else:
             video.playback_status, video.playback_error = NOT_NEEDED, ""
     s.add(video)
     s.commit()
     if video.playback_status == PENDING:
         log_event(s, "video.playback_copy_requested", case_id=video.case_id, actor=actor,
-                  details={"video_id": video.id, "reason": reason, "forced": force,
-                           "note": "cópia H.264 apenas para visualização; o original é o analisado"})
+                  details={"video_id": video.id, "reason": reason, "forced": force, "format": fmt,
+                           "note": "cópia apenas para visualização; o original é o analisado"})
         _enqueue(video.id)
     return video.playback_status
 
@@ -167,13 +186,18 @@ def _transcode(video_id: int) -> None:
     video = _set(video_id, playback_status=RUNNING, playback_progress=0.0)
     if video is None:
         return
+    fmt = video.playback_format if video.playback_format in FORMATS else "mp4"
     src = Path(video.stored_path)
-    dst = src.with_name(src.stem + "_playback.mp4")
-    tmp = src.with_name(src.stem + "_playback.part.mp4")
+    dst = src.with_name(f"{src.stem}_playback.{fmt}")
+    tmp = src.with_name(f"{src.stem}_playback.part.{fmt}")
+    if fmt == "webm":  # VP9 em tempo real: mais lento que H.264 mas reproduz em qualquer browser moderno
+        codec = ["-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-row-mt", "1",
+                 "-crf", "33", "-b:v", "0"]
+    else:
+        codec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart"]
     cmd = [
         "ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1", "-i", str(src),
-        "-map", "0:v:0", "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
-        "-pix_fmt", "yuv420p", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", "-movflags", "+faststart", str(tmp),
+        "-map", "0:v:0", "-an", *codec, "-pix_fmt", "yuv420p", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", str(tmp),
     ]
     duration = video.duration_s or 0.0
     started, last_update = time.monotonic(), 0.0
@@ -210,6 +234,6 @@ def _transcode(video_id: int) -> None:
     if video is not None:
         with Session(get_engine()) as s:
             log_event(s, "video.playback_copy_ready", case_id=video.case_id, actor="sistema",
-                      details={"video_id": video_id, "size_bytes": dst.stat().st_size,
+                      details={"video_id": video_id, "format": fmt, "size_bytes": dst.stat().st_size,
                                "seconds": round(time.monotonic() - started, 1),
-                               "note": "cópia H.264 apenas para visualização; o original é o analisado"})
+                               "note": "cópia apenas para visualização; o original é o analisado"})

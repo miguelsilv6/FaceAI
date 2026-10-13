@@ -8,7 +8,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
-import { api, formatTime, realTime } from "../api";
+import { api, browserCodecs, formatTime, realTime } from "../api";
 import DeleteJobModal from "../components/DeleteJobModal";
 import DetectionCard from "../components/DetectionCard";
 import PersonCard from "../components/PersonCard";
@@ -16,7 +16,7 @@ import TrackCard from "../components/TrackCard";
 import JobStatusBadge from "../components/JobStatusBadge";
 import Timeline from "../components/Timeline";
 import { notifyError, notifyOk } from "../notify";
-import type { Detection, Job, Person, ReviewStatus, Segment, Track, Video } from "../types";
+import type { Detection, Job, Person, ReviewStatus, Segment, Track, Video, VideoProbe } from "../types";
 
 const EXPORTS = [
   ["pdf", "Relatório PDF"],
@@ -44,7 +44,9 @@ export default function Results() {
   const [frameDet, setFrameDet] = useState<Detection | null>(null);
   const [frameVariant, setFrameVariant] = useState<"annotated" | "original">("annotated");
   const [deleting, setDeleting] = useState(false);
-  const [playError, setPlayError] = useState<number | null>(null); // id do vídeo que o browser não reproduziu
+  // Erro de reprodução no browser (por vídeo), com o diagnóstico mostrado ao analista.
+  const [playError, setPlayError] = useState<{ videoId: number; detail: string } | null>(null);
+  const autoCopyRequested = useRef(new Set<string>());
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -96,14 +98,41 @@ export default function Results() {
     }, 3000);
     return () => clearInterval(t);
   }, [converting, job]);
-  const createPlaybackCopy = async () => {
+  const createPlaybackCopy = async (format?: "mp4" | "webm") => {
     if (!video) return;
     try {
-      const updated = await api.createPlaybackCopy(video.id);
+      const updated = await api.createPlaybackCopy(video.id, format);
       setVideos((vs) => vs.map((v) => (v.id === updated.id ? updated : v)));
       setPlayError(null);
     } catch (e) {
       notifyError(e);
+    }
+  };
+  const MEDIA_ERRORS: Record<number, string> = {
+    1: "carregamento interrompido", 2: "erro de rede", 3: "erro ao descodificar", 4: "formato não suportado",
+  };
+  const onVideoError = async (v: Video, err: MediaError | null) => {
+    const codecs = browserCodecs();
+    const probe = await api.probeVideo(v.id).catch(() => ({} as VideoProbe));
+    const file = probe.codec_name
+      ? `${probe.format_name} · ${probe.codec_name}${probe.profile ? ` ${probe.profile}` : ""} · ${probe.pix_fmt}`
+      : v.codec || "?";
+    const playing = v.playback_status === "ready" ? `cópia ${v.playback_format === "webm" ? "VP9/WebM" : "H.264/MP4"}`
+      : "ficheiro original";
+    setPlayError({
+      videoId: v.id,
+      detail: `Erro do browser: ${err ? `${MEDIA_ERRORS[err.code] ?? err.code}${err.message ? ` (${err.message})` : ""}` : "?"}`
+        + ` · a reproduzir: ${playing} · original: ${file}`
+        + ` · este browser reproduz H.264: ${codecs.h264 ? "sim" : "não"}, VP9: ${codecs.vp9 ? "sim" : "não"}`,
+    });
+    // Pedido automático (uma vez por vídeo e formato) da cópia que este browser consegue reproduzir.
+    const want = codecs.h264 ? "mp4" : "webm";
+    const have = v.playback_status === "ready" ? (v.playback_format || "mp4") : null;
+    const key = `${v.id}-${want}`;
+    if (have !== want && v.playback_status !== "failed" && v.playback_status !== "unavailable"
+      && !autoCopyRequested.current.has(key)) {
+      autoCopyRequested.current.add(key);
+      createPlaybackCopy(want);
     }
   };
   const discover = job?.params.mode === "discover";
@@ -303,33 +332,42 @@ export default function Results() {
                 {converting ? (
                   <Alert color="blue" icon={<IconInfoCircle size={18} />}>
                     O browser não reproduz o formato original deste vídeo ({video.codec || "codec desconhecido"}). A criar uma
-                    cópia H.264 só para visualização:{" "}
+                    cópia {video.playback_format === "webm" ? "VP9/WebM" : "H.264"} só para visualização:{" "}
                     {video.playback_status === "running" ? `${Math.round(video.playback_progress * 100)}%` : "em fila"}.
                     A análise e os resultados usam sempre o original.
                     <Progress mt="xs" value={video.playback_progress * 100} animated striped />
                   </Alert>
                 ) : (
-                  <video ref={videoRef} key={`${video.id}-${video.playback_status}`} src={api.videoUrl(video.id)} controls
+                  <video ref={videoRef} key={`${video.id}-${video.playback_status}-${video.playback_format}`} src={api.videoUrl(video)} controls
                     preload="metadata" style={{ width: "100%", maxHeight: 420, background: "#000", borderRadius: 6 }}
-                    onError={() => setPlayError(video.id)} onLoadedData={() => setPlayError(null)}
+                    onError={(e) => onVideoError(video, e.currentTarget.error)} onLoadedData={() => setPlayError(null)}
                     onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)} />
                 )}
-                {!converting && (playError === video.id || video.playback_status === "failed"
+                {!converting && (playError?.videoId === video.id || video.playback_status === "failed"
                   || video.playback_status === "unavailable") ? (
                   <Alert color="orange" icon={<IconAlertTriangle size={18} />}>
                     {video.playback_status === "failed" ? `A conversão para o browser falhou: ${video.playback_error}. `
                       : video.playback_status === "unavailable" ? `${video.playback_error} `
                         : "O browser não consegue reproduzir este vídeo. "}
-                    Pode criar uma cópia H.264 só para visualização; entretanto use os frames (botão 🔍 nas deteções).
+                    Pode criar uma cópia só para visualização; entretanto use os frames (botão 🔍 nas deteções).
                     {video.playback_status !== "unavailable" && (
-                      <Button size="compact-xs" ml="xs" variant="light" onClick={createPlaybackCopy}>
-                        Criar cópia de reprodução
-                      </Button>
+                      <Group gap="xs" mt="xs">
+                        <Button size="compact-xs" variant="light" onClick={() => createPlaybackCopy("mp4")}>
+                          Criar cópia H.264 (MP4)
+                        </Button>
+                        <Button size="compact-xs" variant="light" onClick={() => createPlaybackCopy("webm")}>
+                          Criar cópia VP9 (WebM)
+                        </Button>
+                      </Group>
+                    )}
+                    {playError?.videoId === video.id && (
+                      <Text size="xs" c="dimmed" mt="xs" ff="monospace">{playError.detail}</Text>
                     )}
                   </Alert>
                 ) : (
                   <Text size="xs" c="dimmed">
-                    {video.playback_status === "ready" ? "Reprodução a partir de uma cópia H.264 (só visualização). " : ""}
+                    {video.playback_status === "ready"
+                      ? `Reprodução a partir de uma cópia ${video.playback_format === "webm" ? "VP9" : "H.264"} (só visualização). ` : ""}
                     Também pode ver os frames de cada deteção (botão 🔍).
                   </Text>
                 )}
