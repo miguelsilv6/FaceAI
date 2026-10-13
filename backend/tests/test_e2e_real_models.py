@@ -1,4 +1,4 @@
-"""Teste end-to-end com os modelos reais (RetinaFace + ArcFace).
+"""Teste end-to-end com os modelos reais do motor ativo (ONNX: SCRFD + ArcFace; ou DeepFace).
 
 É lento e precisa de imagens reais. Define FACEAI_E2E_DATASET com uma pasta com o conjunto de
 teste do DeepFace (tests/unit/dataset de https://github.com/serengil/deepface), onde img1, img2,
@@ -46,7 +46,7 @@ def _make_cctv(path: Path, ds: Path) -> None:
 
 
 def test_real_models_find_person_only_in_expected_interval(client, tmp_path):
-    face_engine.set_engine(face_engine.DeepFaceEngine())
+    face_engine.set_engine(face_engine.create_engine())
     ds = Path(DATASET)
     case = client.post("/api/cases", json={"name": "E2E"}).json()
     with (ds / "img1.jpg").open("rb") as r1, (ds / "img5.jpg").open("rb") as r2:

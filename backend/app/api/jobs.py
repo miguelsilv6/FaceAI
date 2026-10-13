@@ -8,12 +8,11 @@ from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse
 from sqlmodel import select
 
-from ..config import DETECTOR_BACKENDS, RECOGNITION_MODELS
-from ..models import Detection, Job, JobStatus, ReferenceImage, Video, utcnow
+from ..models import Detection, Job, JobStatus, ReferenceImage, Track, Video, utcnow
 from ..schemas import JobCreate, ReviewUpdate
 from ..services import reports
 from ..services.audit import log_event
-from ..services.face_engine import default_threshold
+from ..services.face_engine import default_threshold, get_engine
 from ..services.jobs import runner
 from .deps import ActorDep, SessionDep, get_case_or_404, get_job_or_404
 
@@ -24,12 +23,20 @@ router = APIRouter(prefix="/api", tags=["análises"])
 def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorDep) -> Job:
     get_case_or_404(session, case_id)
     params = body.params
-    if params.model not in RECOGNITION_MODELS:
-        raise HTTPException(422, f"Modelo desconhecido: {params.model}")
-    if params.detector not in DETECTOR_BACKENDS:
-        raise HTTPException(422, f"Detetor desconhecido: {params.detector}")
+    engine = get_engine()
+    models = [m.name for m in engine.models()]
+    params.model = params.model or models[0]
+    params.detector = params.detector or engine.detectors()[0]
+    if params.model not in models:
+        raise HTTPException(422, f"Modelo desconhecido para o motor '{engine.name}': {params.model}")
+    if params.detector not in engine.detectors():
+        raise HTTPException(422, f"Detetor desconhecido para o motor '{engine.name}': {params.detector}")
+    if params.cascade:
+        params.fast_detector = params.fast_detector or engine.default_fast_detector()
+        if params.fast_detector and params.fast_detector not in engine.detectors():
+            raise HTTPException(422, f"Detetor rápido desconhecido: {params.fast_detector}")
     if params.threshold is None:
-        params.threshold = default_threshold(params.model)
+        params.threshold = default_threshold(params.model, engine)
 
     videos = list(session.exec(select(Video).where(Video.case_id == case_id)))
     refs = list(session.exec(select(ReferenceImage).where(ReferenceImage.case_id == case_id)))
@@ -95,7 +102,41 @@ def list_detections(
 def list_segments(job_id: int, session: SessionDep, gap_s: float | None = None) -> list[dict]:
     job = get_job_or_404(session, job_id)
     dets = list(session.exec(select(Detection).where(Detection.job_id == job_id)))
-    return reports.match_segments(dets, gap_s if gap_s is not None else job.params.get("segment_gap_s", 2.0))
+    tracks = {t.id: t for t in session.exec(select(Track).where(Track.job_id == job_id))}
+    return reports.match_segments(dets, gap_s if gap_s is not None else job.params.get("segment_gap_s", 2.0),
+                                  tracks)
+
+
+@router.get("/jobs/{job_id}/tracks", response_model=list[Track])
+def list_tracks(job_id: int, session: SessionDep, video_id: int | None = None) -> list[Track]:
+    get_job_or_404(session, job_id)
+    q = select(Track).where(Track.job_id == job_id)
+    if video_id is not None:
+        q = q.where(Track.video_id == video_id)
+    return list(session.exec(q.order_by(Track.video_id, Track.start_s)))
+
+
+@router.patch("/tracks/{track_id}/review", response_model=Track)
+def review_track(track_id: int, body: ReviewUpdate, session: SessionDep, actor: ActorDep) -> Track:
+    """Revê um track inteiro: aplica a decisão ao track e a todas as suas deteções."""
+    track = session.get(Track, track_id)
+    if track is None:
+        raise HTTPException(404, "Track não encontrado.")
+    now = utcnow()
+    previous = track.review_status
+    track.review_status, track.review_note, track.reviewed_by, track.reviewed_at = body.status, body.note, actor, now
+    dets = list(session.exec(select(Detection).where(Detection.track_id == track_id)))
+    for det in dets:
+        det.review_status, det.review_note, det.reviewed_by, det.reviewed_at = body.status, body.note, actor, now
+        session.add(det)
+    session.add(track)
+    session.commit()
+    session.refresh(track)
+    job = session.get(Job, track.job_id)
+    log_event(session, "track.reviewed", case_id=job.case_id if job else None, actor=actor,
+              details={"job_id": track.job_id, "track_id": track_id, "from": previous.value,
+                       "to": body.status.value, "note": body.note, "detections": [d.id for d in dets]})
+    return track
 
 
 @router.patch("/detections/{det_id}/review", response_model=Detection)

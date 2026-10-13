@@ -16,8 +16,9 @@ from sqlmodel import Session, select
 
 from .. import __version__
 from ..config import settings
-from ..models import AuditEvent, Case, Detection, Job, ReferenceImage, ReviewStatus, Video
-from .segments import build_segments
+from ..models import AuditEvent, Case, Detection, Job, ReferenceImage, ReviewStatus, Track, Video
+from .clock import format_real, real_time
+from .segments import Interval, merge_intervals
 from .video_processor import format_timestamp
 
 _TEMPLATES = Environment(
@@ -28,16 +29,46 @@ _TEMPLATES.filters["ts"] = format_timestamp
 
 CSV_FIELDS = [
     "detection_id", "video_id", "video_filename", "frame_index", "timestamp_s", "timestamp",
-    "x", "y", "w", "h", "face_confidence", "reference_id", "reference_filename",
-    "distance", "similarity", "is_match", "review_status", "reviewed_by", "reviewed_at",
-    "review_note", "crop_file", "frame_file",
+    "real_time", "x", "y", "w", "h", "face_confidence", "reference_id", "reference_filename",
+    "distance", "similarity", "is_match", "track_id", "track_is_match", "quality", "sharpness", "size_score",
+    "frontal", "review_status", "reviewed_by", "reviewed_at", "review_note", "crop_file", "frame_file",
 ]
 
 
-def match_segments(detections: list[Detection], gap_s: float) -> list[dict[str, Any]]:
-    """Segmentos de aparição a partir das correspondências não rejeitadas na revisão."""
-    kept = [d for d in detections if d.is_match and d.review_status != ReviewStatus.rejected]
-    return [seg.to_dict() for seg in build_segments(kept, max_gap_s=gap_s)]
+def match_segments(detections: list[Detection], gap_s: float,
+                   tracks: dict[int, Track] | None = None) -> list[dict[str, Any]]:
+    """Segmentos de aparição a partir das correspondências não rejeitadas na revisão.
+
+    Conta como correspondência uma deteção abaixo do limiar ou que pertença a um track com correspondência; cada
+    track com correspondência forma um único intervalo.
+    """
+    tracks = tracks or {}
+    intervals: list[Interval] = []
+    by_track: dict[int, list[Detection]] = {}
+    last_saved: dict[int, float] = {}
+    for d in detections:
+        if d.track_id is not None:
+            last_saved[d.track_id] = max(last_saved.get(d.track_id, d.timestamp_s), d.timestamp_s)
+        if d.review_status == ReviewStatus.rejected:
+            continue
+        track = tracks.get(d.track_id) if d.track_id is not None else None
+        if track is not None and track.is_match and track.review_status != ReviewStatus.rejected:
+            by_track.setdefault(track.id, []).append(d)
+        elif d.is_match:
+            intervals.append(Interval(d.video_id, d.timestamp_s, d.timestamp_s, d.distance, d.id, (d.id,)))
+    for tid, dets in by_track.items():
+        # Do primeiro ao último frame guardado (com evidência visual) e não rejeitado do track, como um só bloco:
+        # frames-chave espaçados (filtro de movimento) não partem o segmento de alguém parado.
+        # Se o último frame guardado do track não foi rejeitado, o fim estende-se ao fim do track (frames
+        # estáticos saltados pelo filtro de movimento em que a pessoa continuava presente).
+        t = tracks[tid]
+        best = min(dets, key=lambda d: d.distance)
+        times = [d.timestamp_s for d in dets]
+        end = max(times)
+        if end >= last_saved.get(tid, end):
+            end = max(end, t.end_s)
+        intervals.append(Interval(t.video_id, min(times), end, best.distance, best.id, tuple(d.id for d in dets)))
+    return [seg.to_dict() for seg in merge_intervals(intervals, max_gap_s=gap_s)]
 
 
 def load_job_data(s: Session, job: Job) -> dict[str, Any]:
@@ -47,18 +78,50 @@ def load_job_data(s: Session, job: Job) -> dict[str, Any]:
     detections = list(
         s.exec(select(Detection).where(Detection.job_id == job.id).order_by(Detection.video_id, Detection.timestamp_s))
     )
+    tracks = {t.id: t for t in s.exec(select(Track).where(Track.job_id == job.id).order_by(Track.video_id,
+                                                                                           Track.start_s))}
     audit = list(s.exec(select(AuditEvent).where(AuditEvent.case_id == job.case_id).order_by(AuditEvent.id)))
-    return {"case": case, "job": job, "videos": videos, "references": refs, "detections": detections, "audit": audit}
+    return {"case": case, "job": job, "videos": videos, "references": refs, "detections": detections,
+            "tracks": tracks, "audit": audit}
+
+
+def video_real_time(v: Video | None, video_s: float) -> str:
+    """Hora real (relógio do DVR + desvio) de um instante do vídeo, ou "" se o vídeo não tiver a hora acertada."""
+    if v is None:
+        return ""
+    return format_real(real_time(v.dvr_start, v.dvr_rate, v.clock_offset_s, video_s))
+
+
+_TEMPLATES.globals["real_at"] = lambda v, t: video_real_time(v, t)
+
+
+def segments_for(data: dict[str, Any]) -> list[dict[str, Any]]:
+    segs = match_segments(data["detections"], data["job"].params.get("segment_gap_s", 2.0), data.get("tracks"))
+    for seg in segs:
+        v = data["videos"].get(seg["video_id"])
+        seg["real_start"] = video_real_time(v, seg["start_s"])
+        seg["real_end"] = video_real_time(v, seg["end_s"])
+    return segs
+
+
+def effective_match(d: Detection, data: dict[str, Any]) -> bool:
+    t = data.get("tracks", {}).get(d.track_id) if d.track_id is not None else None
+    return d.is_match or bool(t and t.is_match)
 
 
 def detection_row(d: Detection, data: dict[str, Any]) -> dict[str, Any]:
     v, r = data["videos"].get(d.video_id), data["references"].get(d.reference_id)
+    t = data.get("tracks", {}).get(d.track_id) if d.track_id is not None else None
     return {
         "detection_id": d.id, "video_id": d.video_id, "video_filename": v.filename if v else "",
         "frame_index": d.frame_index, "timestamp_s": d.timestamp_s, "timestamp": format_timestamp(d.timestamp_s),
+        "real_time": video_real_time(v, d.timestamp_s),
         "x": d.x, "y": d.y, "w": d.w, "h": d.h, "face_confidence": d.face_confidence,
         "reference_id": d.reference_id, "reference_filename": r.filename if r else "",
         "distance": d.distance, "similarity": d.similarity, "is_match": d.is_match,
+        "track_id": d.track_id if d.track_id is not None else "",
+        "track_is_match": bool(t and t.is_match), "quality": d.quality, "sharpness": d.sharpness,
+        "size_score": d.size_score, "frontal": "" if d.frontal is None else d.frontal,
         "review_status": d.review_status.value, "reviewed_by": d.reviewed_by,
         "reviewed_at": d.reviewed_at.isoformat() if d.reviewed_at else "", "review_note": d.review_note,
         "crop_file": f"crops/{Path(d.crop_path).name}", "frame_file": f"frames/{Path(d.frame_path).name}",
@@ -88,7 +151,11 @@ def to_json(data: dict[str, Any]) -> str:
         "references": [
             r.model_dump(mode="json", exclude={"stored_path", "face_crop_path"}) for r in data["references"].values()
         ],
-        "segments": match_segments(data["detections"], job.params.get("segment_gap_s", 2.0)),
+        "segments": segments_for(data),
+        "tracks": [{**t.model_dump(mode="json"),
+                    "real_start": video_real_time(data["videos"].get(t.video_id), t.start_s),
+                    "real_end": video_real_time(data["videos"].get(t.video_id), t.end_s)}
+                   for t in data.get("tracks", {}).values()],
         "detections": [detection_row(d, data) for d in data["detections"]],
     }
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
@@ -110,18 +177,28 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
     job: Job = data["job"]
     detections: list[Detection] = data["detections"]
     by_id = {d.id: d for d in detections}
-    segments = match_segments(detections, job.params.get("segment_gap_s", 2.0))
+    segments = segments_for(data)
     for seg in segments:
         best = by_id.get(seg["best_detection_id"])
         seg["frame_img"] = _img_data_uri(best.frame_path if best else None)
         seg["crop_img"] = _img_data_uri(best.crop_path if best else None)
         seg["video"] = data["videos"].get(seg["video_id"])
-    matches = [d for d in detections if d.is_match]
+    matches = [d for d in detections if effective_match(d, data)]
     rows = []
     for i, d in enumerate(matches):
         row = detection_row(d, data)
         row["crop_img"] = _img_data_uri(d.crop_path) if i < max_images else ""
         rows.append(row)
+    tracks = []
+    for t in data.get("tracks", {}).values():
+        if not t.is_match:
+            continue
+        best = by_id.get(t.best_detection_id)
+        tv = data["videos"].get(t.video_id)
+        tracks.append({"t": t, "video": tv, "real_start": video_real_time(tv, t.start_s),
+                       "real_end": video_real_time(tv, t.end_s),
+                       "ref": data["references"].get(t.reference_id),
+                       "crop_img": _img_data_uri(best.crop_path if best else None)})
     references = [
         {"ref": r, "img": _img_data_uri(r.face_crop_path or r.stored_path)} for r in data["references"].values()
     ]
@@ -135,7 +212,8 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
         references=references,
         segments=segments,
         rows=rows,
-        candidates=sum(1 for d in detections if not d.is_match),
+        tracks=tracks,
+        candidates=sum(1 for d in detections if not effective_match(d, data)),
         review_counts=review_counts,
         audit=data["audit"],
         max_images=max_images,

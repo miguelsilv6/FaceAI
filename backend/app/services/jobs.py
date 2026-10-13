@@ -2,24 +2,29 @@
 
 from __future__ import annotations
 
+import bisect
 import logging
 import math
 import threading
 import traceback
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from sqlmodel import Session, select
 
 from ..config import settings
 from ..db import get_engine as get_db_engine
-from ..models import Detection, Job, JobStatus, ReferenceImage, Video, utcnow
+from ..models import Detection, Job, JobStatus, ReferenceImage, Track, Video, utcnow
 from .audit import log_event
-from .face_engine import get_engine
+from .face_engine import FaceEngine, get_engine
 from .imageio import write_jpeg
 from .matcher import ReferenceSet, is_match
+from .motion import MotionGate
+from .quality import face_quality
 from .references import reference_embeddings
-from .video_processor import annotate, crop_with_margin, format_timestamp, sample_frames
+from .tracking import FaceTracker
+from .video_processor import SampledFrame, annotate, crop_with_margin, format_timestamp, sample_frames
 
 log = logging.getLogger(__name__)
 
@@ -118,16 +123,10 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
             if not videos:
                 raise ValueError("Nenhum vídeo selecionado.")
 
-            threshold = float(p["threshold"])
-            candidate_threshold = threshold + float(p.get("candidate_margin", 0.0))
-            min_size = int(p.get("min_face_size", 0))
-            min_conf = float(p.get("min_confidence", 0.0))
-            upscale = float(p.get("upscale", 1.0))
-            sample_fps = float(p["sample_fps"])
-            out_dir = job_dir(job)
+            ctx = _AnalysisContext.from_params(p, engine, reference_set, used_refs, job_dir(job))
 
             def frames_for(v: Video) -> int:
-                step = max(1, int(round(v.fps / sample_fps))) if v.fps else 1
+                step = max(1, int(round(v.fps / ctx.sample_fps))) if v.fps else 1
                 return max(1, math.ceil(v.frame_count / step)) if v.frame_count else 1
 
             total = sum(frames_for(v) for v in videos)
@@ -135,46 +134,27 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
 
             for video in videos:
                 job.current_video_id = video.id
-                for frame in sample_frames(video.stored_path, sample_fps, fps=video.fps or None):
+                analyzer = _VideoAnalyzer(ctx, s, job, video)
+                for frame in sample_frames(video.stored_path, ctx.sample_fps, fps=video.fps or None):
                     if cancel.is_set():
                         raise JobCancelled()
-                    faces = engine.detect(frame.image, model=p["model"], detector=p["detector"], upscale=upscale)
-                    for k, face in enumerate(faces):
-                        if min(face.w, face.h) < min_size or face.confidence < min_conf:
-                            continue
-                        job.faces_detected += 1
-                        result = reference_set.best_match(face.embedding)
-                        if result.distance > candidate_threshold:
-                            continue
-                        matched = is_match(result.distance, threshold)
-                        ref = used_refs[result.reference_index]
-                        stem = f"v{video.id:04d}_f{frame.index:07d}_{k}"
-                        crop_path = out_dir / "crops" / f"{stem}.jpg"
-                        frame_path = out_dir / "frames" / f"{stem}.jpg"
-                        write_jpeg(crop_path, crop_with_margin(frame.image, face.x, face.y, face.w, face.h))
-                        label = f"{format_timestamp(frame.timestamp_s)} sim={result.similarity:.2f}"
-                        color = (0, 0, 255) if matched else (0, 165, 255)
-                        write_jpeg(frame_path, annotate(frame.image, face.x, face.y, face.w, face.h, label, color))
-                        s.add(Detection(
-                            job_id=job.id, video_id=video.id, reference_id=ref.id,
-                            frame_index=frame.index, timestamp_s=round(frame.timestamp_s, 3),
-                            x=face.x, y=face.y, w=face.w, h=face.h,
-                            face_confidence=round(face.confidence, 4),
-                            distance=round(result.distance, 4), similarity=round(result.similarity, 4),
-                            is_match=matched, crop_path=str(crop_path), frame_path=str(frame_path),
-                        ))
-                        if matched:
-                            job.matches += 1
+                    analyzer.process(frame)
                     done += 1
-                    job.frames_processed += 1
                     if done % PROGRESS_COMMIT_EVERY == 0:
                         job.progress = min(0.999, done / total)
                         s.add(job)
                         s.commit()
+                s.commit()
             job.progress = 1.0
-            _finish(s, job, JobStatus.completed,
-                    (job.message + " " if job.message else "")
-                    + f"{job.matches} correspondência(s) em {job.frames_processed} frames analisados.")
+            matched_tracks = s.exec(
+                select(Track).where(Track.job_id == job.id, Track.is_match == True)  # noqa: E712
+            ).all()
+            summary = (f"{job.matches} correspondência(s) em {job.frames_processed} frames analisados"
+                       f" ({job.frames_sampled} amostrados; {job.frames_skipped_motion} sem movimento,"
+                       f" {job.frames_skipped_noface} sem faces na 1.ª passagem)")
+            if ctx.tracking:
+                summary += f"; {len(matched_tracks)} track(s) com correspondência"
+            _finish(s, job, JobStatus.completed, (job.message + " " if job.message else "") + summary + ".")
         except JobCancelled:
             _finish(s, job, JobStatus.cancelled, "Cancelada pelo utilizador.")
         except Exception as exc:
@@ -191,4 +171,196 @@ def _finish(s: Session, job: Job, status: JobStatus, message: str) -> None:
     s.commit()
     log_event(s, f"job.{status.value}", case_id=job.case_id, actor=job.created_by or "sistema",
               details={"job_id": job.id, "message": job.message, "matches": job.matches,
-                       "frames_processed": job.frames_processed})
+                       "frames_sampled": job.frames_sampled, "frames_processed": job.frames_processed,
+                       "frames_skipped_motion": job.frames_skipped_motion,
+                       "frames_skipped_noface": job.frames_skipped_noface, "tracks": job.tracks})
+
+
+TRACK_TOP_K = 3  # o match do track decide-se pela média das K melhores distâncias
+
+
+@dataclass
+class _AnalysisContext:
+    engine: FaceEngine
+    reference_set: ReferenceSet
+    refs: list[ReferenceImage]
+    out_dir: Path
+    model: str
+    detector: str
+    fast_detector: str | None
+    sample_fps: float
+    threshold: float
+    candidate_threshold: float
+    min_size: int
+    min_conf: float
+    min_quality: float
+    upscale: float
+    motion_filter: bool
+    motion_threshold: float
+    keyframe_interval_s: float
+    tracking: bool
+    track_gap_s: float
+
+    @classmethod
+    def from_params(cls, p: dict, engine: FaceEngine, reference_set: ReferenceSet,
+                    refs: list[ReferenceImage], out_dir: Path) -> _AnalysisContext:
+        threshold = float(p["threshold"])
+        fast = p.get("fast_detector") if p.get("cascade", False) else None
+        return cls(
+            engine=engine, reference_set=reference_set, refs=refs, out_dir=out_dir,
+            model=p["model"], detector=p["detector"],
+            fast_detector=fast if fast and fast != p["detector"] else None,
+            sample_fps=float(p["sample_fps"]), threshold=threshold,
+            candidate_threshold=threshold + float(p.get("candidate_margin", 0.0)),
+            min_size=int(p.get("min_face_size", 0)), min_conf=float(p.get("min_confidence", 0.0)),
+            min_quality=float(p.get("min_quality", 0.0)), upscale=float(p.get("upscale", 1.0)),
+            motion_filter=bool(p.get("motion_filter", False)),
+            motion_threshold=float(p.get("motion_threshold", 0.0)),
+            keyframe_interval_s=float(p.get("keyframe_interval_s", 0.0)),
+            tracking=bool(p.get("tracking", False)), track_gap_s=float(p.get("track_gap_s", 2.0)),
+        )
+
+
+@dataclass
+class _TrackState:
+    start_s: float
+    end_s: float
+    n_faces: int = 0
+    top: list[float] = field(default_factory=list)  # as K menores distâncias, ordenadas
+    best_distance: float = 2.0
+    best_ref_id: int | None = None
+    best_quality: float = 0.0
+    best_saved_distance: float = 2.0
+    row: Track | None = None
+
+
+class _VideoAnalyzer:
+    """Processa os frames amostrados de um vídeo: movimento → cascata → deteção → qualidade → tracking → match."""
+
+    def __init__(self, ctx: _AnalysisContext, s: Session, job: Job, video: Video):
+        self.ctx, self.s, self.job, self.video = ctx, s, job, video
+        self.gate = MotionGate(ctx.motion_threshold, ctx.keyframe_interval_s) if ctx.motion_filter else None
+        self.tracker = FaceTracker(max_gap_s=ctx.track_gap_s) if ctx.tracking else None
+        self.tracks: dict[int, _TrackState] = {}
+        self.visible_tids: list[int] = []  # tracks vistos no último frame analisado
+
+    def process(self, frame: SampledFrame) -> None:
+        ctx, job = self.ctx, self.job
+        job.frames_sampled += 1
+        if self.gate is not None and not self.gate.check(frame.image, frame.timestamp_s).analyze:
+            job.frames_skipped_motion += 1
+            if self.tracker is not None:
+                # A imagem é igual à do último frame analisado: as faces que lá estavam continuam presentes.
+                self.tracker.keep_alive(frame.timestamp_s, self.visible_tids)
+                for tid in self.visible_tids:
+                    st = self.tracks[tid]
+                    st.end_s = frame.timestamp_s
+                    if st.row is not None:
+                        self._refresh_track_row(st)
+            return
+        self.visible_tids = []
+        if ctx.fast_detector and ctx.engine.count_faces(frame.image, detector=ctx.fast_detector,
+                                                        upscale=ctx.upscale) == 0:
+            job.frames_skipped_noface += 1
+            return
+
+        faces = ctx.engine.detect(frame.image, model=ctx.model, detector=ctx.detector, upscale=ctx.upscale,
+                                  min_confidence=ctx.min_conf)
+        job.frames_processed += 1
+        kept = []
+        for face in faces:
+            if min(face.w, face.h) < ctx.min_size or face.confidence < ctx.min_conf:
+                continue
+            q = face_quality(frame.image, face.x, face.y, face.w, face.h, face.landmarks)
+            if q.score < ctx.min_quality:
+                continue
+            kept.append((face, q))
+        job.faces_detected += len(kept)
+        if not kept:
+            return
+
+        track_ids: list[int | None] = [None] * len(kept)
+        if self.tracker is not None:
+            track_ids = list(self.tracker.update(
+                frame.timestamp_s, [(f.x, f.y, f.w, f.h) for f, _ in kept], [f.embedding for f, _ in kept]))
+
+        self.visible_tids = [t for t in track_ids if t is not None]
+        for k, ((face, q), tid) in enumerate(zip(kept, track_ids, strict=True)):
+            result = ctx.reference_set.best_match(face.embedding)
+            ref = ctx.refs[result.reference_index]
+            state = self._track_state(tid, frame.timestamp_s, result.distance, ref.id, q.score)
+            continuation = state is not None and state.row is not None
+            if result.distance > ctx.candidate_threshold and not continuation:
+                continue
+            det = self._save_detection(frame, k, face, q, result.distance, ref.id)
+            if state is not None:
+                self._attach_to_track(state, det)
+
+    def _track_state(self, tid: int | None, ts: float, distance: float, ref_id: int,
+                     quality: float) -> _TrackState | None:
+        if tid is None:
+            return None
+        st = self.tracks.get(tid)
+        if st is None:
+            st = self.tracks[tid] = _TrackState(start_s=ts, end_s=ts)
+        st.end_s = ts
+        st.n_faces += 1
+        if len(st.top) < TRACK_TOP_K or distance < st.top[-1]:
+            bisect.insort(st.top, distance)
+            del st.top[TRACK_TOP_K:]
+        st.best_quality = max(st.best_quality, quality)
+        if distance < st.best_distance:
+            st.best_distance, st.best_ref_id = distance, ref_id
+        if st.row is not None:
+            self._refresh_track_row(st)
+        return st
+
+    def _save_detection(self, frame: SampledFrame, k: int, face, q, distance: float, ref_id: int) -> Detection:
+        ctx = self.ctx
+        matched = is_match(distance, ctx.threshold)
+        stem = f"v{self.video.id:04d}_f{frame.index:07d}_{k}"
+        crop_path = ctx.out_dir / "crops" / f"{stem}.jpg"
+        frame_path = ctx.out_dir / "frames" / f"{stem}.jpg"
+        write_jpeg(crop_path, crop_with_margin(frame.image, face.x, face.y, face.w, face.h))
+        label = f"{format_timestamp(frame.timestamp_s)} sim={1 - distance:.2f} q={q.score:.2f}"
+        color = (0, 0, 255) if matched else (0, 165, 255)
+        write_jpeg(frame_path, annotate(frame.image, face.x, face.y, face.w, face.h, label, color))
+        det = Detection(
+            job_id=self.job.id, video_id=self.video.id, reference_id=ref_id,
+            frame_index=frame.index, timestamp_s=round(frame.timestamp_s, 3),
+            x=face.x, y=face.y, w=face.w, h=face.h, face_confidence=round(face.confidence, 4),
+            distance=round(distance, 4), similarity=round(1 - distance, 4), is_match=matched,
+            crop_path=str(crop_path), frame_path=str(frame_path),
+            quality=round(q.score, 3), sharpness=round(q.sharpness, 3), size_score=round(q.size, 3),
+            frontal=None if q.frontal is None else round(q.frontal, 3),
+        )
+        self.s.add(det)
+        if matched:
+            self.job.matches += 1
+        return det
+
+    def _attach_to_track(self, st: _TrackState, det: Detection) -> None:
+        if st.row is None:
+            st.row = Track(job_id=self.job.id, video_id=self.video.id, start_s=round(st.start_s, 3),
+                           end_s=round(st.end_s, 3))
+            self.s.add(st.row)
+            self.job.tracks += 1
+        self.s.flush()  # um só flush: ids do track (se novo) e da deteção
+        det.track_id = st.row.id
+        st.row.n_saved += 1
+        if det.distance < st.best_saved_distance:
+            st.best_saved_distance = det.distance
+            st.row.best_detection_id = det.id
+        self._refresh_track_row(st)
+
+    def _refresh_track_row(self, st: _TrackState) -> None:
+        row = st.row
+        top = st.top
+        row.end_s = round(st.end_s, 3)
+        row.n_faces = st.n_faces
+        row.best_distance = round(st.best_distance, 4)
+        row.reference_id = st.best_ref_id
+        row.track_distance = round(float(sum(top) / len(top)), 4)
+        row.best_quality = round(st.best_quality, 3)
+        row.is_match = row.track_distance <= self.ctx.threshold
+        self.s.add(row)

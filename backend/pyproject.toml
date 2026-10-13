@@ -1,11 +1,9 @@
 [project]
 name = "faceai"
 version = "0.1.0"
-description = "Deteção de uma pessoa em vídeos de CCTV a partir de imagens de referência (DeepFace + FastAPI)"
+description = "Deteção de uma pessoa em vídeos de CCTV a partir de imagens de referência (ONNX Runtime + FastAPI)"
 requires-python = ">=3.11"
 dependencies = [
-    "deepface>=0.0.93",
-    "tf-keras>=2.16",
     "opencv-python-headless>=4.9",
     "numpy>=1.26",
     "fastapi>=0.115",
@@ -14,11 +12,15 @@ dependencies = [
     "python-multipart>=0.0.9",
     "jinja2>=3.1",
     "weasyprint>=62",
+    "rapidocr>=3.0",  # OCR da data/hora do CCTV (PP-OCR em ONNX Runtime; modelos incluídos no pacote)
 ]
 
 [project.optional-dependencies]
-cpu = ["tensorflow>=2.16"]
-gpu = ["tensorflow[and-cuda]>=2.16"]
+# Motor ONNX (por omissão): escolher UM dos dois
+cpu = ["onnxruntime>=1.18"]
+gpu = ["onnxruntime-gpu[cuda,cudnn]>=1.21"]
+# Motor DeepFace/TensorFlow (opcional; FACEAI_ENGINE=deepface)
+deepface = ["deepface>=0.0.93", "tf-keras>=2.16", "tensorflow>=2.16"]
 dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
 
 [build-system]
@@ -33,7 +35,7 @@ app = ["templates/*.j2"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["e2e: teste com modelos reais do DeepFace (lento; requer FACEAI_E2E_DATASET)"]
+markers = ["e2e: teste com modelos reais (requer FACEAI_E2E_DATASET e download dos modelos)"]
 
 [tool.ruff]
 line-length = 120

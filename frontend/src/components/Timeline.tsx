@@ -4,6 +4,7 @@ import { formatTime } from "../api";
 import type { Detection, Segment } from "../types";
 
 interface Props {
+  realTime?: (seconds: number) => string;
   duration: number;
   segments: Segment[];
   detections: Detection[];
@@ -12,7 +13,7 @@ interface Props {
 }
 
 /** Barra temporal do vídeo: segmentos de aparição (blocos) e deteções individuais (marcas). */
-export default function Timeline({ duration, segments, detections, currentTime, onSeek }: Props) {
+export default function Timeline({ duration, segments, detections, currentTime, onSeek, realTime }: Props) {
   const pct = (t: number) => `${Math.min(100, Math.max(0, (t / Math.max(duration, 0.001)) * 100))}%`;
   return (
     <Box
@@ -30,7 +31,8 @@ export default function Timeline({ duration, segments, detections, currentTime, 
       aria-valuenow={currentTime}
     >
       {segments.map((s, i) => (
-        <Tooltip key={i} label={`${formatTime(s.start_s)} → ${formatTime(s.end_s)} · ${s.count} deteções · sim. ${s.best_similarity.toFixed(3)}`}>
+        <Tooltip key={i} label={`${realTime?.(s.start_s) ? `${realTime(s.start_s)} → ${realTime(s.end_s).slice(11)} · ` : ""}`
+          + `${formatTime(s.start_s)} → ${formatTime(s.end_s)} · ${s.count} deteções · sim. ${s.best_similarity.toFixed(3)}`}>
           <Box
             pos="absolute"
             top={4}

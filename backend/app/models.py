@@ -64,6 +64,13 @@ class Video(SQLModel, table=True):
     height: int = 0
     codec: str = ""
     playback_path: str | None = None  # cópia H.264 só para visualização no navegador
+    # Hora real (relógio do DVR): hora_real(t) = dvr_start + t × dvr_rate + clock_offset_s
+    dvr_start: str | None = None  # ISO 8601 sem fuso: hora "de parede" do DVR (não é convertida para UTC)
+    dvr_rate: float = 1.0
+    clock_offset_s: float = 0.0
+    time_source: str = ""  # "" | "manual" | "ocr"
+    time_note: str = ""
+    time_calibration: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     uploaded_at: datetime = Field(default_factory=utcnow)
 
 
@@ -80,6 +87,10 @@ class Job(SQLModel, table=True):
     frames_processed: int = 0
     faces_detected: int = 0
     matches: int = 0
+    frames_sampled: int = 0
+    frames_skipped_motion: int = 0
+    frames_skipped_noface: int = 0
+    tracks: int = 0
     message: str = ""
     created_by: str = ""
     created_at: datetime = Field(default_factory=utcnow)
@@ -106,10 +117,53 @@ class Detection(SQLModel, table=True):
     is_match: bool
     crop_path: str
     frame_path: str
+    track_id: int | None = Field(default=None, index=True)
+    quality: float = 0.0
+    sharpness: float = 0.0
+    size_score: float = 0.0
+    frontal: float | None = None
     review_status: ReviewStatus = ReviewStatus.pending
     review_note: str = ""
     reviewed_by: str = ""
     reviewed_at: datetime | None = None
+
+
+class Track(SQLModel, table=True):
+    """Sequência de deteções da mesma face ao longo do vídeo (tracking)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    job_id: int = Field(foreign_key="job.id", index=True)
+    video_id: int = Field(foreign_key="video.id", index=True)
+    reference_id: int | None = Field(default=None, foreign_key="referenceimage.id")
+    start_s: float
+    end_s: float
+    n_faces: int = 0  # faces associadas ao track (incluindo as não guardadas)
+    n_saved: int = 0  # deteções guardadas (candidatas/continuação)
+    best_detection_id: int | None = None
+    best_distance: float = 2.0
+    track_distance: float = 2.0  # média das (até) 3 melhores distâncias — decide o match do track
+    best_quality: float = 0.0
+    is_match: bool = False
+    review_status: ReviewStatus = ReviewStatus.pending
+    review_note: str = ""
+    reviewed_by: str = ""
+    reviewed_at: datetime | None = None
+
+
+class Upload(SQLModel, table=True):
+    """Upload em blocos (retomável) de um vídeo ou imagem de referência."""
+
+    id: str = Field(primary_key=True)
+    case_id: int = Field(foreign_key="case.id", index=True)
+    kind: str  # "video" | "reference"
+    filename: str
+    size_bytes: int
+    received_bytes: int = 0
+    temp_path: str
+    created_by: str = ""
+    created_at: datetime = Field(default_factory=utcnow)
+    completed_at: datetime | None = None
+    result_id: int | None = None  # Video/ReferenceImage criado na conclusão (torna /complete idempotente)
 
 
 class AuditEvent(SQLModel, table=True):

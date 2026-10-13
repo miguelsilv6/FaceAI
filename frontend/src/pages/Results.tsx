@@ -6,12 +6,13 @@ import { IconAlertTriangle, IconDownload, IconInfoCircle, IconPlayerStop } from 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
-import { api, formatTime } from "../api";
+import { api, formatTime, realTime } from "../api";
 import DetectionCard from "../components/DetectionCard";
+import TrackCard from "../components/TrackCard";
 import JobStatusBadge from "../components/JobStatusBadge";
 import Timeline from "../components/Timeline";
 import { notifyError } from "../notify";
-import type { Detection, Job, ReviewStatus, Segment, Video } from "../types";
+import type { Detection, Job, ReviewStatus, Segment, Track, Video } from "../types";
 
 const EXPORTS = [
   ["pdf", "Relatório PDF"],
@@ -27,19 +28,23 @@ export default function Results() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [detections, setDetections] = useState<Detection[]>([]);
   const [segments, setSegments] = useState<Segment[]>([]);
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [view, setView] = useState<"tracks" | "detections">("tracks");
+  const [trackFilter, setTrackFilter] = useState<number | null>(null);
   const [videoId, setVideoId] = useState<number | null>(null);
   const [minSim, setMinSim] = useState(0);
   const [showCandidates, setShowCandidates] = useState(false);
-  const [order, setOrder] = useState<"time" | "score">("time");
+  const [order, setOrder] = useState<"time" | "score" | "quality">("time");
   const [frameDet, setFrameDet] = useState<Detection | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const loadResults = useCallback(() => {
-    Promise.all([api.detections(jobId), api.segments(jobId)])
-      .then(([d, s]) => {
+    Promise.all([api.detections(jobId), api.segments(jobId), api.tracks(jobId)])
+      .then(([d, s, t]) => {
         setDetections(d);
         setSegments(s);
+        setTracks(t);
       })
       .catch(notifyError);
   }, [jobId]);
@@ -71,11 +76,26 @@ export default function Results() {
   }, [running, jobId, loadResults]);
 
   const video = videos.find((v) => v.id === videoId) ?? null;
+  const trackById = useMemo(() => new Map(tracks.map((t) => [t.id, t])), [tracks]);
+  // Uma deteção conta como correspondência se estiver abaixo do limiar ou pertencer a um track com correspondência.
+  const isEffectiveMatch = (d: Detection) => d.is_match || (d.track_id != null && !!trackById.get(d.track_id)?.is_match);
   const videoDets = useMemo(() => detections.filter((d) => d.video_id === videoId), [detections, videoId]);
   const visible = useMemo(() => {
-    const list = videoDets.filter((d) => (showCandidates || d.is_match) && d.similarity >= minSim);
-    return order === "score" ? [...list].sort((a, b) => b.similarity - a.similarity) : list;
-  }, [videoDets, showCandidates, minSim, order]);
+    const list = videoDets.filter((d) => (trackFilter == null || d.track_id === trackFilter)
+      && (showCandidates || trackFilter != null || isEffectiveMatch(d)) && d.similarity >= minSim);
+    if (order === "score") return [...list].sort((a, b) => b.similarity - a.similarity);
+    if (order === "quality") return [...list].sort((a, b) => b.quality - a.quality);
+    return list;
+  }, [videoDets, showCandidates, minSim, order, trackFilter, trackById]);
+  const visibleTracks = useMemo(() => {
+    const list = tracks.filter((t) => t.video_id === videoId && (showCandidates || t.is_match)
+      && 1 - t.track_distance >= minSim);
+    if (order === "score") return [...list].sort((a, b) => a.track_distance - b.track_distance);
+    if (order === "quality") return [...list].sort((a, b) => b.best_quality - a.best_quality);
+    return list;
+  }, [tracks, videoId, showCandidates, minSim, order]);
+  const hasTracks = tracks.length > 0;
+  const showTracks = hasTracks && view === "tracks" && trackFilter == null;
   const videoSegments = segments.filter((s) => s.video_id === videoId);
 
   const seek = (t: number) => {
@@ -97,11 +117,23 @@ export default function Results() {
     }
   };
 
+  const reviewTrack = async (track: Track, status: ReviewStatus) => {
+    try {
+      const updated = await api.reviewTrack(track.id, status);
+      setTracks((ts) => ts.map((t) => (t.id === updated.id ? updated : t)));
+      loadResults();
+    } catch (e) {
+      notifyError(e);
+    }
+  };
+
   if (!job) return null;
+  // Mesmo critério do relatório: correspondência no frame ou num track com correspondência.
   const counts = {
-    confirmed: detections.filter((d) => d.is_match && d.review_status === "confirmed").length,
-    rejected: detections.filter((d) => d.is_match && d.review_status === "rejected").length,
-    matches: detections.filter((d) => d.is_match).length,
+    confirmed: detections.filter((d) => isEffectiveMatch(d) && d.review_status === "confirmed").length,
+    rejected: detections.filter((d) => isEffectiveMatch(d) && d.review_status === "rejected").length,
+    matches: detections.filter(isEffectiveMatch).length,
+    tracks: tracks.filter((t) => t.is_match).length,
   };
 
   return (
@@ -117,8 +149,11 @@ export default function Results() {
           <Group gap="sm"><Title order={2}>Análise #{job.id}</Title><JobStatusBadge status={job.status} /></Group>
           <Text size="sm" c="dimmed">
             {job.params.model} + {job.params.detector} · limiar {job.params.threshold} · {job.params.sample_fps} fps ·
-            dispositivo {String(job.environment.device ?? "?")} · {job.frames_processed} frames · {job.faces_detected} faces ·{" "}
+            {" "}{String(job.environment.engine ?? "")} {String(job.environment.device ?? "?")} ·{" "}
+            {job.frames_sampled} frames amostrados ({job.frames_skipped_motion} sem movimento, {job.frames_skipped_noface} sem faces)
+            · {job.frames_processed} com deteção completa · {job.faces_detected} faces ·{" "}
             {counts.matches} correspondências ({counts.confirmed} confirmadas, {counts.rejected} rejeitadas)
+            {job.params.tracking ? ` · ${counts.tracks} tracks com correspondência` : ""}
           </Text>
         </div>
         <Group>
@@ -161,7 +196,8 @@ export default function Results() {
                 <Text size="xs" c="dimmed">
                   Se o navegador não reproduzir este codec, use as imagens dos frames (botão 🔍 nas deteções) ou converta o vídeo para H.264/MP4.
                 </Text>
-                <Timeline duration={video.duration_s} segments={videoSegments} detections={videoDets.filter((d) => d.is_match)}
+                <Timeline duration={video.duration_s} segments={videoSegments} detections={videoDets.filter(isEffectiveMatch)}
+                  realTime={video.dvr_start ? (sec) => realTime(video, sec) : undefined}
                   currentTime={currentTime} onSeek={seek} />
               </>
             )}
@@ -176,7 +212,8 @@ export default function Results() {
               <Table highlightOnHover>
                 <Table.Thead>
                   <Table.Tr><Table.Th>Melhor face</Table.Th><Table.Th>Início</Table.Th><Table.Th>Fim</Table.Th>
-                    <Table.Th>Deteções</Table.Th><Table.Th>Melhor sim.</Table.Th></Table.Tr>
+                    <Table.Th>Deteções</Table.Th><Table.Th>Melhor sim.</Table.Th>
+                    {video?.dvr_start && <Table.Th>Hora real</Table.Th>}</Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {videoSegments.map((s, i) => (
@@ -186,6 +223,9 @@ export default function Results() {
                       <Table.Td ff="monospace">{formatTime(s.end_s)}</Table.Td>
                       <Table.Td>{s.count}</Table.Td>
                       <Table.Td>{(s.best_similarity * 100).toFixed(1)}%</Table.Td>
+                      {video?.dvr_start && (
+                        <Table.Td ff="monospace" fz="xs">{realTime(video, s.start_s)}<br />→ {realTime(video, s.end_s).slice(11)}</Table.Td>
+                      )}
                     </Table.Tr>
                   ))}
                 </Table.Tbody>
@@ -197,7 +237,18 @@ export default function Results() {
 
       <Card withBorder>
         <Group justify="space-between" mb="sm" wrap="wrap">
-          <Text fw={600}>Deteções ({visible.length})</Text>
+          <Group gap="sm">
+            {hasTracks && (
+              <SegmentedControl size="xs" value={view} onChange={(v) => { setView(v as "tracks" | "detections"); setTrackFilter(null); }}
+                data={[{ value: "tracks", label: `Tracks (${visibleTracks.length})` }, { value: "detections", label: "Deteções" }]} />
+            )}
+            {!showTracks && <Text fw={600}>Deteções ({visible.length})</Text>}
+            {trackFilter != null && (
+              <Button size="compact-xs" variant="light" onClick={() => setTrackFilter(null)}>
+                Track #{trackFilter} · mostrar tudo
+              </Button>
+            )}
+          </Group>
           <Group gap="lg" wrap="wrap">
             <Stack gap={2} w={220}>
               <Text size="xs">Similaridade mínima: {(minSim * 100).toFixed(0)}%</Text>
@@ -205,16 +256,30 @@ export default function Results() {
             </Stack>
             <Switch label="Mostrar candidatos abaixo do limiar" checked={showCandidates}
               onChange={(e) => setShowCandidates(e.currentTarget.checked)} />
-            <SegmentedControl size="xs" value={order} onChange={(v) => setOrder(v as "time" | "score")}
-              data={[{ value: "time", label: "Por tempo" }, { value: "score", label: "Por semelhança" }]} />
+            <SegmentedControl size="xs" value={order} onChange={(v) => setOrder(v as "time" | "score" | "quality")}
+              data={[{ value: "time", label: "Tempo" }, { value: "score", label: "Semelhança" },
+                { value: "quality", label: "Qualidade" }]} />
           </Group>
         </Group>
-        {visible.length === 0 ? (
+        {showTracks ? (
+          visibleTracks.length === 0 ? (
+            <Text c="dimmed">Sem tracks com os filtros atuais.</Text>
+          ) : (
+            <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
+              {visibleTracks.map((t) => (
+                <TrackCard key={t.id} track={t} onSeek={seek} onReview={reviewTrack}
+                  realStart={realTime(video, t.start_s)} realEnd={realTime(video, t.end_s)}
+                  onShowDetections={(x) => { setTrackFilter(x.id); setView("detections"); }} />
+              ))}
+            </SimpleGrid>
+          )
+        ) : visible.length === 0 ? (
           <Text c="dimmed">Sem deteções com os filtros atuais.</Text>
         ) : (
           <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
             {visible.map((d) => (
-              <DetectionCard key={d.id} det={d} onSeek={(x) => seek(x.timestamp_s)} onReview={review} onOpenFrame={setFrameDet} />
+              <DetectionCard key={d.id} det={d} onSeek={(x) => seek(x.timestamp_s)} onReview={review} onOpenFrame={setFrameDet}
+                realTime={realTime(video, d.timestamp_s)} />
             ))}
           </SimpleGrid>
         )}

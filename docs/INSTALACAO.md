@@ -11,14 +11,20 @@ Este guia cobre três formas de instalar o FaceAI numa VM ou num posto de análi
 | | Mínimo | Recomendado (CPU) | Com GPU |
 |---|---|---|---|
 | vCPU | 2 | 4–8 | 4 |
-| RAM | 4 GB | 8 GB | 16 GB |
-| GPU | — | — | NVIDIA com ≥ 4 GB de VRAM |
-| Disco (sistema + app) | 10 GB | 20 GB | 25 GB |
+| RAM | 2 GB | 4–8 GB | 8 GB |
+| GPU | — | — | NVIDIA com ≥ 2 GB de VRAM |
+| Disco (sistema + app) | 5 GB | 10 GB | 15 GB |
 | SO | Ubuntu 22.04/24.04 ou Debian 12, x86-64 | | |
 
 Além disto, é preciso espaço para os vídeos importados.
 
-Valores de referência medidos (4 vCPU, sem GPU, RetinaFace + ArcFace): ~1,6 s por frame analisado e ~1,4 GB de RAM. Uma hora de vídeo a 1 frame/s demora ~1,6 h.
+Valores de referência medidos (4 vCPU, sem GPU, motor ONNX: SCRFD-10G + ArcFace R50):
+- ~0,07 s por frame de deteção, mais ~0,08 s por face;
+- ~0,56 GB de RAM.
+
+Com o pré-filtro de movimento e a cascata (ativos por omissão), só os frames com mudanças e com faces passam pelo modelo completo. Num vídeo de teste, isto reduziu o tempo ~8×.
+
+A versão anterior (DeepFace/TensorFlow) precisava de ~1,6 s por frame e ~1,4 GB de RAM. Continua disponível como motor opcional.
 
 ---
 
@@ -69,7 +75,9 @@ pip install -e "backend[cpu]"           # só CPU
 # pip install -e "backend[gpu]"         # GPU NVIDIA (ver secção "GPU")
 ```
 
-A instalação descarrega cerca de 2,8 GB (sobretudo o TensorFlow) e pode demorar alguns minutos.
+A instalação ocupa cerca de 0,5 GB (ONNX Runtime + OpenCV; sem TensorFlow).
+
+Opcional: o motor DeepFace/TensorFlow (`pip install -e "backend[cpu,deepface]"` e `FACEAI_ENGINE=deepface`) acrescenta ~2,3 GB.
 
 ### 5. Frontend (interface web)
 
@@ -80,21 +88,25 @@ npm run build          # gera frontend/dist, que o backend serve
 cd ..
 ```
 
-### 6. Descarregar os modelos (uma vez, ~250 MB)
+### 6. Descarregar os modelos (uma vez, ~198 MB)
 
-Sem este passo, os modelos são descarregados na primeira análise. Fazê-lo já evita esperas e confirma que o TensorFlow funciona:
+Sem este passo, os modelos são descarregados na primeira análise. Fazê-lo já evita esperas e confirma que o ONNX Runtime funciona:
 
 ```bash
 cd backend
 python -c "
 import numpy as np
-from app.services.face_engine import DeepFaceEngine, _environment
-DeepFaceEngine().detect(np.zeros((200, 200, 3), np.uint8), model='ArcFace', detector='retinaface')
+from app.services.engine_onnx import OnnxEngine, _environment
+e = OnnxEngine()
+for m, d in [('arcface_r50', 'scrfd_10g'), ('arcface_mbf', 'scrfd_500m')]:
+    e.detect(np.zeros((200, 200, 3), np.uint8), model=m, detector=d)
 print('Modelos prontos. Dispositivo:', _environment()['device'])
 "
 ```
 
-Os pesos ficam em `~/.deepface/weights/`. Para mudar o local, define a variável `DEEPFACE_HOME`.
+Os pesos ficam em `~/.faceai/models/`. Para mudar o local, define `FACEAI_MODELS_DIR`.
+
+Cada ficheiro é verificado por SHA-256 contra os hashes fixados em `backend/app/services/engine_onnx.py`. Se algum não coincidir, é descartado.
 
 ### 7. Arrancar
 
@@ -114,7 +126,7 @@ Abre **http://localhost:8000** no browser.
 curl -s http://127.0.0.1:8000/api/system | python3 -m json.tool | head -20
 ```
 
-A resposta deve mostrar `"device": "CPU"` (ou `"GPU"`) e as versões do DeepFace e do TensorFlow.
+A resposta deve mostrar `"engine": "onnx"`, `"device": "CPU"` (ou `"GPU"`), a versão do ONNX Runtime e os hashes SHA-256 dos modelos.
 
 Opcionalmente, corre os testes:
 
@@ -129,7 +141,7 @@ cd backend && pytest -q
 ```bash
 sudo useradd --system --create-home --home-dir /srv/faceai faceai
 sudo mkdir -p /srv/faceai/data && sudo chown -R faceai:faceai /srv/faceai
-# copia ~/.deepface para /srv/faceai/.deepface se já descarregaste os modelos
+# copia ~/.faceai/models para /srv/faceai/models se já descarregaste os modelos
 ```
 
 Cria `/etc/systemd/system/faceai.service`, ajustando `/opt/FaceAI` ao local do código:
@@ -187,11 +199,12 @@ docker compose --profile gpu up --build -d faceai-gpu
 ## GPU (instalação nativa)
 
 1. Instala o driver NVIDIA (`sudo ubuntu-drivers install` e reinicia). Confirma com `nvidia-smi`.
-2. Instala com `pip install -e "backend[gpu]"`. Isto instala o TensorFlow com as bibliotecas CUDA/cuDNN via pip, por isso não é preciso instalar o CUDA no sistema.
+2. Instala com `pip install -e "backend[gpu]"` (em vez de `[cpu]`). Isto instala o `onnxruntime-gpu` com as bibliotecas CUDA/cuDNN via pip, por isso não é preciso instalar o CUDA no sistema.
 3. Confirma que a GPU é detetada:
    ```bash
-   python -c "import tensorflow as tf; print(tf.config.list_physical_devices('GPU'))"
+   python -c "import onnxruntime as ort; print(ort.get_available_providers())"
    ```
+   A lista deve incluir `CUDAExecutionProvider`.
    O badge **GPU** aparece no cabeçalho da interface.
 
 **Numa VM**, a GPU só fica disponível com *passthrough* PCI (Proxmox, VMware ESXi, Hyper-V DDA). O VirtualBox não suporta. No Windows, a alternativa é o WSL2, que já expõe a GPU NVIDIA.
@@ -208,14 +221,14 @@ Num posto de análise sem acesso à Internet:
    mkdir -p ~/faceai-offline && cd ~/faceai-offline
    cp -r /caminho/para/FaceAI .                     # inclui frontend/dist já compilado
    rm -rf FaceAI/.venv FaceAI/frontend/node_modules
-   cp -r ~/.deepface deepface                       # pesos dos modelos
+   cp -r ~/.faceai/models models                    # pesos dos modelos (passo A.6)
    pip download -d wheels "./FaceAI/backend[cpu]"   # pacotes Python
    cd .. && tar czf faceai-offline.tgz faceai-offline
    ```
 3. No posto isolado, instala os pacotes `apt` do passo A.1 a partir de um mirror local ou ISO. Depois:
    ```bash
    tar xzf faceai-offline.tgz && cd faceai-offline
-   cp -r deepface ~/.deepface                       # modelos
+   mkdir -p ~/.faceai && cp -r models ~/.faceai/models   # modelos
    python3 -m venv .venv && source .venv/bin/activate
    pip install --no-index --find-links wheels -e "FaceAI/backend[cpu]"
    ```
@@ -226,14 +239,63 @@ A aplicação não envia imagens nem vídeos para fora. A rede só é usada para
 
 ---
 
+## D. Atualizar uma instalação existente
+
+A base de dados é migrada automaticamente no arranque: as colunas novas são acrescentadas e nenhum dado é apagado. Os casos e as análises anteriores mantêm-se.
+
+**Instalação nativa:**
+```bash
+cd ~/FaceAI && git pull
+source .venv/bin/activate && pip install -e "backend[cpu]"
+cd frontend && npm ci && npm run build
+sudo systemctl restart faceai         # ou volta a arrancar o uvicorn
+```
+Opcional: `pip uninstall -y tensorflow tf-keras deepface retina-face` liberta ~2,3 GB, se não fores usar o motor DeepFace.
+
+**Docker:** se alteraste o `docker-compose.yml` (portas, redes), passa essas alterações para um `docker-compose.override.yml`, que é ignorado pelo git, e repõe o original:
+```bash
+cd ~/FaceAI
+cp docker-compose.yml /tmp/compose.meu.yml       # cópia de segurança
+git checkout docker-compose.yml && git pull
+cat > docker-compose.override.yml <<'YML'
+services:
+  faceai:
+    ports: !override
+      - "127.0.0.1:8002:8000"
+YML
+docker compose up -d --build
+```
+O `!override` substitui a lista de portas do ficheiro base, em vez de a juntar, e requer Docker Compose 2.24 ou superior (`docker compose version`).
+
+---
+
+## E. Publicar com Cloudflare Tunnel
+
+1. Arranca a app apenas em localhost (por exemplo, `127.0.0.1:8002`).
+2. No `/etc/cloudflared/config.yml` do túnel, acrescenta a regra **antes** de `http_status:404`:
+   ```yaml
+     - hostname: faceai.exemplo.pt
+       service: http://localhost:8002
+   ```
+3. Reinicia o túnel com `systemctl restart cloudflared` e cria o CNAME `faceai` → `<ID-DO-TÚNEL>.cfargotunnel.com`.
+4. **Obrigatório:** protege o subdomínio com **Cloudflare Access** (Zero Trust → Access → Applications → Self-hosted), com uma policy *Allow* para os emails autorizados. A app não tem login próprio.
+
+Os vídeos são enviados em blocos de 8 MB (`FACEAI_UPLOAD_CHUNK_MB`), por isso o limite de 100 MB por pedido do Cloudflare não afeta o upload.
+
+---
+
 ## Problemas comuns
 
 | Sintoma | Causa / solução |
 |---|---|
-| `A KerasTensor cannot be used as input to a TensorFlow function` | Falta o `tf-keras`, ou o TensorFlow foi importado antes de definir `TF_USE_LEGACY_KERAS=1`. Reinstala com `pip install -e "backend[cpu]"`. A app já define a variável no arranque. |
-| Download dos pesos falha (`An exception occurred while downloading ...`) | Sem acesso a `github.com`. Copia `~/.deepface/weights` de outra máquina (ver C). O detetor YuNet descarrega os pesos de outro sítio: se falhar, usa o RetinaFace. |
+| Download dos modelos falha (`urlopen error` / `SHA-256 inválido`) | Sem acesso a `github.com`, ou download corrompido. Repete, ou copia `~/.faceai/models` de outra máquina (ver C). |
+| `No module named 'onnxruntime'` | Falta o extra: `pip install -e "backend[cpu]"` (ou `[gpu]`). |
+| `A KerasTensor cannot be used…` (só com `FACEAI_ENGINE=deepface`) | Falta o `tf-keras`. Reinstala com `pip install -e "backend[cpu,deepface]"`. |
+| "OCR indisponível" ao acertar a hora | Falta o pacote `rapidocr`: corre `pip install -e "backend[cpu]"` outra vez. |
+| O OCR não encontra a data/hora | Marca a zona à mão (arrastando o rato sobre o frame), escolhe o formato da data certo, ou usa o acerto manual. |
+| Upload de vídeo grande falha atrás do Cloudflare (413) | Versão antiga sem upload em blocos. Atualiza a app e recarrega a página (Ctrl+F5); confirma `FACEAI_UPLOAD_CHUNK_MB` < 100. |
 | PDF não é gerado (`cannot load library 'libpango'`) | Falta `libpango-1.0-0 libpangoft2-1.0-0` (passo A.1). |
 | O vídeo não reproduz no browser | Codec não suportado e ffmpeg não instalado. Instala o ffmpeg e volta a importar o vídeo. A análise funciona na mesma. |
 | `Não foi possível abrir o vídeo` ao importar | Formato proprietário de DVR (ex.: `.dav`). Converte primeiro: `ffmpeg -i entrada.dav -c:v libx264 saida.mp4`. Regista a conversão no relatório. |
 | Análise muito lenta | Reduz *frames por segundo* (0,5–1), evita a *ampliação* > 1, ou usa GPU. |
-| `ImportError: libGL.so.1` | `sudo apt install libgl1` |
+| `ImportError: libGL.so.1` | Está instalado o `opencv-python` em vez do `opencv-python-headless`. Corre `pip uninstall opencv-python`, ou `sudo apt install libgl1`. |

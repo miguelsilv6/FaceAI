@@ -19,8 +19,14 @@ class Settings:
             _env("FRONTEND_DIST", str(Path(__file__).resolve().parents[2] / "frontend" / "dist"))
         )
     )
-    default_model: str = field(default_factory=lambda: _env("DEFAULT_MODEL", "ArcFace"))
-    default_detector: str = field(default_factory=lambda: _env("DEFAULT_DETECTOR", "retinaface"))
+    # Motor facial: "onnx" (SCRFD + ArcFace via ONNX Runtime, por omissão) ou "deepface" (TensorFlow, opcional).
+    engine: str = field(default_factory=lambda: _env("ENGINE", "onnx"))
+    # Pasta dos pesos ONNX (descarregados na 1.ª utilização e verificados por SHA-256).
+    models_dir: Path = field(
+        default_factory=lambda: Path(_env("MODELS_DIR", str(Path.home() / ".faceai" / "models"))).resolve()
+    )
+    # Tamanho de cada bloco do upload em blocos (abaixo do limite de 100 MB por pedido do Cloudflare).
+    upload_chunk_mb: int = field(default_factory=lambda: int(_env("UPLOAD_CHUNK_MB", "8")))
     cors_origins: list[str] = field(
         default_factory=lambda: _env("CORS_ORIGINS", "http://localhost:5173").split(",")
     )
@@ -41,7 +47,3 @@ class Settings:
 
 
 settings = Settings()
-
-# Modelos de reconhecimento e detetores suportados pelo DeepFace que fazem sentido em CCTV.
-RECOGNITION_MODELS = ["ArcFace", "Facenet512", "Facenet", "VGG-Face", "GhostFaceNet", "SFace"]
-DETECTOR_BACKENDS = ["retinaface", "mtcnn", "yunet", "centerface", "yolov8n", "opencv", "ssd"]
