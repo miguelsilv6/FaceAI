@@ -3,12 +3,13 @@ import {
   Slider, Stack, Switch, Table, Text, Title,
 } from "@mantine/core";
 import {
-  IconAlertTriangle, IconDownload, IconInfoCircle, IconPhoto, IconPlayerStop, IconUserPlus,
+  IconAlertTriangle, IconDownload, IconInfoCircle, IconPhoto, IconPlayerStop, IconTrash, IconUserPlus,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { api, formatTime, realTime } from "../api";
+import DeleteJobModal from "../components/DeleteJobModal";
 import DetectionCard from "../components/DetectionCard";
 import PersonCard from "../components/PersonCard";
 import TrackCard from "../components/TrackCard";
@@ -42,6 +43,8 @@ export default function Results() {
   const [order, setOrder] = useState<"time" | "score" | "quality">("time");
   const [frameDet, setFrameDet] = useState<Detection | null>(null);
   const [frameVariant, setFrameVariant] = useState<"annotated" | "original">("annotated");
+  const [deleting, setDeleting] = useState(false);
+  const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -247,6 +250,8 @@ export default function Results() {
             <Button color="orange" variant="light" leftSection={<IconPlayerStop size={18} />}
               onClick={() => api.cancelJob(job.id).then(setJob).catch(notifyError)}>Cancelar</Button>
           )}
+          <Button color="red" variant="subtle" leftSection={<IconTrash size={18} />} disabled={running}
+            onClick={() => setDeleting(true)}>Eliminar</Button>
           <Menu position="bottom-end" withinPortal>
             <Menu.Target>
               <Button leftSection={<IconDownload size={18} />} disabled={running}>Exportar</Button>
@@ -409,6 +414,9 @@ export default function Results() {
           </SimpleGrid>
         )}
       </Card>
+
+      <DeleteJobModal job={deleting ? job : null} onClose={() => setDeleting(false)}
+        onDeleted={(j) => navigate(`/cases/${j.case_id}`)} />
 
       <Modal opened={!!frameDet} onClose={() => setFrameDet(null)} size="xl"
         title={frameDet ? `Deteção #${frameDet.id} · ${formatTime(frameDet.timestamp_s)} · frame ${frameDet.frame_index}` : ""}>

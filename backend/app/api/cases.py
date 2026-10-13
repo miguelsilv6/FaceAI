@@ -12,7 +12,7 @@ from sqlmodel import select
 
 from ..config import settings
 from ..models import AuditEvent, Case, Detection, ReferenceImage, Video
-from ..schemas import CaseCreate
+from ..schemas import CaseCreate, CaseUpdate
 from ..services.audit import log_event
 from ..services.face_engine import get_engine
 from ..services.references import validate_reference
@@ -105,6 +105,27 @@ def list_cases(session: SessionDep) -> list[Case]:
 @router.get("/cases/{case_id}", response_model=Case)
 def get_case(case_id: int, session: SessionDep) -> Case:
     return get_case_or_404(session, case_id)
+
+
+@router.patch("/cases/{case_id}", response_model=Case)
+def update_case(case_id: int, body: CaseUpdate, session: SessionDep, actor: ActorDep) -> Case:
+    """Altera o nome e/ou a descrição do caso. Os valores anteriores ficam na auditoria."""
+    case = get_case_or_404(session, case_id)
+    changes = {}
+    if body.name is not None and body.name.strip() != case.name:
+        if not body.name.strip():
+            raise HTTPException(422, "O nome do caso não pode ficar vazio.")
+        changes["name"] = {"from": case.name, "to": body.name.strip()}
+        case.name = body.name.strip()
+    if body.description is not None and body.description != case.description:
+        changes["description"] = {"from": case.description, "to": body.description}
+        case.description = body.description
+    if changes:
+        session.add(case)
+        session.commit()
+        session.refresh(case)
+        log_event(session, "case.updated", case_id=case_id, actor=actor, details=changes)
+    return case
 
 
 @router.get("/cases/{case_id}/audit", response_model=list[AuditEvent])

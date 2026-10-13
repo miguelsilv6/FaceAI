@@ -160,6 +160,8 @@ export const api = {
   case: (id: number) => request<Case>("GET", `/api/cases/${id}`),
   createCase: (body: { name: string; description: string; analyst: string }) =>
     request<Case>("POST", "/api/cases", body),
+  updateCase: (id: number, body: { name?: string; description?: string }) =>
+    request<Case>("PATCH", `/api/cases/${id}`, body),
   audit: (caseId: number) => request<AuditEvent[]>("GET", `/api/cases/${caseId}/audit`),
 
   references: (caseId: number) => request<ReferenceImage[]>("GET", `/api/cases/${caseId}/references`),
@@ -192,6 +194,8 @@ export const api = {
       reference_ids: referenceIds,
     }),
   cancelJob: (id: number) => request<Job>("POST", `/api/jobs/${id}/cancel`),
+  deleteJob: (id: number, reason: string) =>
+    request<void>("DELETE", `/api/jobs/${id}`, { confirm_job_id: id, reason }),
   detections: (jobId: number) => request<Detection[]>("GET", `/api/jobs/${jobId}/detections`),
   segments: (jobId: number, personId?: number | null) => request<Segment[]>("GET",
     `/api/jobs/${jobId}/segments${personId != null ? `?person_id=${personId}` : ""}`),

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -14,8 +15,8 @@ from fastapi.responses import FileResponse
 from sqlmodel import select
 
 from ..config import settings
-from ..models import Detection, Job, JobStatus, ReferenceImage, Track, Video, utcnow
-from ..schemas import JobCreate, PersonMerge, ReviewUpdate, TrackPerson
+from ..models import Detection, Job, JobStatus, ReferenceImage, ReviewStatus, Track, Video, utcnow
+from ..schemas import JobCreate, JobDelete, PersonMerge, ReviewUpdate, TrackPerson
 from ..services import reports
 from ..services.audit import log_event
 from ..services.face_engine import default_threshold, get_engine
@@ -94,6 +95,41 @@ def cancel_job(job_id: int, session: SessionDep, actor: ActorDep) -> Job:
     log_event(session, "job.cancel_requested", case_id=job.case_id, actor=actor, details={"job_id": job_id})
     session.refresh(job)
     return job
+
+
+@router.delete("/jobs/{job_id}", status_code=204)
+def delete_job(job_id: int, body: JobDelete, session: SessionDep, actor: ActorDep) -> None:
+    """Elimina uma análise terminada: deteções, tracks e ficheiros gerados (recortes, frames, PNG originais).
+
+    Os vídeos e as imagens de referência do caso não são tocados. A auditoria é append-only: os eventos da
+    análise mantêm-se e é acrescentado um "job.deleted" com o resumo da análise eliminada e o motivo.
+    """
+    job = get_job_or_404(session, job_id)
+    if body.confirm_job_id != job_id:
+        raise HTTPException(422, "Confirmação inválida: indique o número da análise a eliminar.")
+    if job.status in (JobStatus.queued, JobStatus.running):
+        raise HTTPException(409, "A análise ainda está a decorrer. Cancele-a primeiro.")
+    detections = list(session.exec(select(Detection).where(Detection.job_id == job_id)))
+    tracks = list(session.exec(select(Track).where(Track.job_id == job_id)))
+    summary = {
+        "job_id": job_id, "reason": body.reason.strip(), "status": job.status.value,
+        "mode": job.params.get("mode", "match"), "params": job.params, "video_ids": job.video_ids,
+        "reference_ids": job.reference_ids, "created_by": job.created_by,
+        "created_at": job.created_at.isoformat() if job.created_at else None,
+        "finished_at": job.finished_at.isoformat() if job.finished_at else None, "message": job.message,
+        "detections": len(detections), "tracks": len(tracks), "matches": job.matches, "persons": job.persons,
+        "reviewed_detections": sum(1 for d in detections if d.review_status != ReviewStatus.pending),
+    }
+    folder = job_dir(job)
+    for row in (*detections, *tracks):
+        session.delete(row)
+    session.flush()
+    session.delete(job)
+    session.commit()
+    removed = folder.exists()
+    shutil.rmtree(folder, ignore_errors=True)
+    summary["files_removed"] = removed
+    log_event(session, "job.deleted", case_id=job.case_id, actor=actor, details=summary)
 
 
 @router.get("/jobs/{job_id}/detections", response_model=list[Detection])

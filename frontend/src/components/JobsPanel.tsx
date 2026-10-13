@@ -1,14 +1,15 @@
 import {
-  Accordion, Alert, Button, Card, Group, MultiSelect, NumberInput, Progress, SegmentedControl, Select, SimpleGrid, Stack,
-  Switch, Table, Text, Title,
+  Accordion, ActionIcon, Alert, Button, Card, Group, MultiSelect, NumberInput, Progress, SegmentedControl, Select, SimpleGrid, Stack,
+  Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconInfoCircle, IconPlayerPlay } from "@tabler/icons-react";
+import { IconInfoCircle, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api, formatDate } from "../api";
 import { notifyError } from "../notify";
 import type { Job, JobMode, JobParams, ReferenceImage, SystemInfo, Video } from "../types";
+import DeleteJobModal from "./DeleteJobModal";
 import JobStatusBadge from "./JobStatusBadge";
 
 interface Props {
@@ -26,6 +27,7 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
   const [videoIds, setVideoIds] = useState<string[]>([]);
   const [refIds, setRefIds] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
+  const [toDelete, setToDelete] = useState<Job | null>(null);
   const validRefs = useMemo(() => references.filter((r) => r.valid), [references]);
 
   useEffect(() => {
@@ -180,7 +182,7 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
               <Table.Thead>
                 <Table.Tr><Table.Th>#</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Progresso</Table.Th>
                   <Table.Th>Modelo / detetor</Table.Th><Table.Th>Resultado</Table.Th><Table.Th>Criada</Table.Th>
-                  <Table.Th>Analista</Table.Th></Table.Tr>
+                  <Table.Th>Analista</Table.Th><Table.Th /></Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {jobs.map((j) => (
@@ -192,6 +194,15 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                     <Table.Td>{j.params.mode === "discover" ? `${j.persons} pessoas (descoberta)` : j.matches}</Table.Td>
                     <Table.Td>{formatDate(j.created_at)}</Table.Td>
                     <Table.Td>{j.created_by}</Table.Td>
+                    <Table.Td w={40} onClick={(e) => e.stopPropagation()}>
+                      <Tooltip label={j.status === "running" || j.status === "queued"
+                        ? "Cancele a análise antes de a eliminar" : "Eliminar análise"}>
+                        <ActionIcon variant="subtle" color="red" aria-label={`Eliminar análise ${j.id}`}
+                          disabled={j.status === "running" || j.status === "queued"} onClick={() => setToDelete(j)}>
+                          <IconTrash size={16} />
+                        </ActionIcon>
+                      </Tooltip>
+                    </Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>
@@ -199,6 +210,8 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
           </Table.ScrollContainer>
         )}
       </Card>
+      <DeleteJobModal job={toDelete} onClose={() => setToDelete(null)}
+        onDeleted={() => { setToDelete(null); onChange(); }} />
     </Stack>
   );
 }

@@ -15,6 +15,16 @@ class CaseCreate(BaseModel):
     analyst: str = ""
 
 
+class CaseUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=200)
+    description: str | None = None
+
+
+class JobDelete(BaseModel):
+    confirm_job_id: int = Field(description="Número da análise, repetido como confirmação do pedido")
+    reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")
+
+
 class JobParams(BaseModel):
     # "match": procurar a pessoa das imagens de referência; "discover": sem referência, agrupar todas as faces
     # em pessoas distintas (o limiar passa a ser o de agrupamento e o tracking é obrigatório).

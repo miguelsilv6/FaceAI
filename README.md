@@ -110,7 +110,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 
 ## Utilização
 
-1. **Novo caso:** indica o nome ou referência do processo e o teu nome de analista (no cabeçalho).
+1. **Novo caso:** indica o nome ou referência do processo e o teu nome de analista (no cabeçalho). O nome e a descrição podem ser editados depois (✏️ ao lado do nome do caso). Os valores anteriores ficam na auditoria.
 2. **Referências:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
 3. **Vídeos:** arrasta os ficheiros de CCTV. O envio é **em blocos e retomável**: se a ligação cair, volta a largar o mesmo ficheiro e o upload continua de onde parou, mesmo depois de recarregar a página. Os metadados são extraídos automaticamente. Se o codec não for reproduzível no browser e houver `ffmpeg`, é criada uma **cópia H.264 só para visualização**. A análise usa sempre o original.
 4. **Análises:** escolhe o modo (**procurar uma pessoa** com amostra, ou **descobrir todas as faces** sem amostra), os vídeos, as referências, o modelo, os fps e o limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo.
@@ -119,7 +119,8 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
    - **vista por tracks**: um cartão por pessoa ou trajetória, com revisão do track inteiro;
    - **vista por deteções**, ordenável por tempo, semelhança ou **qualidade**;
    - **frame completo** (botão 🔍): com marcação ou original, e download de qualquer um deles. Ver [Download do frame](#download-do-frame).
-6. **Exportar:** relatório PDF ou HTML, com estatísticas, parâmetros, tracks e qualidade; CSV; JSON; ou ZIP.
+6. **Eliminar uma análise** (🗑 na lista de análises ou "Eliminar" nos resultados): pede o motivo e a confirmação, escrevendo o número da análise. Apaga as deteções, os tracks, as revisões e os ficheiros gerados. Os vídeos e as referências do caso mantêm-se. A auditoria é *append-only*: guarda o histórico da análise e regista a eliminação (quem, quando, motivo, parâmetros e totais). Não é possível eliminar uma análise a decorrer; é preciso cancelá-la primeiro.
+7. **Exportar:** relatório PDF ou HTML, com estatísticas, parâmetros, tracks e qualidade; CSV; JSON; ou ZIP.
 
 ### Modo descoberta (sem amostra)
 
