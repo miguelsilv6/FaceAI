@@ -74,6 +74,7 @@ function Row({ item, compact }: { item: Item; compact?: boolean }) {
 /** Faixa no topo com as tarefas em curso (análises, cópias de reprodução, uploads) dos casos acessíveis. */
 export default function ActivityBar() {
   const [activity, setActivity] = useState<Activity | null>(null);
+  const [, setDismissTick] = useState(0);
   const runningJobs = useRef<Set<number> | null>(null);
 
   useEffect(() => {
@@ -85,6 +86,7 @@ export default function ActivityBar() {
           const a = await api.activity();
           if (stopped) return;
           setActivity(a);
+          if (a.disk?.level === "ok") setDiskDismissed(null); // volta a avisar se o disco piorar outra vez
           const now = new Set(a.jobs.map((j) => j.id));
           const before = runningJobs.current;
           if (before) {
@@ -125,7 +127,9 @@ export default function ActivityBar() {
 
   const list = activity ? items(activity) : [];
   const disk = activity?.disk;
-  const diskAlert = disk && disk.level !== "ok" ? <DiskAlert disk={disk} /> : null;
+  const diskAlert = disk && disk.level !== "ok" && !diskDismissed(disk.level)
+    ? <DiskAlert disk={disk} onClose={() => { setDiskDismissed(disk.level); setDismissTick((n) => n + 1); }} />
+    : null;
   if (!list.length && !diskAlert) return null;
   const rest = list.slice(VISIBLE);
   return (
@@ -158,11 +162,36 @@ export default function ActivityBar() {
   );
 }
 
-function DiskAlert({ disk }: { disk: DiskStatus }) {
+const DISMISS_KEY = "faceai.diskAlertDismissed";
+const LEVEL_RANK: Record<string, number> = { ok: 0, warning: 1, critical: 2 };
+
+/** O aviso fechado fica escondido nesta sessão do browser, até o nível do disco subir. */
+function diskDismissed(level: DiskStatus["level"]): boolean {
+  try {
+    const d = sessionStorage.getItem(DISMISS_KEY);
+    return d != null && (LEVEL_RANK[d] ?? 0) >= LEVEL_RANK[level];
+  } catch {
+    return false;
+  }
+}
+
+function setDiskDismissed(level: DiskStatus["level"] | null) {
+  try {
+    if (level) sessionStorage.setItem(DISMISS_KEY, level);
+    else sessionStorage.removeItem(DISMISS_KEY);
+  } catch {
+    /* sem armazenamento: o aviso volta a aparecer no próximo ciclo */
+  }
+}
+
+function DiskAlert({ disk, onClose }: { disk: DiskStatus; onClose: () => void }) {
   const { isAdmin } = useAuth();
   const critical = disk.level === "critical";
   return (
+    // Fundo sólido por baixo: a variante "light" do Alert é semitransparente e a faixa é sticky.
+    <Box bg="var(--mantine-color-body)">
     <Alert color={critical ? "red" : "yellow"} radius={0} py={6} icon={<IconAlertTriangle size={16} />}
+      withCloseButton closeButtonLabel="Fechar aviso" onClose={onClose}
       role="alert" title={critical ? "Disco do servidor quase cheio" : "Pouco espaço em disco no servidor"}>
       <Text size="sm">
         Ocupado {disk.percent.toFixed(1)}% · livres {formatBytes(disk.free)}
@@ -172,5 +201,6 @@ function DiskAlert({ disk }: { disk: DiskStatus }) {
           : "Avise o administrador."}
       </Text>
     </Alert>
+    </Box>
   );
 }
