@@ -225,6 +225,19 @@ docker compose exec faceai python -m app.cli create-admin chefe --name "Nome Ape
 docker compose --profile gpu up --build -d faceai-gpu
 ```
 
+**Windows (Docker Desktop + WSL2):** não é preciso instalar o nvidia-container-toolkit, mas é preciso:
+1. o driver NVIDIA **para Windows** atualizado (com suporte WSL). Confirma com `nvidia-smi` no PowerShell. Não instales drivers NVIDIA dentro do WSL;
+2. o WSL atualizado: `wsl --update` e depois `wsl --shutdown`;
+3. no Docker Desktop, *Settings → General → Use the WSL 2 based engine* ativo. O backend Hyper-V não suporta GPU.
+
+Testa primeiro sem o FaceAI:
+
+```powershell
+docker run --rm --gpus all nvidia/cuda:12.4.1-base-ubuntu22.04 nvidia-smi
+```
+
+Se este teste falhar, o problema está no anfitrião e não no FaceAI. Até lá, usa o serviço CPU: `docker compose --profile gpu down` e depois `docker compose up --build -d`. Os dados mantêm-se.
+
 ---
 
 ## GPU (instalação nativa)
@@ -332,4 +345,5 @@ Os vídeos são enviados em blocos de 8 MB (`FACEAI_UPLOAD_CHUNK_MB`), por isso 
 | O vídeo não reproduz no browser | Codec não suportado e ffmpeg não instalado. Instala o ffmpeg e volta a importar o vídeo. A análise funciona na mesma. |
 | `Não foi possível abrir o vídeo` ao importar | Formato proprietário de DVR (ex.: `.dav`). Converte primeiro: `ffmpeg -i entrada.dav -c:v libx264 saida.mp4`. Regista a conversão no relatório. |
 | Análise muito lenta | Reduz *frames por segundo* (0,5–1), evita a *ampliação* > 1, ou usa GPU. |
+| `nvidia-container-cli: … WSL environment detected but no adapters were found` | O Docker Desktop (WSL2) não vê nenhuma GPU NVIDIA. Atualiza o driver NVIDIA do Windows e o WSL (`wsl --update`, `wsl --shutdown`), e confirma o motor WSL 2 no Docker Desktop (ver B, "Windows"). Sem GPU NVIDIA, usa o serviço CPU (`docker compose up -d`). |
 | `ImportError: libGL.so.1` | Está instalado o `opencv-python` em vez do `opencv-python-headless`. Corre `pip uninstall opencv-python`, ou `sudo apt install libgl1`. |
