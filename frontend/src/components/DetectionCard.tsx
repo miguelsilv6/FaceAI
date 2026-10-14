@@ -43,14 +43,12 @@ export default function DetectionCard({ det, onSeek, onReview, onOpenFrame, real
           {det.reference_id == null ? (
             <Badge color="blue" variant="filled" size="sm" style={{ flexShrink: 0 }}>{personId != null ? `P#${personId}` : "—"}</Badge>
           ) : (
-            <Group gap={4} wrap="nowrap">
-              {personLabel && <Badge color={personColor(personId)} variant="light" size="sm" maw={110}>{personLabel}</Badge>}
-              <Badge color={det.is_match ? "red" : "orange"} variant="filled" size="sm">
-                {(det.similarity * 100).toFixed(1)}%
-              </Badge>
-            </Group>
+            <Badge color={det.is_match ? "red" : "orange"} variant="filled" size="sm">
+              {(det.similarity * 100).toFixed(1)}%
+            </Badge>
           )}
         </Group>
+        {personLabel && <Badge color={personColor(personId)} variant="light" size="sm" fullWidth>{personLabel}</Badge>}
         {realTime && <Text size="xs" c="dimmed" ff="monospace">{realTime.slice(0, 10)} · vídeo {formatTime(det.timestamp_s)}</Text>}
         <Group gap={6} wrap="nowrap">
           <QualityBadge quality={det.quality} sharpness={det.sharpness} sizeScore={det.size_score} frontal={det.frontal} />

@@ -41,14 +41,14 @@ def test_priority_order_and_positions(client, tmp_path):
     high = _clone(base, priority=1, held=True)
     with _db() as s:
         assert queue_positions(s) == {}  # retidas não contam
-    for jid in (low, normal, high):
-        from app.models import Job
+    from app.models import Job
 
-        with _db() as s:
+    with _db() as s:  # liberta as três de uma vez (numa só transação), para o worker ver a fila completa
+        for jid in (low, normal, high):
             j = s.get(Job, jid)
             j.held = False
             s.add(j)
-            s.commit()
+        s.commit()
     with _db() as s:
         assert queue_positions(s) == {high: 1, normal: 2, low: 3}
         assert runner._next_job_id() == high

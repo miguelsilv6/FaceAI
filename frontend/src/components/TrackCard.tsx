@@ -48,14 +48,7 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
       <Stack gap={4} mt={6}>
         <Group justify="space-between" wrap="nowrap">
           <Text size="sm" fw={600}>Track #{track.id}</Text>
-          {personLabel ? (
-            <Group gap={4} wrap="nowrap">
-              <Badge color={personColor(track.person_id)} variant="light" size="sm" maw={110}>{personLabel}</Badge>
-              <Tooltip label="Similaridade do track (média das 3 melhores distâncias)">
-                <Badge color={track.is_match ? "red" : "orange"} variant="filled" size="sm">{(sim * 100).toFixed(1)}%</Badge>
-              </Tooltip>
-            </Group>
-          ) : track.person_id != null ? (
+          {track.person_id != null && !personLabel ? (
             <Tooltip label={`Distância ao centro do grupo da pessoa: ${track.track_distance.toFixed(3)}`}>
               <Badge color="blue" variant="filled" size="sm">Pessoa #{track.person_id}</Badge>
             </Tooltip>
@@ -65,6 +58,9 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
             </Tooltip>
           )}
         </Group>
+        {personLabel && (
+          <Badge color={personColor(track.person_id)} variant="light" size="sm" fullWidth>{personLabel}</Badge>
+        )}
         {realStart && (
           <Text size="xs" ff="monospace" fw={600}>{realStart} → {realEnd?.slice(11)}</Text>
         )}
