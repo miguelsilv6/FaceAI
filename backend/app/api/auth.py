@@ -1,8 +1,8 @@
 """Login em etapas (password → MFA TOTP → mudança de password obrigatória), sessão, logout e conta própria.
 
 Etapas da sessão (UserSession.stage):
-- "mfa_setup": password certa, MFA ainda por configurar (primeiro login);
-- "mfa": password certa, falta o código TOTP (ou um código de recuperação);
+- "mfa_setup": password certa, MFA por configurar (só com FACEAI_REQUIRE_MFA=true);
+- "mfa": password certa, falta o código TOTP (ou um código de recuperação) — utilizadores com MFA ativo;
 - "password": autenticado, mas tem de mudar a password temporária antes de continuar;
 - "ok": sessão completa.
 O token da sessão é renovado em cada mudança de etapa (proteção contra fixação de sessão).
@@ -44,6 +44,11 @@ class ConfirmBody(BaseModel):
     password: str = Field(max_length=auth.MAX_PASSWORD)
 
 
+class DisableMfaBody(BaseModel):
+    password: str = Field(max_length=auth.MAX_PASSWORD)
+    code: str = Field(max_length=32)
+
+
 # ----------------------------------------------------------------------------- cookie
 def _set_cookie(request: Request, response: Response, token: str) -> None:
     secure = cookie_secure(request)
@@ -78,7 +83,7 @@ def _user_out(user: User) -> dict:
 
 def _state(sess: UserSession, user: User) -> dict:
     return {"stage": sess.stage, "csrf_token": sess.csrf_token, "user": _user_out(user),
-            "idle_minutes": settings.session_idle_minutes}
+            "idle_minutes": settings.session_idle_minutes, "require_mfa": auth.mfa_required()}
 
 
 # ----------------------------------------------------------------------------- estado e login
@@ -107,9 +112,16 @@ def login(body: LoginBody, request: Request, response: Response, session: Sessio
                       details={"failed_logins": user.failed_logins, "until": user.locked_until.isoformat()})
         raise HTTPException(401, GENERIC_LOGIN_ERROR)
     auth.rehash_if_needed(session, user, body.password)
+    stage = auth.next_stage(user)
+    if stage in ("ok", "password"):  # sem MFA: a password conclui o login
+        auth.register_success(session, user, ip)
+        user.last_login_at = auth.now()
+        session.add(user)
     session.commit()
     old = _current(request, session)
-    sess = _rotate(request, response, session, old, user, auth.next_stage(user))
+    sess = _rotate(request, response, session, old, user, stage)
+    if stage in ("ok", "password"):
+        log_event(session, "auth.login", actor=user.username, details={"method": "password"})
     return _state(sess, user)
 
 
@@ -128,8 +140,12 @@ def me(request: Request, session: SessionDep) -> dict:
 # ----------------------------------------------------------------------------- MFA
 @router.post("/mfa/setup")
 def mfa_setup(request: Request, session: SessionDep) -> dict:
-    """Gera um novo segredo TOTP (ainda não ativo) e devolve o QR code para a app autenticadora."""
-    _, user = load_auth(request, session, stages=("mfa_setup",))
+    """Gera um novo segredo TOTP (ainda não ativo) e devolve o QR code para a app autenticadora.
+
+    No login (etapa "mfa_setup", MFA obrigatório) ou depois, em "A minha conta", para quem ainda não o tem."""
+    _, user = load_auth(request, session, stages=("mfa_setup", "ok"))
+    if user.totp_enabled:
+        raise HTTPException(409, "O MFA já está ativo. Desative-o primeiro para o configurar de novo.")
     secret = auth.new_totp_secret()
     user.totp_secret_enc = auth.encrypt(secret)
     user.totp_last_step = 0
@@ -181,10 +197,55 @@ def mfa_verify(body: CodeBody, request: Request, response: Response, session: Se
     return {**_state(new, user), "recovery_codes": codes}
 
 
+@router.post("/mfa/enable")
+def mfa_enable(body: CodeBody, request: Request, session: SessionDep) -> dict:
+    """Ativa o MFA a partir de uma sessão completa (A minha conta), confirmando o primeiro código do QR."""
+    _, user = load_auth(request, session)
+    if user.totp_enabled:
+        raise HTTPException(409, "O MFA já está ativo.")
+    if not user.totp_secret_enc:
+        raise HTTPException(409, "Gere primeiro o QR code.")
+    if not auth.verify_totp(user, body.code):
+        session.add(user)
+        auth.register_failure(session, user, user.username, client_ip(request))
+        log_event(session, "auth.mfa_failed", actor=user.username, details={"setup": True})
+        raise HTTPException(400, "Código inválido.")
+    user.totp_enabled = True
+    codes = auth.new_recovery_codes(user)
+    session.add(user)
+    session.commit()
+    log_event(session, "auth.mfa_enabled", actor=user.username)
+    return {"recovery_codes": codes}
+
+
+@router.post("/mfa/disable")
+def mfa_disable(body: DisableMfaBody, request: Request, session: SessionDep) -> dict:
+    """Desativa o MFA do próprio utilizador: pede a password e um código (TOTP ou de recuperação)."""
+    sess, user = load_auth(request, session)
+    if auth.mfa_required():
+        raise HTTPException(403, "O MFA é obrigatório nesta instalação.")
+    if not user.totp_enabled:
+        raise HTTPException(409, "O MFA não está ativo.")
+    ok = auth.verify_password(user, body.password) and (
+        auth.verify_totp(user, body.code) or auth.use_recovery_code(user, body.code))
+    if not ok:
+        session.add(user)
+        auth.register_failure(session, user, user.username, client_ip(request))
+        raise HTTPException(400, "Password ou código incorretos.")
+    user.totp_secret_enc, user.totp_enabled, user.totp_last_step, user.recovery_codes = None, False, 0, []
+    session.add(user)
+    session.commit()
+    ended = auth.end_sessions(session, user.id, except_id=sess.id)
+    log_event(session, "auth.mfa_disabled", actor=user.username, details={"other_sessions_ended": ended})
+    return _state(sess, user)
+
+
 @router.post("/mfa/recovery-codes")
 def regenerate_recovery_codes(body: ConfirmBody, request: Request, session: SessionDep) -> dict:
     """Gera 10 códigos novos (os anteriores deixam de valer). Pede a password para confirmar."""
     _, user = load_auth(request, session)
+    if not user.totp_enabled:
+        raise HTTPException(409, "O MFA não está ativo.")
     if not auth.verify_password(user, body.password):
         auth.register_failure(session, user, user.username, client_ip(request))
         raise HTTPException(400, "Password incorreta.")

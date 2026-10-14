@@ -139,9 +139,9 @@ cd backend
 FACEAI_DATA_DIR=/srv/faceai/data python -m app.cli create-admin chefe --name "Nome Apelido"
 ```
 
-Abre **http://localhost:8000** no browser e entra com essa conta. No primeiro login configuras o MFA: lês o QR code com uma app autenticadora (Microsoft/Google Authenticator, Aegis, 2FAS…) e guardas os 10 códigos de recuperação. Os restantes utilizadores são criados na interface (menu do utilizador → *Utilizadores*) com uma password temporária, que mudam no primeiro login.
+Abre **http://localhost:8000** no browser e entra com essa conta. Recomendado: em *A minha conta* → *Ativar verificação em dois passos*, lês o QR code com uma app autenticadora (Microsoft/Google Authenticator, Aegis, 2FAS…) e guardas os 10 códigos de recuperação. O MFA é opcional por utilizador; com `FACEAI_REQUIRE_MFA=true` passa a ser obrigatório para todos e é configurado logo no primeiro login. Os restantes utilizadores são criados na interface (menu do utilizador → *Utilizadores*) com uma password temporária, que mudam no primeiro login.
 
-- **Backup da chave:** o ficheiro `$FACEAI_DATA_DIR/secret.key` (ou a variável `FACEAI_SECRET_KEY`) cifra os segredos MFA. Inclui-o nos backups; sem ele, cada utilizador tem de reconfigurar o MFA (`python -m app.cli reset-mfa <utilizador>`).
+- **Backup da chave:** o ficheiro `$FACEAI_DATA_DIR/secret.key` (ou a variável `FACEAI_SECRET_KEY`) cifra os segredos MFA. Inclui-o nos backups; sem ele, quem tem MFA ativo tem de o reconfigurar (`python -m app.cli reset-mfa <utilizador>`).
 - **HTTP numa LAN:** o cookie de sessão só leva a flag `Secure` quando o pedido chega por HTTPS (`FACEAI_COOKIE_SECURE=auto`). Num acesso por `http://` na rede local a sessão funciona, mas a password e o cookie passam em claro: prefere o túnel SSH abaixo ou HTTPS.
 - Para aceder a partir do teu computador sem expor a porta na rede, usa um túnel SSH: `ssh -L 8000:localhost:8000 utilizador@vm`. Depois abre `http://localhost:8000` no teu computador.
 - `FACEAI_DATA_DIR` é onde ficam os casos, as evidências, a base de dados e o `audit.jsonl`. Escolhe um disco com espaço e com backup.
@@ -312,7 +312,7 @@ O `!override` substitui a lista de portas do ficheiro base, em vez de a juntar, 
    ```
 3. Reinicia o túnel com `systemctl restart cloudflared` e cria o CNAME `faceai` → `<ID-DO-TÚNEL>.cfargotunnel.com`.
 4. Define no serviço `FACEAI_TRUST_PROXY=cloudflare`, para a auditoria e os bloqueios usarem o IP real (`CF-Connecting-IP`) e o cookie ser marcado `Secure`. Opcionalmente, define também `FACEAI_ALLOWED_ORIGINS=https://faceai.exemplo.pt`. Só uses `cloudflare` se a app **não** estiver acessível diretamente, porque esses cabeçalhos poderiam ser forjados.
-5. **Recomendado (defesa em profundidade):** protege também o subdomínio com **Cloudflare Access** (Zero Trust → Access → Applications → Self-hosted), com uma policy *Allow* para os emails autorizados. A app tem login próprio com MFA, mas assim nem chega a ficar exposta a quem não está autorizado.
+5. **Recomendado (defesa em profundidade):** protege também o subdomínio com **Cloudflare Access** (Zero Trust → Access → Applications → Self-hosted), com uma policy *Allow* para os emails autorizados. A app tem login próprio (com MFA opcional), mas assim nem chega a ficar exposta a quem não está autorizado.
 
 Os vídeos são enviados em blocos de 8 MB (`FACEAI_UPLOAD_CHUNK_MB`), por isso o limite de 100 MB por pedido do Cloudflare não afeta o upload.
 

@@ -46,7 +46,7 @@ def client(tmp_path, monkeypatch):
     face_engine.set_engine(FakeEngine())
     with TestClient(app.main.app) as c:
         create_user(ADMIN, ADMIN_PASSWORD, role="admin", must_change=False)
-        c.totp = login(c, ADMIN, ADMIN_PASSWORD)
+        c.totp = login(c, ADMIN, ADMIN_PASSWORD, mfa=True)
         yield c
     face_engine.set_engine(None)
     app.db._engine = None
@@ -58,7 +58,7 @@ ADMIN_PASSWORD = "cavalo-bateria-agrafo-correto"
 
 def create_user(username: str, password: str, *, role: str = "analyst", must_change: bool = False,
                 display_name: str = "") -> int:
-    """Cria um utilizador diretamente na base de dados (sem MFA configurado)."""
+    """Cria um utilizador diretamente na base de dados (sem MFA)."""
     from sqlmodel import Session
 
     import app.db
@@ -90,20 +90,32 @@ def totp_code(totp: pyotp.TOTP, username: str) -> str:
         time.sleep(1)
 
 
-def login(c: TestClient, username: str, password: str, totp: pyotp.TOTP | None = None) -> pyotp.TOTP:
-    """Login completo (password → MFA, configurando-o se for o primeiro) e cabeçalho CSRF no cliente.
-    Devolve o gerador TOTP do utilizador."""
+def login(c: TestClient, username: str, password: str, totp: pyotp.TOTP | None = None, *,
+          mfa: bool = False) -> pyotp.TOTP | None:
+    """Login completo e cabeçalho CSRF no cliente. Passa o MFA se estiver ativo (ou for obrigatório) e, com
+    mfa=True, ativa-o em "A minha conta" se ainda não estiver. Devolve o gerador TOTP do utilizador (ou None)."""
     r = c.post("/api/auth/login", json={"username": username, "password": password})
     assert r.status_code == 200, r.text
     c.headers["X-CSRF-Token"] = r.json()["csrf_token"]
-    if r.json()["stage"] == "mfa_setup":
-        setup = c.post("/api/auth/mfa/setup").json()
-        totp = pyotp.TOTP(setup["secret"])
-    assert totp is not None
-    r = c.post("/api/auth/mfa/verify", json={"code": totp_code(totp, username)})
-    assert r.status_code == 200, r.text
-    c.headers["X-CSRF-Token"] = r.json()["csrf_token"]
+    if r.json()["stage"] in ("mfa_setup", "mfa"):
+        if r.json()["stage"] == "mfa_setup":
+            totp = pyotp.TOTP(c.post("/api/auth/mfa/setup").json()["secret"])
+        assert totp is not None
+        r = c.post("/api/auth/mfa/verify", json={"code": totp_code(totp, username)})
+        assert r.status_code == 200, r.text
+        c.headers["X-CSRF-Token"] = r.json()["csrf_token"]
     c.stage = r.json()["stage"]
+    if mfa and totp is None:
+        totp = enable_mfa(c, username)
+    return totp
+
+
+def enable_mfa(c: TestClient, username: str) -> pyotp.TOTP:
+    """Ativa o MFA a partir de uma sessão completa (como em "A minha conta")."""
+    totp = pyotp.TOTP(c.post("/api/auth/mfa/setup").json()["secret"])
+    r = c.post("/api/auth/mfa/enable", json={"code": totp_code(totp, username)})
+    assert r.status_code == 200, r.text
+    c.recovery_codes = r.json()["recovery_codes"]
     return totp
 
 

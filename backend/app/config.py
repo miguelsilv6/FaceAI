@@ -44,6 +44,8 @@ class Settings:
     session_idle_minutes: int = field(default_factory=lambda: int(_env("SESSION_IDLE_MINUTES", "30")))
     session_max_hours: int = field(default_factory=lambda: int(_env("SESSION_MAX_HOURS", "12")))
     # Documentação interativa da API (/docs): desligada por omissão em produção.
+    # MFA obrigatório para todos ("true") ou opcional, ativado por cada utilizador em "A minha conta" ("false").
+    require_mfa: bool = field(default_factory=lambda: _env("REQUIRE_MFA", "false").lower() == "true")
     api_docs: bool = field(default_factory=lambda: _env("API_DOCS", "false").lower() == "true")
 
     @property

@@ -2,7 +2,7 @@
 
   create-admin [username]   cria um administrador (pede a password; não há registo público)
   reset-password <username> define uma password temporária e termina as sessões
-  reset-mfa <username>      remove o MFA (volta a ser configurado no próximo login)
+  reset-mfa <username>      remove o MFA (ex.: telemóvel perdido)
   unlock <username>         desbloqueia a conta
   list-users                lista os utilizadores
 
@@ -52,13 +52,14 @@ def create_admin(s: Session, username: str | None, display_name: str) -> None:
     if s.exec(select(User).where(User.username == username)).first() is not None:
         sys.exit(f"Já existe o utilizador '{username}'.")
     pw = _ask_password(username)
-    # Quem tem acesso à consola escolheu a password: não é temporária. O MFA é configurado no primeiro login.
+    # Quem tem acesso à consola escolheu a password: não é temporária. O MFA ativa-se em "A minha conta"
+    # (ou é configurado logo no primeiro login, se FACEAI_REQUIRE_MFA=true).
     s.add(User(username=username, display_name=display_name, role=UserRole.admin,
                password_hash=auth.hash_password(pw), must_change_password=False,
                password_changed_at=auth.now()))
     s.commit()
     log_event(s, "user.created", actor=ACTOR, ip="local", details={"user": username, "role": "admin"})
-    print(f"Administrador '{username}' criado. No primeiro login vai configurar o MFA (app autenticadora).")
+    print(f"Administrador '{username}' criado. Recomendado: ativar o MFA em 'A minha conta' depois do login.")
 
 
 def reset_password(s: Session, username: str) -> None:
@@ -80,7 +81,7 @@ def reset_mfa(s: Session, username: str) -> None:
     s.commit()
     auth.end_sessions(s, u.id)
     log_event(s, "user.mfa_reset", actor=ACTOR, ip="local", details={"user": u.username})
-    print("MFA removido: será configurado de novo no próximo login.")
+    print("MFA removido. O utilizador pode voltar a ativá-lo em 'A minha conta'.")
 
 
 def unlock(s: Session, username: str) -> None:

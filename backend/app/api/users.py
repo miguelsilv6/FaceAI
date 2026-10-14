@@ -126,7 +126,7 @@ def reset_password(user_id: int, body: PasswordReset, session: SessionDep, admin
 
 @router.post("/users/{user_id}/reset-mfa")
 def reset_mfa(user_id: int, session: SessionDep, admin: AdminUser) -> dict:
-    """Remove o MFA (ex.: telemóvel perdido): no próximo login o utilizador configura-o de novo."""
+    """Remove o MFA (ex.: telemóvel perdido). O utilizador pode voltar a ativá-lo em "A minha conta"."""
     u = _get(session, user_id)
     u.totp_secret_enc, u.totp_enabled, u.totp_last_step, u.recovery_codes = None, False, 0, []
     session.add(u)

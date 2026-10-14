@@ -10,7 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session, select
 
-from .conftest import ADMIN, ADMIN_PASSWORD, create_user, login, new_client, totp_code
+from .conftest import ADMIN, ADMIN_PASSWORD, create_user, enable_mfa, login, new_client, totp_code
 
 PW = "girassol-trovoada-marmelo-9"
 
@@ -101,11 +101,13 @@ def test_login_cookie_flags_and_me(client):
     anon = _anon()
     create_user("ana", PW)
     r = anon.post("/api/auth/login", json={"username": "ANA ", "password": PW})
-    assert r.status_code == 200 and r.json()["stage"] == "mfa_setup"
+    # Sem MFA ativo (opcional por omissão), a password conclui o login
+    assert r.status_code == 200 and r.json()["stage"] == "ok" and r.json()["require_mfa"] is False
     cookie = r.headers["set-cookie"]
     assert "HttpOnly" in cookie and "SameSite=strict" in cookie.replace("Strict", "strict") and "Path=/" in cookie
-    # Etapa intermédia: ainda sem acesso aos dados
-    assert anon.get("/api/cases").status_code == 401
+    assert anon.get("/api/cases").status_code == 200
+    actions = [e["action"] for e in client.get("/api/audit/system").json()]
+    assert "auth.login" in actions
     me = client.get("/api/auth/me").json()
     assert me["stage"] == "ok" and me["user"]["username"] == ADMIN and me["user"]["role"] == "admin"
     assert "password_hash" not in me["user"] and "totp_secret_enc" not in str(me)
@@ -140,10 +142,15 @@ def test_ip_limit(client, monkeypatch):
     assert anon.post("/api/auth/login", json={"username": ADMIN, "password": ADMIN_PASSWORD}).status_code == 429
 
 
-def test_mfa_required_and_recovery_codes(client):
+def test_optional_mfa_enable_and_recovery_codes(client):
     c = _anon()
     create_user("carla", PW)
-    totp = login(c, "carla", PW)
+    assert login(c, "carla", PW) is None and c.stage == "ok"
+    assert c.post("/api/auth/mfa/enable", json={"code": "123456"}).status_code == 409  # sem QR gerado
+    assert c.post("/api/auth/mfa/recovery-codes", json={"password": PW}).status_code == 409  # sem MFA
+    totp = enable_mfa(c, "carla")
+    assert len(c.recovery_codes) == 10
+    assert c.post("/api/auth/mfa/setup").status_code == 409  # já ativo: não troca o segredo
     c.post("/api/auth/logout")
     # Segundo login: etapa "mfa"; código errado recusado; código de recuperação aceite uma única vez
     r = c.post("/api/auth/login", json={"username": "carla", "password": PW})
@@ -166,7 +173,43 @@ def test_mfa_required_and_recovery_codes(client):
     assert c.post("/api/auth/mfa/verify", json={"code": totp_code(totp, "carla")}).status_code == 200
 
 
-def test_session_token_rotates_and_logout(client):
+def test_mfa_disable(client):
+    c = new_client("mfa.off", PW)
+    totp = enable_mfa(c, "mfa.off")
+    assert c.post("/api/auth/mfa/disable", json={"password": "errada-errada-1", "code": totp_code(totp, "mfa.off")}
+                  ).status_code == 400
+    assert c.post("/api/auth/mfa/disable", json={"password": PW, "code": "000000"}).status_code == 400
+    r = c.post("/api/auth/mfa/disable", json={"password": PW, "code": totp_code(totp, "mfa.off")})
+    assert r.status_code == 200 and r.json()["user"]["totp_enabled"] is False
+    c.post("/api/auth/logout")
+    assert login(c, "mfa.off", PW) is None and c.stage == "ok"  # volta a entrar só com a password
+    actions = [e["action"] for e in client.get("/api/audit/system").json()]
+    assert "auth.mfa_enabled" in actions and "auth.mfa_disabled" in actions
+
+
+def test_required_mfa_mode(client, monkeypatch):
+    """FACEAI_REQUIRE_MFA=true: o MFA é configurado logo no login e não pode ser desativado."""
+    from app.services import auth
+
+    monkeypatch.setattr(auth, "mfa_required", lambda: True)
+    c = _anon()
+    create_user("obrigada", PW)
+    r = c.post("/api/auth/login", json={"username": "obrigada", "password": PW})
+    assert r.json()["stage"] == "mfa_setup" and r.json()["require_mfa"] is True
+    c.headers["X-CSRF-Token"] = r.json()["csrf_token"]
+    assert c.get("/api/cases").status_code == 401  # etapa intermédia: sem acesso aos dados
+    secret = c.post("/api/auth/mfa/setup").json()["secret"]
+    r = c.post("/api/auth/mfa/verify", json={"code": totp_code(pyotp.TOTP(secret), "obrigada")})
+    assert r.status_code == 200 and r.json()["stage"] == "ok" and len(r.json()["recovery_codes"]) == 10
+    c.headers["X-CSRF-Token"] = r.json()["csrf_token"]
+    r = c.post("/api/auth/mfa/disable", json={"password": PW, "code": totp_code(pyotp.TOTP(secret), "obrigada")})
+    assert r.status_code == 403
+
+
+def test_session_token_rotates_and_logout(client, monkeypatch):
+    from app.services import auth
+
+    monkeypatch.setattr(auth, "mfa_required", lambda: True)
     c = _anon()
     create_user("diana", PW)
     r = c.post("/api/auth/login", json={"username": "diana", "password": PW})
@@ -286,11 +329,12 @@ def test_user_admin_and_last_admin(client):
 
 def test_reset_mfa_and_password_end_sessions(client):
     c = new_client("hugo", PW)
+    enable_mfa(c, "hugo")
     uid = _user("hugo").id
     assert client.post(f"/api/users/{uid}/reset-mfa").json()["totp_enabled"] is False
     assert c.get("/api/cases").status_code == 401
     c2 = _anon()
-    login(c2, "hugo", PW)  # volta a configurar o MFA
+    assert login(c2, "hugo", PW) is None  # entra só com a password (pode voltar a ativar o MFA)
     assert client.post(f"/api/users/{uid}/reset-password", json={"password": "temporaria-bem-longa"}).status_code == 200
     assert c2.get("/api/cases").status_code == 401
 
@@ -398,7 +442,10 @@ def test_member_owner_and_admin_rights(client):
 
 
 @pytest.mark.parametrize("stage_user", ["sem-mfa"])
-def test_pending_stage_cannot_reach_data(client, stage_user):
+def test_pending_stage_cannot_reach_data(client, stage_user, monkeypatch):
+    from app.services import auth
+
+    monkeypatch.setattr(auth, "mfa_required", lambda: True)
     c = _anon()
     create_user(stage_user, PW)
     r = c.post("/api/auth/login", json={"username": stage_user, "password": PW})

@@ -2,7 +2,8 @@
 
 - Passwords: Argon2id (argon2-cffi, parâmetros RFC 9106), mínimo 12 caracteres, recusa passwords comuns e as que
   contêm o nome de utilizador. Sem regras de composição forçadas (NIST SP 800-63B).
-- TOTP (RFC 6238, 30 s, 6 dígitos), janela ±1 passo e anti-replay (último passo aceite). O segredo fica cifrado
+- TOTP (RFC 6238, 30 s, 6 dígitos), opcional por utilizador (obrigatório com FACEAI_REQUIRE_MFA=true),
+  janela ±1 passo e anti-replay (último passo aceite). O segredo fica cifrado
   com AES-GCM e uma chave do servidor (FACEAI_SECRET_KEY ou data/secret.key, permissões 0600).
 - Códigos de recuperação: 10, de uso único, guardados como SHA-256 (têm 50 bits de entropia cada).
 - Sessões: token aleatório de 256 bits no cookie; na base de dados só fica o SHA-256. Expiram por inatividade e
@@ -266,10 +267,17 @@ def end_sessions(s: Session, user_id: int, except_id: str | None = None) -> int:
     return len(rows)
 
 
+def mfa_required() -> bool:
+    return settings.require_mfa
+
+
 def next_stage(user: User) -> str:
-    if not user.totp_enabled:
+    """Etapa a seguir à password certa."""
+    if user.totp_enabled:
+        return "mfa"
+    if mfa_required():
         return "mfa_setup"
-    return "mfa"
+    return stage_after_mfa(user)
 
 
 def stage_after_mfa(user: User) -> str:

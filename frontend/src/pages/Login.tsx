@@ -100,7 +100,7 @@ function PasswordStep({ expired, onState }: { expired: boolean; onState: (s: Aut
   );
 }
 
-function CodeForm({ label, allowRecovery, onSubmit, busy, error }: {
+export function CodeForm({ label, allowRecovery, onSubmit, busy, error }: {
   label: string; allowRecovery: boolean; onSubmit: (code: string) => void; busy: boolean; error: string | null;
 }) {
   const [code, setCode] = useState("");
@@ -157,25 +157,30 @@ function MfaSetupStep({ onState, onCancel }: { onState: (s: AuthState) => void; 
   }, [run]);
   return (
     <Frame title="Configurar verificação em dois passos" icon={<IconShieldLock size={28} />}>
-      <Text size="sm">O FaceAI exige um segundo fator. Leia o código QR com uma app autenticadora (por exemplo
-        Microsoft Authenticator, Google Authenticator, Aegis ou 2FAS) e escreva o código de 6 dígitos que aparece.</Text>
-      {setup && (
-        <>
-          <Center><Image src={setup.qr_svg} alt="Código QR para a app autenticadora" w={220} h={220} /></Center>
-          <Text size="xs" c="dimmed" ta="center">Sem câmara? Introduza a chave manualmente:</Text>
-          <Group justify="center" gap="xs">
-            <Code style={{ wordBreak: "break-all" }}>{setup.secret.match(/.{1,4}/g)?.join(" ")}</Code>
-            <CopyButton value={setup.secret}>
-              {({ copied, copy }) => <Button size="compact-xs" variant="light" onClick={copy}>
-                {copied ? "Copiada" : "Copiar"}</Button>}
-            </CopyButton>
-          </Group>
-        </>
-      )}
+      <Text size="sm">Esta instalação exige um segundo fator.</Text>
+      {setup && <MfaQr setup={setup} />}
       <CodeForm label="Código de 6 dígitos" allowRecovery={false} busy={busy} error={error}
         onSubmit={(code) => void run(async () => onState(await authApi.mfaVerify(code)))} />
       <Anchor component="button" type="button" size="sm" c="dimmed" onClick={onCancel}>Cancelar</Anchor>
     </Frame>
+  );
+}
+
+export function MfaQr({ setup }: { setup: MfaSetup }) {
+  return (
+    <>
+      <Text size="sm">Leia o código QR com uma app autenticadora (por exemplo Microsoft Authenticator, Google
+        Authenticator, Aegis ou 2FAS) e escreva o código de 6 dígitos que aparece.</Text>
+      <Center><Image src={setup.qr_svg} alt="Código QR para a app autenticadora" w={220} h={220} /></Center>
+      <Text size="xs" c="dimmed" ta="center">Sem câmara? Introduza a chave manualmente:</Text>
+      <Group justify="center" gap="xs">
+        <Code style={{ wordBreak: "break-all" }}>{setup.secret.match(/.{1,4}/g)?.join(" ")}</Code>
+        <CopyButton value={setup.secret}>
+          {({ copied, copy }) => <Button size="compact-xs" variant="light" onClick={copy}>
+            {copied ? "Copiada" : "Copiar"}</Button>}
+        </CopyButton>
+      </Group>
+    </>
   );
 }
 
