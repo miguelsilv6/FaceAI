@@ -20,10 +20,13 @@ def test_two_persons_in_one_pass(client, tmp_path):
     case = client.post("/api/cases", json={"name": "Dois suspeitos"}).json()
     red = _upload_ref(client, case["id"], tmp_path / "a.jpg", RED)
     blue = _upload_ref(client, case["id"], tmp_path / "b.jpg", BLUE)
-    for ref, label in ((red, "Suspeito A"), (blue, "  Suspeito   B ")):
-        r = client.patch(f"/api/references/{ref['id']}", json={"person_label": label})
+    for ref, name in ((red, "Suspeito A"), (blue, "  Suspeito   B ")):
+        person = client.post(f"/api/cases/{case['id']}/persons", json={"name": name}).json()
+        r = client.patch(f"/api/references/{ref['id']}", json={"case_person_id": person["id"]})
         assert r.status_code == 200
-    assert client.get(f"/api/cases/{case['id']}/references").json()[1]["person_label"] == "Suspeito B"
+    persons = client.get(f"/api/cases/{case['id']}/persons").json()
+    assert [(p["name"], p["reference_ids"]) for p in persons] == [("Suspeito A", [red["id"]]),
+                                                                 ("Suspeito B", [blue["id"]])]
     video = make_video(tmp_path / "cctv.mp4", [(1.0, 3.0, RED), (4.0, 6.0, BLUE), (7.0, 9.0, GREEN)],
                        duration_s=10, fps=10)
     with video.open("rb") as fh:
@@ -58,7 +61,7 @@ def test_two_persons_in_one_pass(client, tmp_path):
     assert sorted(npz["person_ids"].tolist())[:2] == [1, 2] and str(npz["model"]) == "fake_model"
 
     events = [e["action"] for e in client.get(f"/api/cases/{case['id']}/audit").json()]
-    assert events.count("reference.person_labeled") == 2
+    assert events.count("reference.person_changed") == 2 and events.count("person.created") == 2
 
 
 def test_single_person_keeps_person_id_empty(client, tmp_path):
@@ -70,7 +73,8 @@ def test_single_person_keeps_person_id_empty(client, tmp_path):
     r = client.post(f"/api/cases/{case['id']}/jobs",
                     json={"params": {"sample_fps": 2, "threshold": 0.05, "motion_filter": False, "tracking": True}})
     job = wait_for_job(client, r.json()["id"])
-    assert job["params"]["persons"] == [{"id": 1, "label": "Pessoa", "reference_ids": job["reference_ids"]}]
+    assert job["params"]["persons"] == [{"id": 1, "label": "Pessoa", "case_person_id": None,
+                                         "reference_ids": job["reference_ids"]}]
     assert {d["person_id"] for d in client.get(f"/api/jobs/{job['id']}/detections").json()} == {None}
     assert {t["person_id"] for t in client.get(f"/api/jobs/{job['id']}/tracks").json()} == {None}
 

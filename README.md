@@ -177,13 +177,15 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 10. **Tarefas em curso:** uma faixa no topo mostra as análises (progresso, tempo restante e posição na fila), as conversões para reprodução e os uploads a decorrer nos casos a que tens acesso, com ligação para cada um. No fim de uma análise aparece uma notificação. Também mostra um alerta quando o disco do servidor passa de 80% (amarelo) ou 90% (vermelho).
 11. **Fila de análises:** as análises correm uma de cada vez. Nas que estão em fila, quem as criou, o responsável do caso ou um admin pode mudar a prioridade (alta, normal ou baixa) e retê-las ou libertá-las. Uma análise a decorrer só pode ser cancelada. A fila sobrevive a um reinício do servidor: as análises em fila retomam e as que estavam a decorrer ficam marcadas como interrompidas.
 
-### Várias pessoas na mesma análise
-Para procurar vários suspeitos numa só passagem pelos vídeos:
-- Dá o mesmo **rótulo** às imagens de referência de cada pessoa no separador *Referências* (ex.: "Suspeito A", "Suspeito B"). Imagens sem rótulo contam como a mesma pessoa.
-- Cada face é atribuída à pessoa mais próxima. Cada track fica com a pessoa cuja média das 3 melhores distâncias é menor.
-- Nos resultados há filtro e cor por pessoa. O CSV e o relatório indicam a pessoa de cada correspondência.
+### Pessoas e várias fotos (vários ângulos)
+No separador *Referências* podes trabalhar com **fotos soltas** ou com **pessoas**.
+- **Fotos soltas:** é a forma mais simples, para uma só pessoa. Todas as fotos soltas contam como a mesma pessoa.
+- **Pessoas:** o botão **Nova pessoa** cria, por exemplo, "Suspeito A", com notas opcionais (roupa, tatuagens…). Juntas-lhe fotos de vários ângulos de três maneiras: largando-as no cartão da pessoa, arrastando fotos soltas para o cartão, ou pelo menu da foto (*Mover para…*). Mudar o nome faz-se num só sítio. Eliminar uma pessoa não apaga as fotos: passam a soltas.
+- **Como as fotos são usadas:** cada face do vídeo é comparada com todas as fotos da pessoa e conta a mais parecida.
+- **Várias pessoas:** escolhendo fotos de várias pessoas em *Nova análise*, todas são procuradas **na mesma passagem**. Cada face e cada track ficam com a pessoa mais próxima. Nos resultados há filtro e cor por pessoa, e o CSV e o relatório indicam a pessoa de cada correspondência.
+- **Faces do próprio CCTV:** nos resultados, o botão 👤+ de um track, de uma deteção ou do frame faz *Adicionar esta face à pessoa…* (ou a uma pessoa nova). São das melhores referências: mesma câmara, mesma luz. O mesmo botão permite **remover** a face depois. Se a face ainda não foi usada numa análise, é eliminada; se já foi, sai da pessoa e fica nas fotos soltas, para a análise continuar a referenciá-la. Tudo fica na auditoria.
 
-O tempo de análise é praticamente o mesmo que para uma só pessoa: a deteção e o embedding das faces fazem-se uma vez por frame.
+Os rótulos de texto da versão anterior são convertidos automaticamente em pessoas no arranque.
 
 ### Procurar a pessoa noutras análises
 O botão **Procurar noutras análises** (👥), num track ou numa pessoa, compara o seu embedding (média das melhores faces) com os tracks de todas as análises concluídas dos casos a que tens acesso, ou só do caso atual.

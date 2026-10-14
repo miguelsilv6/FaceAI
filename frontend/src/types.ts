@@ -19,7 +19,9 @@ export interface ReferenceImage {
   valid: boolean;
   message: string;
   uploaded_at: string;
-  person_label: string;
+  person_label: string; // obsoleto (convertido em CasePerson)
+  case_person_id: number | null;
+  source_detection_id: number | null;
 }
 
 export interface Video {
@@ -442,4 +444,15 @@ export interface CaseRoute {
   unsynced: RouteSegment[];
   jobs: number[];
   videos: { id: number; filename: string; synced: boolean }[];
+}
+
+export interface CasePerson {
+  id: number;
+  case_id: number;
+  name: string;
+  notes: string;
+  created_by: string;
+  created_at: string;
+  reference_ids: number[];
+  valid_references: number;
 }

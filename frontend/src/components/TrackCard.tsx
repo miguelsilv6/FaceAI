@@ -3,6 +3,7 @@ import { IconCheck, IconPhotoSearch, IconUserShare, IconUsersGroup, IconX } from
 
 import { api, formatTime } from "../api";
 import { personColor } from "../personColors";
+import PersonAssignMenu, { type PersonAssignProps } from "./PersonAssignMenu";
 import type { ReviewStatus, Track } from "../types";
 import QualityBadge from "./QualityBadge";
 
@@ -20,6 +21,8 @@ interface Props {
   /** Várias pessoas procuradas (modo procurar): nome da pessoa do track. */
   personLabel?: string;
   onFindSimilar?: (track: Track) => void;
+  /** Adicionar/remover a melhor face do track das fotos de uma pessoa do caso. */
+  personAssign?: Omit<PersonAssignProps, "detectionId">;
 }
 
 const REVIEW: Record<ReviewStatus, [string, string]> = {
@@ -30,7 +33,7 @@ const REVIEW: Record<ReviewStatus, [string, string]> = {
 
 /** Um track = a mesma face em vários frames. A revisão aplica-se a todas as deteções do track. */
 export default function TrackCard({ track, onSeek, onReview, onShowDetections, realStart, realEnd, onOpenFrame,
-  personIds, onMove, personLabel, onFindSimilar }: Props) {
+  personIds, onMove, personLabel, onFindSimilar, personAssign }: Props) {
   const [label, color] = REVIEW[track.review_status];
   const sim = 1 - track.track_distance;
   return (
@@ -76,6 +79,9 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
             <Badge color={color} variant="light" size="sm">{label}</Badge>
           </Tooltip>
           <Group gap={4} wrap="nowrap">
+            {personAssign && track.best_detection_id != null && (
+              <PersonAssignMenu detectionId={track.best_detection_id} {...personAssign} />
+            )}
             {onOpenFrame && track.best_detection_id != null && (
               <Tooltip label="Ver frame da melhor face">
                 <ActionIcon variant="subtle" size="sm" aria-label="Ver frame"

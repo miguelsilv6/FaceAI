@@ -36,6 +36,17 @@ class Case(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class CasePerson(SQLModel, table=True):
+    """Pessoa de um caso (ex.: "Suspeito A") com as suas fotos de referência (vários ângulos)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    case_id: int = Field(foreign_key="case.id", index=True)
+    name: str
+    notes: str = ""
+    created_by: str = ""
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class ReferenceImage(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     case_id: int = Field(foreign_key="case.id", index=True)
@@ -49,8 +60,11 @@ class ReferenceImage(SQLModel, table=True):
     valid: bool = False
     message: str = ""
     uploaded_at: datetime = Field(default_factory=utcnow)
-    # Pessoa a que a imagem pertence: referências com o mesmo rótulo são a mesma pessoa (várias pessoas por análise).
-    person_label: str = ""
+    # Pessoa do caso a que a foto pertence (None = foto solta). Fotos da mesma pessoa = vários ângulos.
+    case_person_id: int | None = Field(default=None, foreign_key="caseperson.id", index=True)
+    # Deteção de onde a foto veio ("Adicionar esta face à pessoa"), se não foi carregada pelo utilizador.
+    source_detection_id: int | None = None
+    person_label: str = ""  # obsoleto (versão anterior: rótulo de texto); convertido em CasePerson no arranque
 
 
 class Video(SQLModel, table=True):

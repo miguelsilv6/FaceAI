@@ -11,8 +11,30 @@ from fastapi.responses import FileResponse
 from sqlmodel import select
 
 from ..config import settings
-from ..models import AuditEvent, Case, CaseMember, Detection, Job, JobStatus, ReferenceImage, Track, Upload, User, Video
-from ..schemas import CaseCreate, CaseDelete, CaseOut, CaseUpdate, MemberAdd, ReferenceUpdate
+from ..models import (
+    AuditEvent,
+    Case,
+    CaseMember,
+    CasePerson,
+    Detection,
+    Job,
+    JobStatus,
+    ReferenceImage,
+    Track,
+    Upload,
+    User,
+    Video,
+)
+from ..schemas import (
+    CaseCreate,
+    CaseDelete,
+    CaseOut,
+    CasePersonCreate,
+    CasePersonUpdate,
+    CaseUpdate,
+    MemberAdd,
+    ReferenceUpdate,
+)
 from ..services import disk
 from ..services.audit import log_event
 from ..services.face_engine import get_engine
@@ -191,7 +213,9 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
     }
     members = list(session.exec(select(CaseMember).where(CaseMember.case_id == case_id)))
     summary["members"] = [m.user_id for m in members]
-    for rows in (detections, tracks, jobs, uploads, refs, videos, members):
+    persons = list(session.exec(select(CasePerson).where(CasePerson.case_id == case_id)))
+    summary["persons"] = [p.name for p in persons]
+    for rows in (detections, tracks, jobs, uploads, refs, persons, videos, members):
         for row in rows:
             session.delete(row)
         session.flush()
@@ -308,19 +332,131 @@ def reference_image(ref_id: int, session: SessionDep, face: bool = False) -> Fil
 
 @router.patch("/references/{ref_id}", response_model=ReferenceImage)
 def update_reference(ref_id: int, body: ReferenceUpdate, session: SessionDep, actor: ActorDep) -> ReferenceImage:
-    """Rótulo de pessoa da imagem de referência (referências com o mesmo rótulo são a mesma pessoa)."""
+    """Põe a foto numa pessoa do caso (ou volta a ser solta com case_person_id=null)."""
     ref = session.get(ReferenceImage, ref_id)
     if ref is None:
         raise HTTPException(404, "Referência não encontrada.")
-    label = " ".join(body.person_label.split())
-    if label != ref.person_label:
-        previous, ref.person_label = ref.person_label, label
+    person = _person_of_case(session, ref.case_id, body.case_person_id)
+    if body.case_person_id != ref.case_person_id:
+        previous = ref.case_person_id
+        ref.case_person_id = body.case_person_id
         session.add(ref)
         session.commit()
         session.refresh(ref)
-        log_event(session, "reference.person_labeled", case_id=ref.case_id, actor=actor,
-                  details={"reference_id": ref.id, "filename": ref.filename, "from": previous, "to": label})
+        log_event(session, "reference.person_changed", case_id=ref.case_id, actor=actor,
+                  details={"reference_id": ref.id, "filename": ref.filename, "from": previous,
+                           "to": body.case_person_id, "person": person.name if person else None})
     return ref
+
+
+@router.post("/references/{ref_id}/remove-from-person")
+def remove_from_person(ref_id: int, session: SessionDep, actor: ActorDep) -> dict:
+    """Remove a foto da pessoa: é eliminada se nunca foi usada numa análise; senão fica como foto solta (a análise
+    que a usou continua a referenciá-la)."""
+    ref = session.get(ReferenceImage, ref_id)
+    if ref is None:
+        raise HTTPException(404, "Referência não encontrada.")
+    used = session.exec(select(Detection).where(Detection.reference_id == ref_id)).first() is not None
+    previous = ref.case_person_id
+    if used:
+        ref.case_person_id = None
+        session.add(ref)
+        session.commit()
+        action = "detached"
+    else:
+        session.delete(ref)
+        session.commit()
+        action = "deleted"
+    log_event(session, "reference.removed_from_person", case_id=ref.case_id, actor=actor,
+              details={"reference_id": ref_id, "filename": ref.filename, "case_person_id": previous,
+                       "action": action, "source_detection_id": ref.source_detection_id})
+    return {"action": action}
+
+
+def _person_of_case(session, case_id: int, case_person_id: int | None) -> CasePerson | None:
+    if case_person_id is None:
+        return None
+    person = session.get(CasePerson, case_person_id)
+    if person is None or person.case_id != case_id:
+        raise HTTPException(422, "Pessoa inexistente neste caso.")
+    return person
+
+
+# ---------------------------------------------------------------- pessoas do caso
+def _person_out(session, p: CasePerson) -> dict:
+    refs = session.exec(select(ReferenceImage).where(ReferenceImage.case_person_id == p.id)
+                        .order_by(ReferenceImage.id)).all()
+    return {"id": p.id, "case_id": p.case_id, "name": p.name, "notes": p.notes, "created_by": p.created_by,
+            "created_at": p.created_at, "reference_ids": [r.id for r in refs],
+            "valid_references": sum(1 for r in refs if r.valid)}
+
+
+def _check_name(session, case_id: int, name: str, exclude: int | None = None) -> str:
+    name = " ".join(name.split())
+    if not name:
+        raise HTTPException(422, "Indique o nome da pessoa.")
+    for other in session.exec(select(CasePerson).where(CasePerson.case_id == case_id)):
+        if other.id != exclude and other.name.casefold() == name.casefold():
+            raise HTTPException(409, f"Já existe a pessoa \"{other.name}\" neste caso.")
+    return name
+
+
+@router.get("/cases/{case_id}/persons")
+def list_case_persons(case_id: int, session: SessionDep) -> list[dict]:
+    get_case_or_404(session, case_id)
+    return [_person_out(session, p) for p in
+            session.exec(select(CasePerson).where(CasePerson.case_id == case_id).order_by(CasePerson.id))]
+
+
+@router.post("/cases/{case_id}/persons", status_code=201)
+def create_case_person(case_id: int, body: CasePersonCreate, session: SessionDep, actor: ActorDep) -> dict:
+    get_case_or_404(session, case_id)
+    p = CasePerson(case_id=case_id, name=_check_name(session, case_id, body.name), notes=body.notes.strip(),
+                   created_by=actor)
+    session.add(p)
+    session.commit()
+    session.refresh(p)
+    log_event(session, "person.created", case_id=case_id, actor=actor,
+              details={"case_person_id": p.id, "name": p.name, "notes": p.notes})
+    return _person_out(session, p)
+
+
+@router.patch("/case-persons/{case_person_id}")
+def update_case_person(case_person_id: int, body: CasePersonUpdate, session: SessionDep, actor: ActorDep) -> dict:
+    p = session.get(CasePerson, case_person_id)
+    if p is None:
+        raise HTTPException(404, "Pessoa não encontrada.")
+    changes = {}
+    if body.name is not None:
+        name = _check_name(session, p.case_id, body.name, exclude=p.id)
+        if name != p.name:
+            changes["name"] = [p.name, name]
+            p.name = name
+    if body.notes is not None and body.notes.strip() != p.notes:
+        changes["notes"] = [p.notes, body.notes.strip()]
+        p.notes = body.notes.strip()
+    if changes:
+        session.add(p)
+        session.commit()
+        log_event(session, "person.updated", case_id=p.case_id, actor=actor,
+                  details={"case_person_id": p.id, "changes": changes})
+    return _person_out(session, p)
+
+
+@router.delete("/case-persons/{case_person_id}", status_code=204)
+def delete_case_person(case_person_id: int, session: SessionDep, actor: ActorDep) -> None:
+    """Elimina a pessoa; as suas fotos não são apagadas, passam a fotos soltas."""
+    p = session.get(CasePerson, case_person_id)
+    if p is None:
+        raise HTTPException(404, "Pessoa não encontrada.")
+    refs = session.exec(select(ReferenceImage).where(ReferenceImage.case_person_id == p.id)).all()
+    for r in refs:
+        r.case_person_id = None
+        session.add(r)
+    session.delete(p)
+    session.commit()
+    log_event(session, "person.deleted", case_id=p.case_id, actor=actor,
+              details={"case_person_id": case_person_id, "name": p.name, "references_released": [r.id for r in refs]})
 
 
 @router.delete("/references/{ref_id}", status_code=204)

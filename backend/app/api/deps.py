@@ -1,8 +1,9 @@
 """Dependências comuns: sessão da base de dados, utilizador autenticado, CSRF e autorização por caso.
 
 Autorização (anti-IDOR): os routers de dados usam `authorize_objects`, que resolve o caso a que pertence qualquer
-objeto indicado no caminho (case_id, job_id, video_id, ref_id, det_id, track_id, upload_id) e responde 404 se o
-utilizador não tiver acesso a esse caso — também para objetos que não existem, para não revelar a sua existência.
+objeto indicado no caminho (case_id, job_id, video_id, ref_id, det_id, track_id, upload_id,
+case_person_id) e responde 404 se o utilizador não tiver acesso a esse caso — também para objetos que não
+existem, para não revelar a sua existência.
 """
 
 from __future__ import annotations
@@ -15,7 +16,20 @@ from sqlmodel import Session, select
 
 from ..config import settings
 from ..db import get_session
-from ..models import Case, CaseMember, Detection, Job, ReferenceImage, Track, Upload, User, UserRole, UserSession, Video
+from ..models import (
+    Case,
+    CaseMember,
+    CasePerson,
+    Detection,
+    Job,
+    ReferenceImage,
+    Track,
+    Upload,
+    User,
+    UserRole,
+    UserSession,
+    Video,
+)
 from ..services import auth
 
 SessionDep = Annotated[Session, Depends(get_session)]
@@ -139,6 +153,9 @@ def _case_of(session: Session, params: dict) -> int | None:
         t = session.get(Track, int(params["track_id"]))
         job = session.get(Job, t.job_id) if t else None
         return job.case_id if job else -1
+    if "case_person_id" in params:
+        cp = session.get(CasePerson, int(params["case_person_id"]))
+        return cp.case_id if cp else -1
     if "upload_id" in params:
         u = session.get(Upload, str(params["upload_id"]))
         return u.case_id if u else -1

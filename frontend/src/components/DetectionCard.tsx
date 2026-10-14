@@ -3,6 +3,7 @@ import { IconCheck, IconPhotoSearch, IconX } from "@tabler/icons-react";
 
 import { api, formatTime } from "../api";
 import { personColor } from "../personColors";
+import PersonAssignMenu, { type PersonAssignProps } from "./PersonAssignMenu";
 import QualityBadge from "./QualityBadge";
 import type { Detection, ReviewStatus } from "../types";
 
@@ -15,6 +16,8 @@ interface Props {
   personId?: number | null;
   /** Várias pessoas procuradas: nome da pessoa mais próxima desta face. */
   personLabel?: string;
+  /** Adicionar/remover esta face das fotos de uma pessoa do caso. */
+  personAssign?: Omit<PersonAssignProps, "detectionId">;
 }
 
 const REVIEW: Record<ReviewStatus, [string, string]> = {
@@ -23,7 +26,7 @@ const REVIEW: Record<ReviewStatus, [string, string]> = {
   rejected: ["Rejeitada", "red"],
 };
 
-export default function DetectionCard({ det, onSeek, onReview, onOpenFrame, realTime, personId, personLabel }: Props) {
+export default function DetectionCard({ det, onSeek, onReview, onOpenFrame, realTime, personId, personLabel, personAssign }: Props) {
   const [label, color] = REVIEW[det.review_status];
   return (
     <Card withBorder padding="xs" style={{ opacity: det.review_status === "rejected" ? 0.55 : 1 }}>
@@ -62,6 +65,7 @@ export default function DetectionCard({ det, onSeek, onReview, onOpenFrame, real
             <Badge color={color} variant="light" size="sm">{label}</Badge>
           </Tooltip>
           <Group gap={4} wrap="nowrap">
+            {personAssign && det.kind !== "body" && <PersonAssignMenu detectionId={det.id} {...personAssign} />}
             <Tooltip label="Ver frame completo">
               <ActionIcon variant="subtle" size="sm" onClick={() => onOpenFrame(det)} aria-label="Ver frame">
                 <IconPhotoSearch size={16} />

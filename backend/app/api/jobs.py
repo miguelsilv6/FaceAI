@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlmodel import select
 
 from ..config import settings
-from ..models import Detection, Job, JobStatus, ReferenceImage, ReviewStatus, Track, Video, utcnow
+from ..models import CasePerson, Detection, Job, JobStatus, ReferenceImage, ReviewStatus, Track, Video, utcnow
 from ..schemas import JobCreate, JobDelete, PersonMerge, QueueUpdate, ReviewUpdate, TrackPerson
 from ..services import disk, enhance, linking, reports, validated_frames
 from ..services.audit import log_event
@@ -86,7 +86,8 @@ def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorD
         chosen = [r for r in refs if r.valid and (body.reference_ids is None or r.id in body.reference_ids)]
         ref_ids = [r.id for r in chosen]
         # Várias pessoas na mesma passagem: as referências agrupam-se pelo rótulo de pessoa.
-        job_params["persons"] = person_groups(chosen)
+        names = {p.id: p.name for p in session.exec(select(CasePerson).where(CasePerson.case_id == case_id))}
+        job_params["persons"] = person_groups(chosen, names)
         if not ref_ids:
             raise HTTPException(422, "Não há imagens de referência válidas selecionadas. Sem amostra da pessoa, "
                                      "use o modo \"Descobrir todas as faces\".")
@@ -547,9 +548,10 @@ def detection_image(det_id: int, kind: str, session: SessionDep, actor: ActorDep
 
 
 @router.post("/detections/{det_id}/as-reference", response_model=ReferenceImage, status_code=201)
-def detection_as_reference(det_id: int, session: SessionDep, actor: ActorDep) -> ReferenceImage:
-    """Usa a face de uma deteção como nova imagem de referência do caso (ex.: uma pessoa descoberta que se quer
-    procurar noutros vídeos)."""
+def detection_as_reference(det_id: int, session: SessionDep, actor: ActorDep,
+                           case_person_id: int | None = None) -> ReferenceImage:
+    """Usa a face de uma deteção como nova imagem de referência do caso, opcionalmente já numa pessoa do caso
+    ("Adicionar esta face à pessoa A"; ex.: faces confirmadas do próprio CCTV)."""
     det = session.get(Detection, det_id)
     if det is None:
         raise HTTPException(404, "Deteção não encontrada.")
@@ -558,6 +560,11 @@ def detection_as_reference(det_id: int, session: SessionDep, actor: ActorDep) ->
     job = session.get(Job, det.job_id)
     if job is None or not Path(det.crop_path).exists():
         raise HTTPException(404, "O recorte desta deteção já não está disponível.")
+    person = None
+    if case_person_id is not None:
+        person = session.get(CasePerson, case_person_id)
+        if person is None or person.case_id != job.case_id:
+            raise HTTPException(422, "Pessoa inexistente neste caso.")
     crop = read_image(det.crop_path)
     scale = 160 / min(crop.shape[:2])
     if scale > 1:  # faces pequenas de CCTV: ampliar ajuda o detetor a validá-la como referência
@@ -568,9 +575,14 @@ def detection_as_reference(det_id: int, session: SessionDep, actor: ActorDep) ->
     name = (f"analise{job.id}_pessoa{track.person_id}_det{det.id}.jpg" if track and track.person_id
             else f"analise{job.id}_det{det.id}.jpg")
     ref = register_reference(session, job.case_id, dest, name, dest.stat().st_size, actor)
+    ref.source_detection_id, ref.case_person_id = det.id, case_person_id
+    session.add(ref)
+    session.commit()
+    session.refresh(ref)
     log_event(session, "reference.from_detection", case_id=job.case_id, actor=actor,
               details={"reference_id": ref.id, "detection_id": det.id, "job_id": job.id,
                        "person_id": track.person_id if track else None, "valid": ref.valid,
+                       "case_person_id": case_person_id, "case_person": person.name if person else None,
                        "note": "recorte da face (ampliado se pequeno), não é uma imagem original"})
     return ref
 

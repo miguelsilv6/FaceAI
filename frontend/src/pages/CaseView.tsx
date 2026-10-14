@@ -17,7 +17,7 @@ import RouteTimeline from "../components/RouteTimeline";
 import ReferencesPanel from "../components/ReferencesPanel";
 import VideosPanel from "../components/VideosPanel";
 import { notifyError, notifyOk } from "../notify";
-import type { AuditEvent, Case, CaseMember, Job, ReferenceImage, Video } from "../types";
+import type { AuditEvent, Case, CaseMember, CasePerson, Job, ReferenceImage, Video } from "../types";
 
 export default function CaseView() {
   const caseId = Number(useParams().caseId);
@@ -27,6 +27,7 @@ export default function CaseView() {
   const [jobs, setJobs] = useState<Job[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [members, setMembers] = useState<CaseMember[]>([]);
+  const [persons, setPersons] = useState<CasePerson[]>([]);
   const { user, isAdmin } = useAuth();
   const [tab, setTab] = useState<string | null>("references");
   const [editing, setEditing] = useState(false);
@@ -37,8 +38,10 @@ export default function CaseView() {
   const [saving, setSaving] = useState(false);
 
   const reload = useCallback(() => {
-    Promise.all([api.case(caseId), api.references(caseId), api.videos(caseId), api.jobs(caseId), api.audit(caseId)])
-      .then(([c, r, v, j, a]) => {
+    Promise.all([api.case(caseId), api.references(caseId), api.videos(caseId), api.jobs(caseId), api.audit(caseId),
+      api.casePersons(caseId)])
+      .then(([c, r, v, j, a, p]) => {
+        setPersons(p);
         setCase(c);
         setReferences(r);
         setVideos(v);
@@ -142,13 +145,14 @@ export default function CaseView() {
           <Tabs.Tab value="audit" leftSection={<IconHistory size={16} />}>Auditoria</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="references" pt="md">
-          <ReferencesPanel caseId={caseId} references={references} onChange={reload} />
+          <ReferencesPanel caseId={caseId} references={references} persons={persons} onChange={reload} />
         </Tabs.Panel>
         <Tabs.Panel value="videos" pt="md">
           <VideosPanel caseId={caseId} videos={videos} onChange={reloadVideos} />
         </Tabs.Panel>
         <Tabs.Panel value="jobs" pt="md">
-          <JobsPanel caseId={caseId} jobs={jobs} videos={videos} references={references} onChange={reloadJobs} />
+          <JobsPanel caseId={caseId} jobs={jobs} videos={videos} references={references} persons={persons}
+            onChange={reloadJobs} />
         </Tabs.Panel>
         <Tabs.Panel value="route" pt="md">
           <RouteTimeline caseId={caseId} jobs={jobs} />
