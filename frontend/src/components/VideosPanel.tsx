@@ -1,4 +1,4 @@
-import { Badge, Button, Card, Group, Stack, Table, Text } from "@mantine/core";
+import { Badge, Button, Card, Group, Loader, Stack, Table, Text, Tooltip } from "@mantine/core";
 import { IconClock, IconMovie, IconRefresh } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 
@@ -25,7 +25,9 @@ export default function VideosPanel({ caseId, videos, onChange }: Props) {
   const [clockVideo, setClockVideo] = useState<Video | null>(null);
 
   // Atualiza o estado das conversões para o browser enquanto houver alguma na fila ou a decorrer.
-  const converting = videos.some((v) => v.playback_status === "pending" || v.playback_status === "running");
+  // (e enquanto a hora estiver a ser lida por OCR na importação).
+  const converting = videos.some((v) => v.playback_status === "pending" || v.playback_status === "running"
+    || v.clock_auto_status === "pending" || v.clock_auto_status === "running");
   useEffect(() => {
     if (!converting) return;
     const t = setInterval(onChange, 3000);
@@ -101,11 +103,25 @@ export default function VideosPanel({ caseId, videos, onChange }: Props) {
                       {v.dvr_start ? (
                         <Stack gap={2}>
                           <Text size="xs" ff="monospace">{realTime(v, 0)} → {realTime(v, v.duration_s)}</Text>
-                          <Badge size="xs" variant="light" color={v.time_source === "ocr" ? "teal" : "blue"}>
-                            {v.time_source === "ocr" ? "OCR" : "manual"}
-                            {v.clock_offset_s ? ` · desvio ${v.clock_offset_s > 0 ? "+" : ""}${v.clock_offset_s} s` : ""}
-                          </Badge>
+                          <Tooltip label={v.time_note || (v.time_source === "ocr" ? "Lida por OCR" : "Acerto manual")}
+                            multiline w={260}>
+                            <Badge size="xs" variant="light" color={v.time_source === "ocr" ? "teal" : "blue"}>
+                              {v.time_source === "ocr" ? (v.clock_auto_status === "done" ? "OCR automático" : "OCR") : "manual"}
+                              {v.clock_offset_s ? ` · desvio ${v.clock_offset_s > 0 ? "+" : ""}${v.clock_offset_s} s` : ""}
+                            </Badge>
+                          </Tooltip>
                         </Stack>
+                      ) : v.clock_auto_status === "pending" || v.clock_auto_status === "running" ? (
+                        <Group gap={6} wrap="nowrap">
+                          <Loader size={12} />
+                          <Text size="xs" c="dimmed">{v.clock_auto_status === "running" ? "A ler a hora (OCR)…" : "Leitura da hora em fila…"}</Text>
+                        </Group>
+                      ) : v.clock_auto_status === "failed" || v.clock_auto_status === "unavailable" ? (
+                        <Tooltip multiline w={320} label={`${v.clock_auto_message || "Sem leitura."} Acerte a hora manualmente ou marque a zona da data/hora.`}>
+                          <Badge size="xs" color="orange" variant="light">
+                            {v.clock_auto_status === "unavailable" ? "OCR indisponível" : "OCR sem resultado"}
+                          </Badge>
+                        </Tooltip>
                       ) : <Text size="xs" c="dimmed">não acertada</Text>}
                       <Button size="compact-xs" variant="subtle" leftSection={<IconClock size={14} />} mt={4}
                         onClick={() => setClockVideo(v)}>Acertar hora</Button>

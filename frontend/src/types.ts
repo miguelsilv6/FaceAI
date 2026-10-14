@@ -46,6 +46,8 @@ export interface Video {
   time_source: "" | "manual" | "ocr";
   time_note: string;
   time_calibration: ClockCalibration | Record<string, never>;
+  clock_auto_status: "" | "pending" | "running" | "done" | "failed" | "unavailable";
+  clock_auto_message: string;
 }
 
 export interface VideoProbe {

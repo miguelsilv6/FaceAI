@@ -25,6 +25,7 @@ from .config import settings
 from .db import get_engine, init_db
 from .services import auth
 from .services.audit import request_ip
+from .services.clock_auto import resume_pending_auto_clock
 from .services.face_engine import preload_models
 from .services.jobs import recover_interrupted_jobs, runner
 from .services.references import migrate_person_labels
@@ -45,6 +46,7 @@ async def lifespan(_: FastAPI):
     recover_interrupted_jobs()
     cleanup_stale_uploads()
     resume_pending_copies()
+    resume_pending_auto_clock()
     preload_models()
     if settings.cpu_threads > 0:
         cv2.setNumThreads(settings.cpu_threads)

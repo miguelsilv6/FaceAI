@@ -49,6 +49,9 @@ class Settings:
     cpu_threads: int = field(default_factory=lambda: int(_env("CPU_THREADS", "0")))
     # "nice" da thread das análises (0–19): valores maiores deixam a interface e os uploads mais fluidos.
     job_nice: int = field(default_factory=lambda: int(_env("JOB_NICE", "10")))
+    # Lê a data/hora impressa (OCR) dos vídeos logo na importação e acerta o relógio, se a leitura for coerente.
+    auto_clock_ocr: bool = field(default_factory=lambda: _env("AUTO_CLOCK_OCR", "1").lower() in ("1", "true", "yes"))
+    clock_date_order: str = field(default_factory=lambda: _env("CLOCK_DATE_ORDER", "DMY").upper())
     # Alertas de disco (pasta de dados): % de ocupação e espaço livre mínimo.
     disk_warn_percent: float = field(default_factory=lambda: float(_env("DISK_WARN_PERCENT", "80")))
     disk_critical_percent: float = field(default_factory=lambda: float(_env("DISK_CRITICAL_PERCENT", "90")))
