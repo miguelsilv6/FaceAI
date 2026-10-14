@@ -9,6 +9,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 
 import { AuthGate } from "./auth";
+import ErrorBoundary from "./components/ErrorBoundary";
 import Layout from "./components/Layout";
 import Account from "./pages/Account";
 import CaseList from "./pages/CaseList";
@@ -21,20 +22,23 @@ const theme = createTheme({ primaryColor: "indigo", defaultRadius: "md" });
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <MantineProvider theme={theme} defaultColorScheme="auto">
-      <Notifications position="top-right" />
-      <AuthGate>
-        <BrowserRouter>
-          <Routes>
-            <Route element={<Layout />}>
-              <Route index element={<CaseList />} />
-              <Route path="cases/:caseId" element={<CaseView />} />
-              <Route path="jobs/:jobId" element={<Results />} />
-              <Route path="account" element={<Account />} />
-              <Route path="users" element={<Users />} />
-            </Route>
-          </Routes>
-        </BrowserRouter>
-      </AuthGate>
+      {/* O router envolve também as notificações: algumas têm links ("Ver resultados"). */}
+      <BrowserRouter>
+        <Notifications position="top-right" />
+        <ErrorBoundary>
+          <AuthGate>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route index element={<CaseList />} />
+                <Route path="cases/:caseId" element={<CaseView />} />
+                <Route path="jobs/:jobId" element={<Results />} />
+                <Route path="account" element={<Account />} />
+                <Route path="users" element={<Users />} />
+              </Route>
+            </Routes>
+          </AuthGate>
+        </ErrorBoundary>
+      </BrowserRouter>
     </MantineProvider>
   </StrictMode>,
 );
