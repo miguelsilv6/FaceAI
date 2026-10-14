@@ -16,6 +16,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("FACEAI_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("FACEAI_FRONTEND_DIST", str(tmp_path / "no-frontend"))
     monkeypatch.setenv("FACEAI_PRELOAD_MODELS", "0")
+    monkeypatch.setenv("FACEAI_AUTO_CLOCK_OCR", "0")
     # Recarrega a configuração e a base de dados para usar a pasta temporária.
     import app.config
     import app.db
@@ -23,11 +24,11 @@ def client(tmp_path, monkeypatch):
     importlib.reload(app.config)
     app.db.settings = app.config.settings
     app.db._engine = None
-    from app.services import audit, disk, face_engine, jobs, reports, transcode
+    from app.services import audit, clock_auto, disk, face_engine, jobs, reports, transcode
 
     monkeypatch.setattr(transcode, "ffmpeg_available", lambda: False)
 
-    for mod in (audit, disk, jobs, reports):
+    for mod in (audit, clock_auto, disk, jobs, reports):
         mod.settings = app.config.settings
     import app.api.cases as cases_api
     import app.api.deps as deps

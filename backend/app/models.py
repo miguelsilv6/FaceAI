@@ -92,6 +92,9 @@ class Video(SQLModel, table=True):
     time_source: str = ""  # "" | "manual" | "ocr"
     time_note: str = ""
     time_calibration: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    # Leitura automática da hora por OCR na importação: "" | pending | running | done | failed | unavailable
+    clock_auto_status: str = ""
+    clock_auto_message: str = ""
     uploaded_at: datetime = Field(default_factory=utcnow)
 
 

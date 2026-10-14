@@ -113,6 +113,8 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 | `FACEAI_ALLOWED_ORIGINS` | *(vazio)* | Origens extra aceites nos pedidos que alteram dados (ex.: `https://faceai.exemplo.pt`). O próprio host é sempre aceite. |
 | `FACEAI_SESSION_IDLE_MINUTES` / `FACEAI_SESSION_MAX_HOURS` | `30` / `12` | Expiração da sessão por inatividade e duração máxima |
 | `FACEAI_API_DOCS` | `false` | Expor `/api/docs` e `/api/openapi.json` (só para desenvolvimento) |
+| `FACEAI_AUTO_CLOCK_OCR` | `1` | Lê a data/hora (OCR) dos vídeos logo na importação. `0` desativa. |
+| `FACEAI_CLOCK_DATE_ORDER` | `DMY` | Ordem da data no relógio impresso, para a leitura automática (`DMY`, `MDY` ou `YMD`). |
 | `FACEAI_CPU_THREADS` | `0` (todos) | Threads de CPU para o ONNX Runtime, OpenCV e ffmpeg. Limita o CPU usado pelas análises. |
 | `FACEAI_JOB_NICE` | `10` | Prioridade ("nice") da thread das análises; valores maiores deixam a interface e os uploads mais fluidos |
 | `FACEAI_DISK_WARN_PERCENT` / `FACEAI_DISK_CRITICAL_PERCENT` / `FACEAI_DISK_MIN_FREE_GB` | `80` / `90` / `2` | Alertas de disco. Em nível crítico, uploads que não cabem e novas análises são recusados. |
@@ -279,7 +281,7 @@ O nome do ficheiro identifica o caso, a análise, o vídeo, o frame, o tempo e a
 
 Por omissão, os tempos são relativos ao início do ficheiro (`00:01:23.400`). Em **Vídeos → Acertar hora** há três formas de os converter em hora real:
 
-1. **OCR da data/hora gravada na imagem.** A zona da data/hora é detetada automaticamente, ou marcada arrastando o rato sobre o frame. O OCR usa o RapidOCR (PP-OCR em ONNX Runtime, com os modelos incluídos no pacote, sem downloads) e lê ~12 frames distribuídos pelo vídeo. A seguir faz-se um **ajuste robusto**:
+1. **OCR da data/hora gravada na imagem.** É feito **automaticamente na importação** de cada vídeo, em segundo plano e com prioridade baixa. A hora só é aplicada se as leituras forem coerentes, e fica marcada como "OCR automático" para confirmar. Se não houver leitura válida, o vídeo fica "OCR sem resultado" e acerta-se à mão. Nunca é substituída uma hora já acertada. Também se pode repetir pelo botão do relógio: a zona da data/hora é detetada automaticamente, ou marcada arrastando o rato sobre o frame. O OCR usa o RapidOCR (PP-OCR em ONNX Runtime, com os modelos incluídos no pacote, sem downloads) e lê ~12 frames distribuídos pelo vídeo. A seguir faz-se um **ajuste robusto**:
    - as leituras erradas são descartadas;
    - se as leituras cobrirem pelo menos 60 s, estima-se também a **taxa** do relógio. Isto corrige vídeos exportados com um fps nominal diferente do de gravação; por exemplo, um DVR que grava a 12,5 fps e exporta a 25 fps.
 

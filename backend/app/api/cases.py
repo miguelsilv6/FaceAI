@@ -37,6 +37,7 @@ from ..schemas import (
 )
 from ..services import disk
 from ..services.audit import log_event
+from ..services.clock_auto import request_auto_clock
 from ..services.face_engine import get_engine
 from ..services.references import validate_reference
 from ..services.transcode import (
@@ -118,6 +119,7 @@ def register_video(session, case_id: int, path: Path, filename: str, size: int, 
     log_event(session, "video.uploaded", case_id=case_id, actor=actor,
               details=video.model_dump(mode="json", exclude={"stored_path", "playback_path"}))
     request_playback_copy(session, video)
+    request_auto_clock(session, video)
     return video
 
 

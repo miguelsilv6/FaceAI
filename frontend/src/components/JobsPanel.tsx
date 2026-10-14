@@ -11,6 +11,7 @@ import { notifyError, notifyOk } from "../notify";
 import type { CasePerson, Job, JobMode, JobParams, ReferenceImage, SystemInfo, Video } from "../types";
 import DeleteJobModal from "./DeleteJobModal";
 import JobStatusBadge from "./JobStatusBadge";
+import ReferencePicker, { allChoices, choicesToRefIds, type RefChoice } from "./ReferencePicker";
 
 interface Props {
   caseId: number;
@@ -39,7 +40,7 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [params, setParams] = useState<JobParams | null>(null);
   const [videoIds, setVideoIds] = useState<string[]>([]);
-  const [refIds, setRefIds] = useState<string[]>([]);
+  const [choices, setChoices] = useState<RefChoice[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [toDelete, setToDelete] = useState<Job | null>(null);
   const validRefs = useMemo(() => references.filter((r) => r.valid), [references]);
@@ -52,7 +53,8 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
     }).catch(notifyError);
   }, []);
   useEffect(() => setVideoIds(videos.map((v) => String(v.id))), [videos]);
-  useEffect(() => setRefIds(validRefs.map((r) => String(r.id))), [validRefs]);
+  useEffect(() => setChoices(allChoices(validRefs, persons)), [validRefs, persons]);
+  const refIds = useMemo(() => choicesToRefIds(choices, validRefs), [choices, validRefs]);
   // Sem nenhuma amostra válida, o modo por omissão é a descoberta de todas as faces.
   const [modeTouched, setModeTouched] = useState(false);
   useEffect(() => {
@@ -74,7 +76,7 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
     if (!params) return;
     setSubmitting(true);
     try {
-      const job = await api.createJob(caseId, params, videoIds.map(Number), discover ? [] : refIds.map(Number));
+      const job = await api.createJob(caseId, params, videoIds.map(Number), discover ? [] : refIds);
       navigate(`/jobs/${job.id}`);
     } catch (e) {
       notifyError(e, "Não foi possível iniciar a análise");
@@ -95,7 +97,7 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
           <Stack>
             <SegmentedControl value={params.mode} fullWidth
               onChange={(m) => { setModeTouched(true); set("mode", m as JobMode); }}
-              data={[{ value: "match", label: "Procurar uma pessoa (com amostra)" },
+              data={[{ value: "match", label: "Procurar por pessoa(s) - com amostra" },
                 { value: "discover", label: "Descobrir todas as faces (sem amostra)" }]} />
             {discover && (
               <Alert color="blue" icon={<IconInfoCircle size={18} />}>
@@ -108,10 +110,8 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
               <MultiSelect label="Vídeos" data={videos.map((v) => ({ value: String(v.id), label: `#${v.id} ${v.filename}` }))}
                 value={videoIds} onChange={setVideoIds} placeholder="Selecione os vídeos" />
               {!discover && (
-                <MultiSelect label="Imagens de referência (válidas)"
-                  data={refOptions(validRefs, persons)}
-                  value={refIds} onChange={setRefIds}
-                  description={personsSummary(validRefs.filter((r) => refIds.includes(String(r.id))), persons)}
+                <ReferencePicker refs={validRefs} persons={persons} value={choices} onChange={setChoices}
+                  description={personsSummary(validRefs.filter((r) => refIds.includes(r.id)), persons)}
                   placeholder={validRefs.length ? "Selecione as referências" : "Sem amostras válidas — use o modo de descoberta"} />
               )}
             </SimpleGrid>
@@ -318,17 +318,6 @@ function QueueControls({ job, onChange }: { job: Job; onChange: () => void }) {
       </Menu.Dropdown>
     </Menu>
   );
-}
-
-/** Referências agrupadas por pessoa do caso (as fotos soltas num grupo próprio). */
-function refOptions(refs: ReferenceImage[], persons: CasePerson[]) {
-  const groups = persons.map((p) => ({
-    group: p.name,
-    items: refs.filter((r) => r.case_person_id === p.id).map((r) => ({ value: String(r.id), label: `${p.name} · #${r.id} ${r.filename}` })),
-  }));
-  const loose = refs.filter((r) => r.case_person_id == null).map((r) => ({ value: String(r.id), label: `#${r.id} ${r.filename}` }));
-  return [...groups, ...(loose.length ? [{ group: persons.length ? "Fotos soltas" : "Fotos", items: loose }] : [])]
-    .filter((g) => g.items.length);
 }
 
 /** "2 pessoas na mesma passagem: Suspeito A (3) · Suspeito B (1)". */

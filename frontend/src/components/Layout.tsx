@@ -32,7 +32,7 @@ export default function Layout() {
             <Group gap="xs" wrap="nowrap">
               <IconScan size={28} />
               <Title order={3}>FaceAI</Title>
-              <Badge variant="light" visibleFrom="sm">análise facial em CCTV</Badge>
+              <Badge variant="light" visibleFrom="sm">Identificação de pessoas em CCTV</Badge>
             </Group>
           </Link>
           <Group gap="sm" wrap="nowrap">

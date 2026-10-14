@@ -3,7 +3,7 @@ import {
   Title, Tooltip,
 } from "@mantine/core";
 import { Dropzone, IMAGE_MIME_TYPE } from "@mantine/dropzone";
-import { IconDots, IconPhoto, IconPhotoPlus, IconPlus, IconTrash, IconUser } from "@tabler/icons-react";
+import { IconDots, IconHelp, IconPhoto, IconPhotoPlus, IconPlus, IconTrash, IconUser } from "@tabler/icons-react";
 import { useState, type DragEvent } from "react";
 
 import { api } from "../api";
@@ -82,12 +82,14 @@ export default function ReferencesPanel({ caseId, references, persons, onChange 
   return (
     <Stack>
       <Group justify="space-between" align="flex-start" wrap="wrap">
-        <Text size="sm" c="dimmed" maw={760}>
+        <Tooltip multiline w={380} withArrow position="bottom-start" label={<>
           Para uma pessoa com várias fotos (ângulos, iluminação, com/sem óculos), crie uma <b>pessoa</b> e junte-lhe as
           fotos. Cada face do vídeo é comparada com todas as fotos da pessoa e conta a mais parecida. Com várias pessoas
           selecionadas, a análise procura-as todas na mesma passagem. Fotos soltas contam como uma só pessoa.
           Pode arrastar uma foto para outra pessoa.
-        </Text>
+        </>}>
+          <ActionIcon variant="light" radius="xl" size="lg" aria-label="Ajuda"><IconHelp size={18} /></ActionIcon>
+        </Tooltip>
         <Button leftSection={<IconPlus size={16} />} onClick={() => setEditing("new")}>Nova pessoa</Button>
       </Group>
 
