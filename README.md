@@ -145,7 +145,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 ## Utilização
 
 1. **Novo caso:** indica o nome ou referência do processo. Ficas como responsável do caso e podes dar acesso a colegas no separador *Equipa*. O nome e a descrição podem ser editados depois (✏️ ao lado do nome do caso). Os valores anteriores ficam na auditoria.
-2. **Referências:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
+2. **Referências/Pessoas:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
 3. **Vídeos:** arrasta os ficheiros de CCTV. O envio é **em blocos e retomável**: se a ligação cair, volta a largar o mesmo ficheiro e o upload continua de onde parou, mesmo depois de recarregar a página. Os metadados são extraídos automaticamente. Se o browser não conseguir reproduzir o vídeo e houver `ffmpeg`, é criada uma **cópia H.264 só para visualização**. A análise usa sempre o original. Os casos típicos são H.265/HEVC, `.dav`, `.avi`/MPEG-4, H.264 a 10 bits ou 4:2:2/4:4:4, que dão a mensagem "nenhum vídeo com formato e tipo MIME suportado".
    - A decisão usa o `ffprobe` (codec e formato de cor), e não só a extensão.
    - As conversões correm numa fila, uma de cada vez. A coluna **Reprodução no browser** mostra o estado e o progresso: em fila, a converter, pronta ou falhou.
@@ -195,7 +195,7 @@ O botão **Procurar noutras análises** (👥), num track ou numa pessoa, compar
 - As análises no modo "procurar" feitas antes desta versão não têm índice e aparecem contadas à parte.
 
 ### Percurso multi-câmara
-O separador **Percurso** do caso junta as aparições das análises escolhidas e ordena-as pela **hora real do DVR**.
+O separador **Percurso/Multi View** do caso junta as aparições das análises escolhidas e ordena-as pela **hora real do DVR**.
 - Por omissão escolhe todas as análises "procurar" concluídas, para juntar câmaras analisadas à parte.
 - Mostra uma linha por câmara (mesmo as que não têm aparições), com blocos coloridos por pessoa (tracejados se a aparição vier só do vestuário), e a lista cronológica, exportável em CSV.
 - Os vídeos sem hora acertada ficam fora do eixo e são assinalados.

@@ -3,7 +3,7 @@ import {
 } from "@mantine/core";
 import {
   IconArrowsMaximize, IconArrowsMinimize, IconPlayerPause, IconPlayerPlay, IconPlayerSkipForward, IconRewindBackward10,
-  IconRewindForward10,
+  IconRewindForward10, IconArrowUp, IconX,
 } from "@tabler/icons-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -42,6 +42,31 @@ export default function MultiCamPlayer({ videos, segments, seek }: {
   const els = useRef(new Map<number, HTMLVideoElement>());
   const wallRef = useRef(0);
   wallRef.current = wall;
+  // Leitor flutuante: quando o leitor sai do ecrã por cima (scroll para baixo), fica fixo no topo.
+  const holder = useRef<HTMLDivElement>(null);
+  const [floating, setFloating] = useState(false);
+  const [dismissed, setDismissed] = useState(false);
+  const [holderH, setHolderH] = useState<number>();
+  const floatingRef = useRef(false);
+  useEffect(() => {
+    const check = () => {
+      const el = holder.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (!floatingRef.current) setHolderH(el.offsetHeight);
+      const above = r.bottom < 120; // passou para cima do cabeçalho e da faixa de tarefas
+      if (!above) setDismissed(false);
+      floatingRef.current = above;
+      setFloating(above);
+    };
+    check();
+    window.addEventListener("scroll", check, { passive: true });
+    window.addEventListener("resize", check);
+    return () => {
+      window.removeEventListener("scroll", check);
+      window.removeEventListener("resize", check);
+    };
+  }, []);
 
   const t0 = cams.length ? Math.min(...cams.map((v) => wallOf(v, 0))) : 0;
   const t1 = cams.length ? Math.max(...cams.map((v) => wallOf(v, v.duration_s))) : 1;
@@ -113,16 +138,39 @@ export default function MultiCamPlayer({ videos, segments, seek }: {
   const nextSeg = segments.find((s) => s.real_start && wallSeconds(s.real_start) - 2 > wall + 0.5
     && shown.includes(String(s.video_id)));
   const jump = (d: number) => setWall((w) => Math.min(t1, Math.max(t0, w + d)));
-  const cols = focus != null ? 1 : visible.length <= 1 ? 1 : visible.length <= 4 ? 2 : 3;
+  const float = floating && !dismissed;
+  const cols = focus != null ? 1 : visible.length <= 1 ? 1 : float ? Math.min(3, visible.length)
+    : visible.length <= 4 ? 2 : 3;
 
   return (
-    <Card withBorder>
-      <Stack gap="sm">
+    <div ref={holder} style={{ height: floating ? holderH : undefined }}>
+    <Card withBorder shadow={float ? "xl" : undefined} aria-label="Leitor multi-câmara"
+      style={float ? {
+        position: "fixed", top: "calc(var(--app-shell-header-height, 60px) + 6px)", right: 16, zIndex: 180,
+        width: "min(760px, calc(100vw - 32px))", maxHeight: "calc(100vh - 90px)", overflowY: "auto",
+      } : undefined}>
+      <Stack gap={float ? 6 : "sm"}>
         <Group justify="space-between" wrap="wrap">
-          <Text fw={600}>Câmaras sincronizadas pela hora real</Text>
-          <Text size="xs" c="dimmed">Só visualização: a análise e as evidências usam sempre os ficheiros originais.</Text>
+          <Text fw={600} size={float ? "sm" : undefined}>Câmaras sincronizadas pela hora real</Text>
+          {float ? (
+            <Group gap={4}>
+              <Tooltip label="Voltar ao leitor">
+                <ActionIcon size="sm" variant="subtle" aria-label="Voltar ao leitor"
+                  onClick={() => holder.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+                  <IconArrowUp size={14} />
+                </ActionIcon>
+              </Tooltip>
+              <Tooltip label="Fechar leitor flutuante">
+                <ActionIcon size="sm" variant="subtle" aria-label="Fechar leitor flutuante" onClick={() => setDismissed(true)}>
+                  <IconX size={14} />
+                </ActionIcon>
+              </Tooltip>
+            </Group>
+          ) : (
+            <Text size="xs" c="dimmed">Só visualização: a análise e as evidências usam sempre os ficheiros originais.</Text>
+          )}
         </Group>
-        {cams.length > 1 && (
+        {cams.length > 1 && !float && (
           <Chip.Group multiple value={shown} onChange={setShown}>
             <Group gap={4}>
               {cams.map((v) => <Chip key={v.id} size="xs" value={String(v.id)}>{v.filename}</Chip>)}
@@ -158,7 +206,7 @@ export default function MultiCamPlayer({ videos, segments, seek }: {
           <Text size="xs" ff="monospace" c="dimmed">{fmt(t0)}</Text>
           <Text size="xs" ff="monospace" c="dimmed">{fmt(t1)}</Text>
         </Group>
-        <SimpleGrid cols={{ base: 1, sm: Math.min(2, cols), lg: cols }} spacing="xs">
+        <SimpleGrid cols={float ? cols : { base: 1, sm: Math.min(2, cols), lg: cols }} spacing="xs">
           {visible.map((v) => {
             const t = videoTimeAt(v, wall);
             const inside = t >= 0 && t <= v.duration_s;
@@ -181,14 +229,15 @@ export default function MultiCamPlayer({ videos, segments, seek }: {
                     </Tooltip>
                   </Group>
                 </Group>
-                <Box style={{ position: "relative", background: "#000", borderRadius: 4, aspectRatio: `${v.width || 16} / ${v.height || 9}` }}>
+                <Box style={{ position: "relative", background: "#000", borderRadius: 4, aspectRatio: `${v.width || 16} / ${v.height || 9}`,
+                  maxHeight: float ? 170 : undefined }}>
                   {preparing ? (
                     <Text c="gray.4" size="xs" p="sm">A preparar a cópia de reprodução deste vídeo…</Text>
                   ) : (
                     <video ref={(el) => { if (el) els.current.set(v.id, el); else els.current.delete(v.id); }}
                       src={api.videoUrl(v)} muted playsInline preload="auto"
                       onError={() => setBroken((b) => new Set(b).add(v.id))}
-                      style={{ width: "100%", height: "100%", display: "block", opacity: inside ? 1 : 0.15 }} />
+                      style={{ width: "100%", height: "100%", display: "block", objectFit: "contain", opacity: inside ? 1 : 0.15 }} />
                   )}
                   {!inside && !preparing && (
                     <Text c="gray.3" size="xs" ta="center" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
@@ -210,5 +259,6 @@ export default function MultiCamPlayer({ videos, segments, seek }: {
         </SimpleGrid>
       </Stack>
     </Card>
+    </div>
   );
 }

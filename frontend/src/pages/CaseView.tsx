@@ -130,7 +130,7 @@ export default function CaseView() {
       <Tabs value={tab} onChange={setTab} keepMounted={false}>
         <Tabs.List>
           <Tabs.Tab value="references" leftSection={<IconPhoto size={16} />}>
-            <Group gap={6}>Referências <Badge size="sm" variant="light">{references.length}</Badge></Group>
+            <Group gap={6}>Referências/Pessoas <Badge size="sm" variant="light">{references.length}</Badge></Group>
           </Tabs.Tab>
           <Tabs.Tab value="videos" leftSection={<IconMovie size={16} />}>
             <Group gap={6}>Vídeos <Badge size="sm" variant="light">{videos.length}</Badge></Group>
@@ -138,7 +138,7 @@ export default function CaseView() {
           <Tabs.Tab value="jobs" leftSection={<IconActivity size={16} />}>
             <Group gap={6}>Análises <Badge size="sm" variant="light">{jobs.length}</Badge></Group>
           </Tabs.Tab>
-          <Tabs.Tab value="route" leftSection={<IconRoute size={16} />}>Percurso</Tabs.Tab>
+          <Tabs.Tab value="route" leftSection={<IconRoute size={16} />}>Percurso/Multi View</Tabs.Tab>
           <Tabs.Tab value="members" leftSection={<IconUsers size={16} />}>
             Equipa <Badge size="xs" variant="light">{members.length}</Badge>
           </Tabs.Tab>

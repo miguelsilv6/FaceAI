@@ -224,11 +224,11 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
         {jobs.length === 0 ? (
           <Text c="dimmed" p="md">Ainda não foram feitas análises neste caso.</Text>
         ) : (
-          <Table.ScrollContainer minWidth={760}>
+          <Table.ScrollContainer minWidth={840}>
             <Table highlightOnHover>
               <Table.Thead>
                 <Table.Tr><Table.Th>#</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Progresso</Table.Th>
-                  <Table.Th>Modelo / detetor</Table.Th><Table.Th>Resultado</Table.Th><Table.Th>Criada</Table.Th>
+                  <Table.Th>Modelo / detetor</Table.Th><Table.Th>Vestuário</Table.Th><Table.Th>Resultado</Table.Th><Table.Th>Criada</Table.Th>
                   <Table.Th>Analista</Table.Th><Table.Th /></Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -248,6 +248,15 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
                       )}
                     </Table.Td>
                     <Table.Td>{j.params.model} / {j.params.detector}</Table.Td>
+                    <Table.Td>
+                      {j.params.clothing ? (
+                        <Tooltip label={j.status === "completed"
+                          ? `${j.clothing_samples} amostra(s) de vestuário · ${j.clothing_summary?.clothing_matches ?? 0} aparição(ões) só pela roupa`
+                          : "Análise com o complemento de vestuário (ReID)"}>
+                          <Badge size="sm" color="grape" variant="light">Sim</Badge>
+                        </Tooltip>
+                      ) : <Text size="sm" c="dimmed">—</Text>}
+                    </Table.Td>
                     <Table.Td>{j.params.mode === "discover" ? `${j.persons} pessoas (descoberta)` : j.matches}</Table.Td>
                     <Table.Td>{formatDate(j.created_at)}</Table.Td>
                     <Table.Td>{j.created_by}</Table.Td>
