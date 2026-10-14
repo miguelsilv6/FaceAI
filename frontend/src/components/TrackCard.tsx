@@ -1,5 +1,5 @@
 import { ActionIcon, Badge, Button, Card, Group, Image, Menu, Stack, Text, Tooltip } from "@mantine/core";
-import { IconCheck, IconPhotoSearch, IconUserShare, IconX } from "@tabler/icons-react";
+import { IconCheck, IconPhotoSearch, IconUserShare, IconUsersGroup, IconX } from "@tabler/icons-react";
 
 import { api, formatTime } from "../api";
 import { personColor } from "../personColors";
@@ -19,6 +19,7 @@ interface Props {
   onMove?: (track: Track, personId: number | null) => void;
   /** Várias pessoas procuradas (modo procurar): nome da pessoa do track. */
   personLabel?: string;
+  onFindSimilar?: (track: Track) => void;
 }
 
 const REVIEW: Record<ReviewStatus, [string, string]> = {
@@ -29,7 +30,7 @@ const REVIEW: Record<ReviewStatus, [string, string]> = {
 
 /** Um track = a mesma face em vários frames. A revisão aplica-se a todas as deteções do track. */
 export default function TrackCard({ track, onSeek, onReview, onShowDetections, realStart, realEnd, onOpenFrame,
-  personIds, onMove, personLabel }: Props) {
+  personIds, onMove, personLabel, onFindSimilar }: Props) {
   const [label, color] = REVIEW[track.review_status];
   const sim = 1 - track.track_distance;
   return (
@@ -84,6 +85,14 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
                 <ActionIcon variant="subtle" size="sm" aria-label="Ver frame"
                   onClick={() => onOpenFrame(track.best_detection_id!)}>
                   <IconPhotoSearch size={16} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            {onFindSimilar && (
+              <Tooltip label="Procurar esta pessoa noutras análises">
+                <ActionIcon variant="subtle" size="sm" aria-label="Procurar noutras análises"
+                  onClick={() => onFindSimilar(track)}>
+                  <IconUsersGroup size={16} />
                 </ActionIcon>
               </Tooltip>
             )}

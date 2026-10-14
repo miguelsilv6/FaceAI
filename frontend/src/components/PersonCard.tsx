@@ -1,5 +1,5 @@
 import { ActionIcon, Badge, Button, Card, Group, Image, Menu, Stack, Text, Tooltip } from "@mantine/core";
-import { IconArrowsJoin, IconCheck, IconUserPlus, IconX } from "@tabler/icons-react";
+import { IconArrowsJoin, IconCheck, IconUserPlus, IconUsersGroup, IconX } from "@tabler/icons-react";
 
 import { api, formatTime } from "../api";
 import type { Person, ReviewStatus } from "../types";
@@ -14,6 +14,7 @@ interface Props {
   onReview: (p: Person, status: ReviewStatus) => void;
   onMerge: (p: Person, into: Person) => void;
   onUseAsReference: (p: Person) => void;
+  onFindSimilar?: (p: Person) => void;
 }
 
 const REVIEW: Record<Person["review_status"], [string, string]> = {
@@ -25,7 +26,7 @@ const REVIEW: Record<Person["review_status"], [string, string]> = {
 
 /** Pessoa distinta encontrada no modo descoberta (grupo de tracks com faces semelhantes). */
 export default function PersonCard({ person, selected, others, firstRealTime, onSelect, onReview, onMerge,
-  onUseAsReference }: Props) {
+  onUseAsReference, onFindSimilar }: Props) {
   const [label, color] = REVIEW[person.review_status];
   const status = person.review_status;
   return (
@@ -97,6 +98,14 @@ export default function PersonCard({ person, selected, others, firstRealTime, on
               Amostra
             </Button>
           </Tooltip>
+          {onFindSimilar && (
+            <Tooltip label="Procurar esta pessoa noutras análises">
+              <Button size="compact-xs" variant="subtle" leftSection={<IconUsersGroup size={14} />}
+                onClick={() => onFindSimilar(person)}>
+                Outras
+              </Button>
+            </Tooltip>
+          )}
         </Group>
       </Stack>
     </Card>

@@ -1,5 +1,5 @@
 import type {
-  Activity, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
+  Activity, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
 
@@ -187,6 +187,11 @@ export const api = {
     request<void>("DELETE", `/api/cases/${caseId}/members/${userId}`),
   system: () => request<SystemInfo>("GET", "/api/system"),
   cases: () => request<Case[]>("GET", "/api/cases"),
+  similarToTrack: (trackId: number, scope: "all" | "case", threshold?: number) =>
+    request<SimilarResult>("GET", `/api/tracks/${trackId}/similar?scope=${scope}${threshold != null ? `&threshold=${threshold}` : ""}`),
+  similarToPerson: (jobId: number, personId: number, scope: "all" | "case", threshold?: number) =>
+    request<SimilarResult>("GET",
+      `/api/jobs/${jobId}/persons/${personId}/similar?scope=${scope}${threshold != null ? `&threshold=${threshold}` : ""}`),
   activity: () => request<Activity>("GET", "/api/activity"),
   validatedSummary: (caseId: number) =>
     request<{ detections: number; frames: number }>("GET", `/api/cases/${caseId}/frames/validated`),

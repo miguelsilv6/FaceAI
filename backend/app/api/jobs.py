@@ -16,7 +16,7 @@ from sqlmodel import select
 from ..config import settings
 from ..models import Detection, Job, JobStatus, ReferenceImage, ReviewStatus, Track, Video, utcnow
 from ..schemas import JobCreate, JobDelete, PersonMerge, QueueUpdate, ReviewUpdate, TrackPerson
-from ..services import disk, reports, validated_frames
+from ..services import disk, linking, reports, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.face_engine import default_threshold, get_engine
@@ -30,6 +30,7 @@ from .deps import (
     ActorDep,
     CurrentUser,
     SessionDep,
+    accessible_case_ids,
     authorize_objects,
     can_manage_case,
     get_case_or_404,
@@ -480,6 +481,49 @@ EXPORTS = {
     "json": ("application/json", "json"),
     "zip": ("application/zip", "zip"),
 }
+
+
+# ---------------------------------------------------------------- ligar pessoas entre análises
+def _similar(session, user, job: Job, query, *, source: dict, threshold: float | None, scope: str,
+             limit: int) -> dict:
+    if query is None:
+        raise HTTPException(404, "Sem embedding guardado para comparar (análises anteriores a esta versão não "
+                                 "guardavam os embeddings dos tracks no modo procurar).")
+    if scope not in ("case", "all"):
+        raise HTTPException(422, "scope deve ser 'case' ou 'all'.")
+    emb, model = query
+    th = float(threshold if threshold is not None else job.params.get("threshold") or 0.5)
+    if not 0 < th <= 1.5:
+        raise HTTPException(422, "Limiar inválido.")
+    case_ids = {job.case_id} if scope == "case" else accessible_case_ids(session, user)
+    out = linking.find_similar(session, emb, model, case_ids=case_ids, exclude_job_id=job.id, threshold=th,
+                               limit=max(1, min(limit, 500)))
+    log_event(session, "person.linked_search", case_id=job.case_id, actor=user.username,
+              details={**source, "job_id": job.id, "threshold": th, "scope": scope,
+                       "results": len(out["results"]),
+                       "cases_with_results": sorted({r["case_id"] for r in out["results"]})})
+    return out
+
+
+@router.get("/tracks/{track_id}/similar")
+def similar_to_track(track_id: int, session: SessionDep, user: CurrentUser, threshold: float | None = None,
+                     scope: str = "all", limit: int = 100) -> dict:
+    """Tracks parecidos noutras análises dos casos acessíveis (scope=case: só o mesmo caso)."""
+    track = session.get(Track, track_id)
+    job = get_job_or_404(session, track.job_id) if track else None
+    if job is None:
+        raise HTTPException(404, "Track não encontrado.")
+    return _similar(session, user, job, linking.track_query(job, track_id), source={"track_id": track_id},
+                    threshold=threshold, scope=scope, limit=limit)
+
+
+@router.get("/jobs/{job_id}/persons/{person_id}/similar")
+def similar_to_person(job_id: int, person_id: int, session: SessionDep, user: CurrentUser,
+                      threshold: float | None = None, scope: str = "all", limit: int = 100) -> dict:
+    """Como /tracks/{id}/similar, com a média dos tracks da pessoa (descoberta ou várias pessoas procuradas)."""
+    job = get_job_or_404(session, job_id)
+    return _similar(session, user, job, linking.person_query(job, person_id), source={"person_id": person_id},
+                    threshold=threshold, scope=scope, limit=limit)
 
 
 @router.get("/jobs/{job_id}/frames/validated.zip")

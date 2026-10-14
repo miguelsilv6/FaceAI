@@ -392,3 +392,31 @@ export interface Activity {
   conversions: ActivityConversion[];
   uploads: ActivityUpload[];
 }
+
+export interface SimilarTrack {
+  case_id: number;
+  case_name: string;
+  job_id: number;
+  job_mode: string;
+  track_id: number;
+  person_id: number | null;
+  video_id: number;
+  video_filename: string;
+  start_s: number;
+  end_s: number;
+  real_start: string | null;
+  distance: number;
+  similarity: number;
+  best_detection_id: number | null;
+  review_status: ReviewStatus;
+  is_match: boolean;
+}
+
+export interface SimilarResult {
+  model: string;
+  threshold: number;
+  results: SimilarTrack[];
+  jobs_searched: number;
+  jobs_not_indexed: number;
+  jobs_other_model: number;
+}

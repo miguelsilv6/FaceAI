@@ -13,6 +13,7 @@ import DeleteJobModal from "../components/DeleteJobModal";
 import BodyTrackCard from "../components/BodyTrackCard";
 import DetectionCard from "../components/DetectionCard";
 import PersonCard from "../components/PersonCard";
+import SimilarModal, { type SimilarQuery } from "../components/SimilarModal";
 import TrackCard from "../components/TrackCard";
 import JobStatusBadge from "../components/JobStatusBadge";
 import Timeline from "../components/Timeline";
@@ -49,6 +50,7 @@ export default function Results() {
   const [showCandidates, setShowCandidates] = useState(false);
   const [order, setOrder] = useState<"time" | "score" | "quality">("time");
   const [frameDet, setFrameDet] = useState<Detection | null>(null);
+  const [similar, setSimilar] = useState<SimilarQuery | null>(null);
   const [frameVariant, setFrameVariant] = useState<"annotated" | "original">("annotated");
   const [deleting, setDeleting] = useState(false);
   // Erro de reprodução no browser (por vídeo), com o diagnóstico mostrado ao analista.
@@ -577,7 +579,9 @@ export default function Results() {
                   others={persons.filter((o) => o.person_id !== p.person_id)}
                   firstRealTime={realTime(videoById.get(p.first.video_id), p.first.start_s)}
                   onSelect={selectPerson} onReview={reviewPerson} onMerge={mergePerson}
-                  onUseAsReference={(x) => addAsReference(x.best_detection_id)} />
+                  onUseAsReference={(x) => addAsReference(x.best_detection_id)}
+                  onFindSimilar={job.status === "completed"
+                    ? (x) => setSimilar({ kind: "person", jobId: job.id, personId: x.person_id }) : undefined} />
               ))}
             </SimpleGrid>
           )
@@ -591,6 +595,7 @@ export default function Results() {
                   realStart={realTime(video, t.start_s)} realEnd={realTime(video, t.end_s)} onOpenFrame={openFrame}
                   personIds={discover ? personIds : undefined} onMove={discover ? moveTrack : undefined}
                   personLabel={labelOf(t.person_id)}
+                  onFindSimilar={job.status === "completed" ? (x) => setSimilar({ kind: "track", trackId: x.id }) : undefined}
                   onShowDetections={(x) => { setTrackFilter(x.id); setView("detections"); }} />
               ))}
             </SimpleGrid>
@@ -607,6 +612,8 @@ export default function Results() {
         )}
       </Card>
 
+      <SimilarModal query={similar} onClose={() => setSimilar(null)}
+        defaultThreshold={Math.min(0.9, Math.max(0.05, Number(job.params.threshold ?? 0.5)))} />
       <DeleteJobModal job={deleting ? job : null} onClose={() => setDeleting(false)}
         onDeleted={(j) => navigate(`/cases/${j.case_id}`)} />
 
