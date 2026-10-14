@@ -2,13 +2,14 @@ import {
   Alert, Anchor, Badge, Box, Button, Card, Group, MultiSelect, Stack, Switch, Table, Text, Tooltip,
 } from "@mantine/core";
 import { IconDownload } from "@tabler/icons-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { api, formatTime } from "../api";
 import { notifyError } from "../notify";
 import { personColor } from "../personColors";
-import type { CaseRoute, Job, RouteSegment } from "../types";
+import type { CaseRoute, Job, RouteSegment, Video } from "../types";
+import MultiCamPlayer, { type SeekRequest } from "./MultiCamPlayer";
 
 const LANE_H = 34;
 const LABEL_W = 170;
@@ -39,12 +40,14 @@ function toCsv(segs: RouteSegment[]): string {
 }
 
 /** Percurso da(s) pessoa(s) entre câmaras, pela hora real do DVR (linhas = câmaras/vídeos). */
-export default function RouteTimeline({ caseId, jobs }: { caseId: number; jobs: Job[] }) {
+export default function RouteTimeline({ caseId, jobs, videos }: { caseId: number; jobs: Job[]; videos: Video[] }) {
   const navigate = useNavigate();
   const completed = jobs.filter((j) => j.status === "completed");
   const [jobIds, setJobIds] = useState<string[]>([]);
   const [confirmedOnly, setConfirmedOnly] = useState(false);
   const [route, setRoute] = useState<CaseRoute | null>(null);
+  const [seek, setSeek] = useState<SeekRequest | null>(null);
+  const playerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     // Por omissão, todas as análises "procurar" concluídas: cada câmara pode ter sido analisada à parte.
@@ -77,6 +80,14 @@ export default function RouteTimeline({ caseId, jobs }: { caseId: number; jobs: 
   const span = Math.max(1, t1 - t0);
   const pct = (t: number) => ((t - t0) / span) * 100;
   const open = (s: RouteSegment) => navigate(`/jobs/${s.job_id}?video=${s.video_id}&t=${s.start_s}`);
+  // Leva todas as câmaras do leitor para 2 s antes da aparição.
+  const watch = (s: RouteSegment) => {
+    setSeek((q) => ({ wall: seconds(s.real_start!) - 2, n: (q?.n ?? 0) + 1 }));
+    playerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const player = (
+    <div ref={playerRef}><MultiCamPlayer videos={videos} segments={segs} seek={seek} /></div>
+  );
   const unsyncedVideos = route?.videos.filter((v) => !v.synced) ?? [];
 
   const download = () => {
@@ -88,7 +99,9 @@ export default function RouteTimeline({ caseId, jobs }: { caseId: number; jobs: 
     URL.revokeObjectURL(url);
   };
 
-  if (!completed.length) return <Text c="dimmed">Ainda não há análises concluídas neste caso.</Text>;
+  if (!completed.length) {
+    return <Stack><Text c="dimmed">Ainda não há análises concluídas neste caso.</Text>{player}</Stack>;
+  }
   return (
     <Stack>
       <Group align="flex-end" wrap="wrap">
@@ -101,7 +114,7 @@ export default function RouteTimeline({ caseId, jobs }: { caseId: number; jobs: 
           onClick={download}>CSV</Button>
       </Group>
       <Text size="sm" c="dimmed">Cada linha é uma câmara (vídeo); os blocos são as aparições, pela hora real do DVR.
-        Blocos tracejados vêm só do vestuário. Clique num bloco para abrir os resultados nesse instante.</Text>
+        Blocos tracejados vêm só do vestuário. Clique num bloco para ver todas as câmaras nesse instante (leitor abaixo).</Text>
       {unsyncedVideos.length > 0 && (
         <Alert color="yellow">
           {unsyncedVideos.length} vídeo(s) com aparições mas sem hora real acertada ({unsyncedVideos.map((v) => v.filename).join(", ")}):
@@ -142,7 +155,7 @@ export default function RouteTimeline({ caseId, jobs }: { caseId: number; jobs: 
                       <Tooltip key={i} label={`${s.person_label} · ${hhmmss(s.real_start!)}–${hhmmss(s.real_end ?? s.real_start!)}`
                         + ` · ${s.evidence}${s.best_similarity != null ? ` · ${(s.best_similarity * 100).toFixed(0)}%` : ""}`}>
                         <Box component="button" aria-label={`${s.person_label} em ${lane.filename} às ${hhmmss(s.real_start!)}`}
-                          onClick={() => open(s)}
+                          onClick={() => watch(s)}
                           style={{ position: "absolute", left: `${left}%`, width: `${width}%`, top: 7, height: LANE_H - 14,
                             background: s.evidence === "vestuário" ? "transparent" : color, cursor: "pointer",
                             border: `2px ${s.evidence === "vestuário" ? "dashed" : "solid"} ${color}`, borderRadius: 4, padding: 0 }} />
@@ -161,6 +174,7 @@ export default function RouteTimeline({ caseId, jobs }: { caseId: number; jobs: 
           </Group>
         </Card>
       )}
+      {player}
       {segs.length > 0 && (
         <Card withBorder p={0}>
           <Table.ScrollContainer minWidth={640}>
@@ -178,7 +192,10 @@ export default function RouteTimeline({ caseId, jobs }: { caseId: number; jobs: 
                     <Table.Td ff="monospace">{formatTime(s.start_s)}</Table.Td>
                     <Table.Td>{s.evidence}</Table.Td>
                     <Table.Td>
-                      <Anchor component="button" size="xs" onClick={() => open(s)}>Abrir</Anchor>
+                      <Group gap="xs" wrap="nowrap">
+                        <Anchor component="button" size="xs" onClick={() => watch(s)}>Ver câmaras</Anchor>
+                        <Anchor component="button" size="xs" onClick={() => open(s)}>Resultados</Anchor>
+                      </Group>
                     </Table.Td>
                   </Table.Tr>
                 ))}
