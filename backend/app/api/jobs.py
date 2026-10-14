@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import cv2
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlmodel import select
@@ -16,7 +17,7 @@ from sqlmodel import select
 from ..config import settings
 from ..models import Detection, Job, JobStatus, ReferenceImage, ReviewStatus, Track, Video, utcnow
 from ..schemas import JobCreate, JobDelete, PersonMerge, QueueUpdate, ReviewUpdate, TrackPerson
-from ..services import disk, linking, reports, validated_frames
+from ..services import disk, enhance, linking, reports, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.clock import real_time
@@ -476,6 +477,52 @@ def detection_original_frame(det_id: int, session: SessionDep, actor: ActorDep, 
         headers["Content-Disposition"] = f'attachment; filename="{filename}"'
         _log_download(session, det, job, actor, "original", body, filename,
                       video_filename=video.filename, extraction=method, crop_error=err)
+    return Response(content=body, media_type="image/png", headers=headers)
+
+
+@router.get("/detections/{det_id}/enhanced")
+def detection_enhanced(det_id: int, session: SessionDep, actor: ActorDep, src: str = "crop", ops: str = "",
+                       upscale: int = 1, gamma: float = 1.0, download: bool = False) -> Response:
+    """Imagem melhorada SÓ para visualização (contraste, nitidez, ruído, gama, ampliação Lanczos).
+
+    src=crop (recorte da face) ou original (frame completo do vídeo, sem anotações). O original não é alterado.
+    Com download=1 a imagem leva uma faixa "MELHORADA" e o download fica na auditoria (operações e SHA-256)."""
+    det = session.get(Detection, det_id)
+    if det is None or src not in ("crop", "original"):
+        raise HTTPException(404, "Imagem não encontrada.")
+    try:
+        e = enhance.Enhancement.parse(ops, upscale, gamma)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    job = session.get(Job, det.job_id)
+    if src == "crop":
+        if not Path(det.crop_path).exists():
+            raise HTTPException(404, "Recorte indisponível.")
+        img = read_image(det.crop_path)
+    else:
+        video = session.get(Video, det.video_id)
+        if job is None or video is None or not Path(video.stored_path).exists():
+            raise HTTPException(404, "O vídeo original desta deteção já não está disponível.")
+        try:
+            png, _, _ = validated_frames.original_frame_png(job, video, det)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
+    out = enhance.apply(img, e)
+    if download:
+        out = enhance.watermark(out, e)
+    ok, buf = cv2.imencode(".png", out)
+    if not ok:
+        raise HTTPException(500, "Falha ao codificar a imagem.")
+    body = buf.tobytes()
+    headers = {"X-FaceAI-Enhancement": e.describe(), "Cache-Control": "private, max-age=300"}
+    if download and job is not None:
+        filename = _download_name(det, job, f"{'face' if src == 'crop' else 'original'}_melhorada.png")
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        log_event(session, "detection.enhanced_downloaded", case_id=job.case_id, actor=actor,
+                  details={"job_id": job.id, "detection_id": det.id, "source": src, "enhancement": e.as_dict(),
+                           "filename": filename, "size_bytes": len(body),
+                           "sha256": hashlib.sha256(body).hexdigest()})
     return Response(content=body, media_type="image/png", headers=headers)
 
 

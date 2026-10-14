@@ -12,6 +12,7 @@ import { api, browserCodecs, formatEta, formatTime, realTime } from "../api";
 import DeleteJobModal from "../components/DeleteJobModal";
 import BodyTrackCard from "../components/BodyTrackCard";
 import DetectionCard from "../components/DetectionCard";
+import EnhancePanel from "../components/EnhancePanel";
 import PersonCard from "../components/PersonCard";
 import SimilarModal, { type SimilarQuery } from "../components/SimilarModal";
 import TrackCard from "../components/TrackCard";
@@ -54,7 +55,7 @@ export default function Results() {
   const [order, setOrder] = useState<"time" | "score" | "quality">("time");
   const [frameDet, setFrameDet] = useState<Detection | null>(null);
   const [similar, setSimilar] = useState<SimilarQuery | null>(null);
-  const [frameVariant, setFrameVariant] = useState<"annotated" | "original">("annotated");
+  const [frameVariant, setFrameVariant] = useState<"annotated" | "original" | "enhanced">("annotated");
   const [deleting, setDeleting] = useState(false);
   // Erro de reprodução no browser (por vídeo), com o diagnóstico mostrado ao analista.
   const [playError, setPlayError] = useState<{ videoId: number; detail: string } | null>(null);
@@ -635,16 +636,19 @@ export default function Results() {
           <Stack gap="sm">
             <Group justify="space-between" wrap="wrap">
               <SegmentedControl size="xs" value={frameVariant}
-                onChange={(v) => setFrameVariant(v as "annotated" | "original")}
-                data={[{ value: "annotated", label: "Com marcação" }, { value: "original", label: "Original (sem marcação)" }]} />
+                onChange={(v) => setFrameVariant(v as "annotated" | "original" | "enhanced")}
+                data={[{ value: "annotated", label: "Com marcação" }, { value: "original", label: "Original (sem marcação)" },
+                  { value: "enhanced", label: "Melhorar (revisão)" }]} />
               {(() => {
                 const fv = videoById.get(frameDet.video_id);
                 const rt = realTime(fv, frameDet.timestamp_s);
                 return <Text size="xs" c="dimmed">{fv?.filename}{rt ? ` · hora real ${rt}` : ""}</Text>;
               })()}
             </Group>
-            <Image key={`${frameDet.id}-${frameVariant}`} alt="Frame completo"
-              src={api.detectionFrameUrl(frameDet.id, frameVariant)} />
+            {frameVariant === "enhanced" ? <EnhancePanel detectionId={frameDet.id} /> : (
+              <Image key={`${frameDet.id}-${frameVariant}`} alt="Frame completo"
+                src={api.detectionFrameUrl(frameDet.id, frameVariant)} />
+            )}
             <Group justify="space-between" wrap="wrap">
               <Text size="xs" c="dimmed" maw={520}>
                 O original é extraído do vídeo analisado (PNG, sem perdas) e verificado contra o recorte da face guardado na

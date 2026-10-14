@@ -259,6 +259,9 @@ export const api = {
   review: (detId: number, status: ReviewStatus, note = "") =>
     request<Detection>("PATCH", `/api/detections/${detId}/review`, { status, note }),
   detectionImageUrl: (id: number, kind: "crop" | "frame") => `/api/detections/${id}/${kind}`,
+  enhancedUrl: (id: number, o: { src: "crop" | "original"; ops: string[]; upscale: number; gamma: number }, download = false) =>
+    `/api/detections/${id}/enhanced?src=${o.src}&ops=${o.ops.join(",")}&upscale=${o.upscale}&gamma=${o.gamma}`
+    + (download ? "&download=1" : ""),
   /** Frame completo: "annotated" (JPEG com a caixa) ou "original" (PNG extraído do vídeo, sem marcações). */
   detectionFrameUrl: (id: number, variant: "annotated" | "original", download = false) => {
     const base = variant === "original" ? `/api/detections/${id}/frame/original` : `/api/detections/${id}/frame`;
