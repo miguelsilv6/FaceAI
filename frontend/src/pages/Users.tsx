@@ -68,9 +68,10 @@ export default function Users() {
                         <Group gap={4}>
                           {!u.active && <Badge color="gray">inativo</Badge>}
                           {u.locked && <Badge color="red">bloqueado</Badge>}
-                          {!u.totp_enabled && <Badge color="yellow">MFA por configurar</Badge>}
+                          {u.totp_enabled ? <Badge color="teal" variant="light">MFA</Badge>
+                            : <Badge color="gray" variant="light">sem MFA</Badge>}
                           {u.must_change_password && <Badge color="orange">password temporária</Badge>}
-                          {u.active && !u.locked && u.totp_enabled && !u.must_change_password &&
+                          {u.active && !u.locked && !u.must_change_password &&
                             <Badge color="green">ativo</Badge>}
                         </Group>
                       </Table.Td>
@@ -88,8 +89,8 @@ export default function Users() {
                               {u.role === "admin" ? "Tornar analista" : "Tornar administrador"}
                             </Menu.Item>
                             <Menu.Item onClick={() => setResetting(u)}>Repor password…</Menu.Item>
-                            <Menu.Item onClick={() => {
-                              if (window.confirm(`Repor o MFA de ${u.username}? Terá de o configurar no próximo login.`)) {
+                            <Menu.Item disabled={!u.totp_enabled} onClick={() => {
+                              if (window.confirm(`Repor o MFA de ${u.username}? As sessões terminam e o MFA fica desativado até o voltar a ativar.`)) {
                                 void act(() => usersApi.resetMfa(u.id), "MFA reposto.");
                               }
                             }}>Repor MFA (telemóvel perdido)</Menu.Item>
@@ -156,7 +157,7 @@ function CreateUserModal({ opened, onClose, onCreated }: {
     setBusy(true);
     try {
       await usersApi.create({ username, display_name: displayName, role, password });
-      notifyOk(`Utilizador ${username} criado. No primeiro login vai configurar o MFA e mudar a password.`);
+      notifyOk(`Utilizador ${username} criado. No primeiro login vai mudar a password.`);
       setUsername("");
       setDisplayName("");
       setPassword("");

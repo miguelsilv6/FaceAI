@@ -8,6 +8,7 @@ import type { AuthState, Me } from "./types";
 interface AuthContextValue {
   user: Me;
   isAdmin: boolean;
+  requireMfa: boolean;
   refresh: () => Promise<void>;
   logout: () => Promise<void>;
 }
@@ -83,7 +84,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
     );
   }
   return (
-    <AuthContext.Provider value={{ user: state.user, isAdmin: state.user.role === "admin", refresh, logout }}>
+    <AuthContext.Provider value={{ user: state.user, isAdmin: state.user.role === "admin",
+      requireMfa: state.require_mfa, refresh, logout }}>
       {children}
     </AuthContext.Provider>
   );

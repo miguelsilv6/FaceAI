@@ -284,6 +284,7 @@ export interface AuthState {
   csrf_token: string;
   user: Me;
   idle_minutes: number;
+  require_mfa: boolean;
   recovery_codes?: string[];
 }
 

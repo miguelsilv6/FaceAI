@@ -106,7 +106,8 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 | `FACEAI_MODELS_DIR` | `~/.faceai/models` | Pesos ONNX |
 | `FACEAI_UPLOAD_CHUNK_MB` | `8` | Tamanho de cada bloco do upload (o Cloudflare limita os pedidos a 100 MB) |
 | `FACEAI_PRELOAD_MODELS` | `1` | Descarregar/carregar os modelos em segundo plano no arranque |
-| `FACEAI_SECRET_KEY` | *(vazio)* | Chave que cifra os segredos MFA. Se ficar vazia, usa-se `data/secret.key`, gerado no 1.º arranque com permissões 0600. **Faz backup**: sem ela, todos têm de reconfigurar o MFA. |
+| `FACEAI_SECRET_KEY` | *(vazio)* | Chave que cifra os segredos MFA. Se ficar vazia, usa-se `data/secret.key`, gerado no 1.º arranque com permissões 0600. **Faz backup**: sem ela, quem tem MFA ativo tem de o reconfigurar. |
+| `FACEAI_REQUIRE_MFA` | `false` | `true`: MFA obrigatório para todos, configurado logo no primeiro login. `false`: opcional, cada utilizador ativa-o em *A minha conta*. |
 | `FACEAI_COOKIE_SECURE` | `auto` | Cookie de sessão só por HTTPS: `auto` (quando o pedido chega por HTTPS), `true` ou `false` |
 | `FACEAI_TRUST_PROXY` | `none` | `cloudflare`: usa `CF-Connecting-IP` e `X-Forwarded-Proto` (IP real na auditoria e nos bloqueios). Só atrás do Cloudflare Tunnel. |
 | `FACEAI_ALLOWED_ORIGINS` | *(vazio)* | Origens extra aceites nos pedidos que alteram dados (ex.: `https://faceai.exemplo.pt`). O próprio host é sempre aceite. |
@@ -116,9 +117,9 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 ### Autenticação e controlo de acesso
 
 - **Primeiro administrador:** `python -m app.cli create-admin` (em `backend/`), ou `docker compose exec faceai python -m app.cli create-admin`. Não há registo público: até existir um administrador, a API responde 503. A mesma ferramenta faz `reset-password`, `reset-mfa`, `unlock` e `list-users`.
-- **Contas locais com MFA obrigatório:**
+- **Contas locais com MFA opcional** (obrigatório com `FACEAI_REQUIRE_MFA=true`):
   - password com hash **Argon2id**, mínimo de 12 caracteres, recusa passwords comuns e as que contêm o nome de utilizador;
-  - **TOTP** (app autenticadora), configurado no primeiro login a partir de um QR code gerado no próprio servidor. O segredo fica cifrado com AES-GCM;
+  - **TOTP** (app autenticadora), ativado em *A minha conta* (ou no primeiro login, se obrigatório) a partir de um QR code gerado no próprio servidor. O segredo fica cifrado com AES-GCM. Desativar pede a password e um código;
   - 10 **códigos de recuperação** de uso único.
 - **Sessões:**
   - cookie `HttpOnly`, `SameSite=Strict`, com `Secure` e prefixo `__Host-` em HTTPS. Na base de dados só fica o SHA-256 do token;

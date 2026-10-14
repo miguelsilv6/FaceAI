@@ -153,6 +153,9 @@ export const authApi = {
   login: (username: string, password: string) => request<AuthState>("POST", "/api/auth/login", { username, password }),
   mfaSetup: () => request<MfaSetup>("POST", "/api/auth/mfa/setup"),
   mfaVerify: (code: string) => request<AuthState>("POST", "/api/auth/mfa/verify", { code }),
+  mfaEnable: (code: string) => request<{ recovery_codes: string[] }>("POST", "/api/auth/mfa/enable", { code }),
+  mfaDisable: (password: string, code: string) =>
+    request<AuthState>("POST", "/api/auth/mfa/disable", { password, code }),
   changePassword: (current_password: string, new_password: string) =>
     request<AuthState>("POST", "/api/auth/password", { current_password, new_password }),
   regenerateRecoveryCodes: (password: string) =>
