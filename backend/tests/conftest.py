@@ -23,11 +23,11 @@ def client(tmp_path, monkeypatch):
     importlib.reload(app.config)
     app.db.settings = app.config.settings
     app.db._engine = None
-    from app.services import audit, face_engine, jobs, reports, transcode
+    from app.services import audit, disk, face_engine, jobs, reports, transcode
 
     monkeypatch.setattr(transcode, "ffmpeg_available", lambda: False)
 
-    for mod in (audit, jobs, reports):
+    for mod in (audit, disk, jobs, reports):
         mod.settings = app.config.settings
     import app.api.cases as cases_api
     import app.api.deps as deps
@@ -43,6 +43,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "hasher", PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1))
     monkeypatch.setattr(auth, "_DUMMY_HASH", auth.hasher.hash("dummy-password-x"))
     monkeypatch.setitem(app.main._setup_state, "done", False)
+    monkeypatch.setitem(disk._last_alert, "level", "ok")
     face_engine.set_engine(FakeEngine())
     with TestClient(app.main.app) as c:
         create_user(ADMIN, ADMIN_PASSWORD, role="admin", must_change=False)

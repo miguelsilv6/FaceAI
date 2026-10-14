@@ -5,11 +5,11 @@ from __future__ import annotations
 import bisect
 import logging
 import math
+import os
 import threading
 import time
 import traceback
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -25,10 +25,10 @@ from .body_engine import get_body_engine
 from .clustering import centroids_of, cluster_embeddings
 from .face_engine import FaceEngine, get_engine
 from .imageio import write_jpeg
-from .matcher import ReferenceSet, is_match, l2_normalize
+from .matcher import MultiReferenceSet, is_match, l2_normalize
 from .motion import MotionGate
 from .quality import face_quality
-from .references import reference_embeddings
+from .references import person_groups, reference_embeddings
 from .tracking import FaceTracker
 from .video_processor import SampledFrame, annotate, crop_with_margin, format_timestamp, sample_frames
 
@@ -42,37 +42,106 @@ class JobCancelled(Exception):
 
 
 class JobRunner:
-    def __init__(self) -> None:
-        self._executor: ThreadPoolExecutor | None = None
-        self._cancel: dict[int, threading.Event] = {}
+    """Fila de análises persistente (na base de dados), executada uma de cada vez por uma thread própria.
 
-    def submit(self, job_id: int) -> None:
-        if self._executor is None:
-            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="faceai-job")
-        self._cancel[job_id] = threading.Event()
-        self._executor.submit(self._run_safe, job_id)
+    A próxima análise é a de maior prioridade (empate: a mais antiga) que não esteja retida. As análises em fila
+    sobrevivem a um reinício do servidor; as que estavam a decorrer são marcadas como interrompidas.
+    """
+
+    IDLE_WAIT_S = 30.0
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._thread: threading.Thread | None = None
+        self._stop = False
+        self._current: tuple[int, threading.Event] | None = None
+
+    def start(self) -> None:
+        with self._cond:
+            if self._thread is not None and self._thread.is_alive():
+                self._cond.notify_all()
+                return
+            self._stop = False
+            self._thread = threading.Thread(target=self._loop, name="faceai-job", daemon=True)
+            self._thread.start()
+
+    def submit(self, job_id: int | None = None) -> None:
+        """Acorda o worker (nova análise em fila, prioridade alterada ou análise libertada)."""
+        self.start()
+
+    wake = submit
 
     def cancel(self, job_id: int) -> bool:
-        ev = self._cancel.get(job_id)
-        if ev is None:
-            return False
-        ev.set()
-        return True
+        with self._cond:
+            if self._current is not None and self._current[0] == job_id:
+                self._current[1].set()
+                return True
+        with Session(get_db_engine(), expire_on_commit=False) as s:  # ainda em fila: cancela já
+            job = s.get(Job, job_id)
+            if job is not None and job.status == JobStatus.queued:
+                _finish(s, job, JobStatus.cancelled, "Cancelada antes de iniciar.")
+                return True
+        return False
 
     def shutdown(self) -> None:
-        for ev in self._cancel.values():
-            ev.set()
-        if self._executor is not None:
-            self._executor.shutdown(wait=False, cancel_futures=True)
-            self._executor = None
+        with self._cond:
+            self._stop = True
+            if self._current is not None:
+                self._current[1].set()
+            self._cond.notify_all()
+            thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=10)
+        self._thread = None
 
-    def _run_safe(self, job_id: int) -> None:
-        try:
-            run_job(job_id, self._cancel.get(job_id) or threading.Event())
-        except Exception:  # pragma: no cover - registado no próprio job
-            log.exception("Falha inesperada no job %s", job_id)
-        finally:
-            self._cancel.pop(job_id, None)
+    def _next_job_id(self) -> int | None:
+        with Session(get_db_engine()) as s:
+            return s.exec(select(Job.id).where(Job.status == JobStatus.queued, Job.held == False)  # noqa: E712
+                          .order_by(Job.priority.desc(), Job.id).limit(1)).first()
+
+    def _loop(self) -> None:
+        _lower_thread_priority()
+        while True:
+            with self._cond:
+                if self._stop:
+                    return
+            try:
+                job_id = self._next_job_id()
+            except Exception:  # pragma: no cover - base de dados indisponível (ex.: entre testes)
+                log.exception("Fila de análises: erro ao escolher a próxima")
+                job_id = None
+            if job_id is None:
+                with self._cond:
+                    if not self._stop:
+                        self._cond.wait(self.IDLE_WAIT_S)
+                continue
+            event = threading.Event()
+            with self._cond:
+                self._current = (job_id, event)
+            try:
+                run_job(job_id, event)
+            except Exception:  # pragma: no cover - registado no próprio job
+                log.exception("Falha inesperada no job %s", job_id)
+            finally:
+                with self._cond:
+                    self._current = None
+
+
+def _lower_thread_priority() -> None:
+    """FACEAI_JOB_NICE: no Linux o "nice" aplica-se só a esta thread (a interface continua fluida)."""
+    if settings.job_nice <= 0 or not hasattr(os, "setpriority"):
+        return
+    try:
+        os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), min(19, settings.job_nice))
+    except OSError:  # pragma: no cover - sem permissão / plataforma sem suporte
+        log.warning("Não foi possível baixar a prioridade da thread das análises")
+
+
+def queue_positions(s: Session) -> dict[int, int]:
+    """Posição (1 = a seguir) de cada análise em fila não retida."""
+    rows = s.exec(select(Job.id).where(Job.status == JobStatus.queued, Job.held == False)  # noqa: E712
+                  .order_by(Job.priority.desc(), Job.id)).all()
+    return {jid: i + 1 for i, jid in enumerate(rows)}
 
 
 runner = JobRunner()
@@ -83,9 +152,10 @@ def job_dir(job: Job) -> Path:
 
 
 def recover_interrupted_jobs() -> None:
-    """Marca como falhadas as análises que estavam a correr quando o servidor parou."""
+    """Marca como falhadas as análises que estavam a correr quando o servidor parou. As que estavam em fila
+    continuam na fila e são executadas a seguir."""
     with Session(get_db_engine(), expire_on_commit=False) as s:
-        for job in s.exec(select(Job).where(Job.status.in_([JobStatus.running, JobStatus.queued]))):
+        for job in s.exec(select(Job).where(Job.status == JobStatus.running)):
             job.status = JobStatus.failed
             job.message = "Interrompida (o servidor foi reiniciado)."
             job.finished_at = utcnow()
@@ -99,7 +169,7 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
     engine = get_engine()
     with Session(get_db_engine(), expire_on_commit=False) as s:
         job = s.get(Job, job_id)
-        if job is None:
+        if job is None or job.status != JobStatus.queued:
             return
         if cancel.is_set():
             _finish(s, job, JobStatus.cancelled, "Cancelada antes de iniciar.")
@@ -107,7 +177,8 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
         p = job.params
         job.status = JobStatus.running
         job.started_at = utcnow()
-        job.environment = engine.environment()
+        job.environment = {**engine.environment(),
+                           "resources": {"cpu_threads": settings.cpu_threads or "auto", "job_nice": settings.job_nice}}
         s.add(job)
         s.commit()
         log_event(s, "job.started", case_id=job.case_id, actor=job.created_by,
@@ -115,7 +186,7 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
 
         try:
             discover = p.get("mode") == "discover"
-            reference_set, used_refs = None, []
+            reference_set, used_refs, persons = None, [], []
             if not discover:
                 refs = [s.get(ReferenceImage, rid) for rid in job.reference_ids]
                 refs = [r for r in refs if r is not None]
@@ -124,8 +195,22 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                 )
                 if not used_refs:
                     raise ValueError("Nenhuma imagem de referência válida. " + " ".join(warnings))
-                reference_set = ReferenceSet(ref_matrix)
+                # Várias pessoas: as referências agrupam-se pelo rótulo (definido ao criar a análise).
+                row_of = {r.id: i for i, r in enumerate(used_refs)}
+                ordered: list[ReferenceImage] = []
+                matrices = []
+                for g in p.get("persons") or person_groups(refs):
+                    rows = [row_of[rid] for rid in g["reference_ids"] if rid in row_of]
+                    if not rows:
+                        warnings.append(f"Pessoa '{g['label']}' ignorada: nenhuma referência válida.")
+                        continue
+                    persons.append({**g, "reference_ids": [used_refs[i].id for i in rows]})
+                    ordered += [used_refs[i] for i in rows]
+                    matrices.append(ref_matrix[rows])
+                used_refs = ordered
+                reference_set = MultiReferenceSet(matrices)
                 job.reference_ids = [r.id for r in used_refs]
+                job.params = {**p, "persons": persons}
                 job.message = " ".join(warnings)
 
             videos = [v for v in (s.get(Video, vid) for vid in job.video_ids) if v is not None]
@@ -138,6 +223,7 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                 job.environment = {**job.environment, "body": body_engine.environment()}
 
             ctx = _AnalysisContext.from_params(p, engine, reference_set, used_refs, job_dir(job))
+            ctx.person_ids = [g["id"] for g in persons]
 
             def frames_for(v: Video) -> int:
                 step = max(1, int(round(v.fps / ctx.sample_fps))) if v.fps else 1
@@ -166,6 +252,9 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
             frames = (f"{job.frames_processed} frames analisados ({job.frames_sampled} amostrados;"
                       f" {job.frames_skipped_motion} sem movimento, {job.frames_skipped_noface} sem faces na"
                       " 1.ª passagem)")
+            if not discover:
+                _save_track_embeddings(ctx, job, [st for st in ctx.tracked if st.row is not None and st.faces],
+                                       lambda st: st.row.person_id or 1)
             if discover:
                 _group_persons(ctx, s, job)
                 summary = (f"{job.faces_detected} face(s) em {frames}, seguidas em {job.tracks} track(s) e"
@@ -265,7 +354,7 @@ DISCOVER_SAVE_EVERY_S = 10.0  # ... ou quando passou este tempo desde a última 
 @dataclass
 class _AnalysisContext:
     engine: FaceEngine
-    reference_set: ReferenceSet | None  # None = modo descoberta
+    reference_set: MultiReferenceSet | None  # None = modo descoberta
     refs: list[ReferenceImage]
     out_dir: Path
     model: str
@@ -284,14 +373,21 @@ class _AnalysisContext:
     tracking: bool
     track_gap_s: float
     discovered: list[_TrackState] = field(default_factory=list)  # modo descoberta: tracks de todos os vídeos
+    tracked: list[_TrackState] = field(default_factory=list)  # modo procurar: tracks de todos os vídeos
+    person_ids: list[int] = field(default_factory=list)  # n.º de cada pessoa (pela ordem do reference_set)
     det_embeddings: list[tuple[Detection, np.ndarray]] = field(default_factory=list)
 
     @property
     def discover(self) -> bool:
         return self.reference_set is None
 
+    @property
+    def multi(self) -> bool:
+        """Várias pessoas procuradas na mesma passagem (só então tracks e deteções levam person_id)."""
+        return len(self.person_ids) > 1
+
     @classmethod
-    def from_params(cls, p: dict, engine: FaceEngine, reference_set: ReferenceSet | None,
+    def from_params(cls, p: dict, engine: FaceEngine, reference_set: MultiReferenceSet | None,
                     refs: list[ReferenceImage], out_dir: Path) -> _AnalysisContext:
         threshold = float(p["threshold"])
         fast = p.get("fast_detector") if p.get("cascade", False) else None
@@ -316,15 +412,24 @@ class _TrackState:
     start_s: float
     end_s: float
     n_faces: int = 0
-    top: list[float] = field(default_factory=list)  # as K menores distâncias, ordenadas
-    best_distance: float = 2.0
-    best_ref_id: int | None = None
+    tops: dict[int, list[float]] = field(default_factory=dict)  # por pessoa: as K menores distâncias, ordenadas
+    best: dict[int, tuple[float, int]] = field(default_factory=dict)  # por pessoa: (menor distância, referência)
     best_quality: float = 0.0
     best_saved_distance: float = 2.0
     row: Track | None = None
-    faces: list[tuple[float, np.ndarray]] = field(default_factory=list)  # descoberta: (qualidade, embedding)
+    faces: list[tuple[float, np.ndarray]] = field(default_factory=list)  # (qualidade, embedding) das melhores faces
     best_saved_quality: float = -1.0
     last_saved_s: float = -1e9
+
+    def person(self) -> int:
+        """Pessoa do track: a de menor média das K melhores distâncias."""
+        return min(self.tops, key=lambda p: sum(self.tops[p]) / len(self.tops[p]))
+
+    def add_face(self, quality: float, emb: np.ndarray) -> None:
+        if len(self.faces) < DISCOVER_TOP_FACES or quality > self.faces[-1][0]:
+            self.faces.append((quality, emb))
+            self.faces.sort(key=lambda f: -f[0])
+            del self.faces[DISCOVER_TOP_FACES:]
 
 
 class _VideoAnalyzer:
@@ -395,14 +500,17 @@ class _VideoAnalyzer:
             self._process_discover(frame, kept, track_ids)
             return
         for k, ((face, q), tid) in enumerate(zip(kept, track_ids, strict=True)):
-            result = ctx.reference_set.best_match(face.embedding)
-            ref = ctx.refs[result.reference_index]
-            state = self._track_state(tid, frame.timestamp_s, result.distance, ref.id, q.score)
-            links.append(FaceLink((face.x, face.y, face.w, face.h), result.distance, state))
+            per = ctx.reference_set.per_person(face.embedding)  # [(referência, distância)] por pessoa
+            pidx = min(range(len(per)), key=lambda i: per[i][1])
+            ref, distance = ctx.refs[per[pidx][0]], per[pidx][1]
+            state = self._track_state(tid, frame.timestamp_s, per, q.score, face.embedding)
+            links.append(FaceLink((face.x, face.y, face.w, face.h), distance, state))
             continuation = state is not None and state.row is not None
-            if result.distance > ctx.candidate_threshold and not continuation:
+            if distance > ctx.candidate_threshold and not continuation:
                 continue
-            det = self._save_detection(frame, k, face, q, result.distance, ref.id)
+            det = self._save_detection(frame, k, face, q, distance, ref.id)
+            if ctx.multi:
+                det.person_id = ctx.person_ids[pidx]
             if state is not None:
                 self._attach_to_track(state, det)
 
@@ -418,10 +526,7 @@ class _VideoAnalyzer:
             st.n_faces += 1
             st.best_quality = max(st.best_quality, q.score)
             emb = l2_normalize(face.embedding)[0]
-            if len(st.faces) < DISCOVER_TOP_FACES or q.score > st.faces[-1][0]:
-                st.faces.append((q.score, emb))
-                st.faces.sort(key=lambda f: -f[0])
-                del st.faces[DISCOVER_TOP_FACES:]
+            st.add_face(q.score, emb)
             if (st.row is None or q.score >= st.best_saved_quality + DISCOVER_QUALITY_STEP
                     or frame.timestamp_s - st.last_saved_s >= DISCOVER_SAVE_EVERY_S):
                 det = self._save_detection(frame, k, face, q, None, None)
@@ -445,21 +550,25 @@ class _VideoAnalyzer:
             st.row.best_detection_id = det.id
         self._refresh_track_row(st)
 
-    def _track_state(self, tid: int | None, ts: float, distance: float, ref_id: int,
-                     quality: float) -> _TrackState | None:
+    def _track_state(self, tid: int | None, ts: float, per: list[tuple[int, float]], quality: float,
+                     embedding: np.ndarray) -> _TrackState | None:
         if tid is None:
             return None
         st = self.tracks.get(tid)
         if st is None:
             st = self.tracks[tid] = _TrackState(start_s=ts, end_s=ts)
+            self.ctx.tracked.append(st)
         st.end_s = ts
         st.n_faces += 1
-        if len(st.top) < TRACK_TOP_K or distance < st.top[-1]:
-            bisect.insort(st.top, distance)
-            del st.top[TRACK_TOP_K:]
+        for p, (ref_idx, distance) in enumerate(per):
+            top = st.tops.setdefault(p, [])
+            if len(top) < TRACK_TOP_K or distance < top[-1]:
+                bisect.insort(top, distance)
+                del top[TRACK_TOP_K:]
+            if p not in st.best or distance < st.best[p][0]:
+                st.best[p] = (distance, self.ctx.refs[ref_idx].id)
         st.best_quality = max(st.best_quality, quality)
-        if distance < st.best_distance:
-            st.best_distance, st.best_ref_id = distance, ref_id
+        st.add_face(quality, l2_normalize(embedding)[0])
         if st.row is not None:
             self._refresh_track_row(st)
         return st
@@ -511,16 +620,18 @@ class _VideoAnalyzer:
 
     def _refresh_track_row(self, st: _TrackState) -> None:
         row = st.row
-        top = st.top
         row.end_s = round(st.end_s, 3)
         row.n_faces = st.n_faces
         if self.ctx.discover:  # sem distâncias: são calculadas no agrupamento final
             row.best_quality = round(st.best_quality, 3)
             self.s.add(row)
             return
-        row.best_distance = round(st.best_distance, 4)
-        row.reference_id = st.best_ref_id
+        p = st.person()
+        top = st.tops[p]
+        row.best_distance = round(st.best[p][0], 4)
+        row.reference_id = st.best[p][1]
         row.track_distance = round(float(sum(top) / len(top)), 4)
+        row.person_id = self.ctx.person_ids[p] if self.ctx.multi else None
         row.best_quality = round(st.best_quality, 3)
         row.is_match = row.track_distance <= self.ctx.threshold
         self.s.add(row)
@@ -562,9 +673,20 @@ def _group_persons(ctx: _AnalysisContext, s: Session, job: Job) -> None:
         det.distance, det.similarity = round(dist, 4), round(1.0 - dist, 4)
         s.add(det)
     job.persons = int(labels.max()) + 1
-    try:  # embeddings dos tracks, para reutilização futura (ex.: comparar pessoas entre análises)
+    _save_track_embeddings(ctx, job, states, lambda st: st.row.person_id, embs)
+
+
+def _save_track_embeddings(ctx: _AnalysisContext, job: Job, states: list[_TrackState], person_of,
+                           embs: np.ndarray | None = None) -> None:
+    """Embeddings dos tracks (média ponderada das melhores faces), para comparar pessoas entre análises."""
+    if not states:
+        return
+    if embs is None:
+        embs = np.stack([_track_embedding(st) for st in states])
+    try:
         ctx.out_dir.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(ctx.out_dir / "track_embeddings.npz", track_ids=[st.row.id for st in states],
-                            person_ids=labels + 1, embeddings=embs.astype(np.float32))
+                            person_ids=[int(person_of(st)) for st in states], embeddings=embs.astype(np.float32),
+                            model=np.array(ctx.model))
     except OSError:
         log.warning("Não foi possível gravar os embeddings dos tracks do job %s", job.id)

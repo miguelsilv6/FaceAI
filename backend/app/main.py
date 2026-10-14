@@ -7,6 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
+import cv2
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -16,8 +17,8 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__
+from .api import activity, cases, clock, jobs, system, uploads, users
 from .api import auth as auth_api
-from .api import cases, clock, jobs, system, uploads, users
 from .api.deps import UNSAFE_METHODS, client_ip, is_https
 from .api.uploads import cleanup_stale_uploads
 from .config import settings
@@ -42,6 +43,9 @@ async def lifespan(_: FastAPI):
     cleanup_stale_uploads()
     resume_pending_copies()
     preload_models()
+    if settings.cpu_threads > 0:
+        cv2.setNumThreads(settings.cpu_threads)
+    runner.start()  # retoma as análises que ficaram em fila
     yield
     runner.shutdown()
 
@@ -146,6 +150,7 @@ app.add_middleware(
 app.add_middleware(SecurityMiddleware)
 app.include_router(auth_api.router)
 app.include_router(users.router)
+app.include_router(activity.router)
 app.include_router(system.router)
 app.include_router(cases.router)
 app.include_router(jobs.router)

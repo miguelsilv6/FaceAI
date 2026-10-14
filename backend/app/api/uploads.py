@@ -24,6 +24,7 @@ from ..config import settings
 from ..db import get_engine
 from ..models import ReferenceImage, Upload, Video, utcnow
 from ..schemas import UploadCreate
+from ..services import disk
 from ..services.audit import log_event
 from .cases import IMAGE_EXT, VIDEO_EXT, register_reference, register_video
 from .deps import ActorDep, SessionDep, authorize_objects, get_case_or_404
@@ -89,6 +90,7 @@ def create_upload(case_id: int, body: UploadCreate, session: SessionDep, actor: 
         raise HTTPException(415, f"Extensão não suportada: '{ext or filename}'.")
     if body.kind == "reference" and body.size_bytes > MAX_REFERENCE_BYTES:
         raise HTTPException(413, "Imagem de referência demasiado grande.")
+    disk.check_space(body.size_bytes)
     tmp_dir = settings.data_dir / "uploads"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     upload_id = uuid.uuid4().hex

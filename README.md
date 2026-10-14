@@ -113,6 +113,9 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 | `FACEAI_ALLOWED_ORIGINS` | *(vazio)* | Origens extra aceites nos pedidos que alteram dados (ex.: `https://faceai.exemplo.pt`). O próprio host é sempre aceite. |
 | `FACEAI_SESSION_IDLE_MINUTES` / `FACEAI_SESSION_MAX_HOURS` | `30` / `12` | Expiração da sessão por inatividade e duração máxima |
 | `FACEAI_API_DOCS` | `false` | Expor `/api/docs` e `/api/openapi.json` (só para desenvolvimento) |
+| `FACEAI_CPU_THREADS` | `0` (todos) | Threads de CPU para o ONNX Runtime, OpenCV e ffmpeg. Limita o CPU usado pelas análises. |
+| `FACEAI_JOB_NICE` | `10` | Prioridade ("nice") da thread das análises; valores maiores deixam a interface e os uploads mais fluidos |
+| `FACEAI_DISK_WARN_PERCENT` / `FACEAI_DISK_CRITICAL_PERCENT` / `FACEAI_DISK_MIN_FREE_GB` | `80` / `90` / `2` | Alertas de disco. Em nível crítico, uploads que não cabem e novas análises são recusados. |
 
 ### Autenticação e controlo de acesso
 
@@ -164,6 +167,46 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 6. **Eliminar um caso** (🗑 na lista de casos ou ao lado do nome do caso): pede o motivo e a confirmação, escrevendo o número do caso. Recusa se houver análises a decorrer. Cancela as conversões em curso e apaga do servidor os **vídeos originais e as cópias de reprodução**, as referências, as análises (deteções, recortes, frames) e os uploads por concluir. A auditoria mantém o histórico e regista um `case.deleted` com o motivo e a lista dos ficheiros apagados. Exporta antes os relatórios de que precises.
 7. **Eliminar uma análise** (🗑 na lista de análises ou "Eliminar" nos resultados): pede o motivo e a confirmação, escrevendo o número da análise. Apaga as deteções, os tracks, as revisões e os ficheiros gerados. Os vídeos e as referências do caso mantêm-se. A auditoria é *append-only*: guarda o histórico da análise e regista a eliminação (quem, quando, motivo, parâmetros e totais). Não é possível eliminar uma análise a decorrer; é preciso cancelá-la primeiro.
 8. **Exportar:** relatório PDF ou HTML, com estatísticas, parâmetros, tracks e qualidade; CSV; JSON; ou ZIP.
+   - **Frames originais validados (ZIP):** no menu *Exportar* dos resultados, ou para o caso inteiro no separador *Análises*. Inclui o frame completo do vídeo original, sem anotações, de cada deteção **confirmada** (a revisão de um track aplica-se às suas deteções):
+     - os frames com várias deteções aparecem uma só vez;
+     - `manifesto.csv` com uma linha por deteção (análise, vídeo, frame, tempo e hora real, semelhança, revisor, método de extração e **SHA-256** do PNG);
+     - `LEIAME.txt` com o critério, quem gerou e quando.
+
+     O ZIP é gerado em streaming, porque com muitos frames a extração pode demorar. A exportação fica na auditoria com a lista das deteções.
+9. **Lista de casos:** mostra o **espaço ocupado em disco** por cada caso (vídeos, cópias de reprodução, referências, análises e uploads por concluir) e o total.
+10. **Tarefas em curso:** uma faixa no topo mostra as análises (progresso, tempo restante e posição na fila), as conversões para reprodução e os uploads a decorrer nos casos a que tens acesso, com ligação para cada um. No fim de uma análise aparece uma notificação. Também mostra um alerta quando o disco do servidor passa de 80% (amarelo) ou 90% (vermelho).
+11. **Fila de análises:** as análises correm uma de cada vez. Nas que estão em fila, quem as criou, o responsável do caso ou um admin pode mudar a prioridade (alta, normal ou baixa) e retê-las ou libertá-las. Uma análise a decorrer só pode ser cancelada. A fila sobrevive a um reinício do servidor: as análises em fila retomam e as que estavam a decorrer ficam marcadas como interrompidas.
+
+### Várias pessoas na mesma análise
+Para procurar vários suspeitos numa só passagem pelos vídeos:
+- Dá o mesmo **rótulo** às imagens de referência de cada pessoa no separador *Referências* (ex.: "Suspeito A", "Suspeito B"). Imagens sem rótulo contam como a mesma pessoa.
+- Cada face é atribuída à pessoa mais próxima. Cada track fica com a pessoa cuja média das 3 melhores distâncias é menor.
+- Nos resultados há filtro e cor por pessoa. O CSV e o relatório indicam a pessoa de cada correspondência.
+
+O tempo de análise é praticamente o mesmo que para uma só pessoa: a deteção e o embedding das faces fazem-se uma vez por frame.
+
+### Procurar a pessoa noutras análises
+O botão **Procurar noutras análises** (👥), num track ou numa pessoa, compara o seu embedding (média das melhores faces) com os tracks de todas as análises concluídas dos casos a que tens acesso, ou só do caso atual.
+- Só se comparam análises feitas com o **mesmo modelo**.
+- Os resultados são candidatos ordenados por semelhança, com caso, análise, vídeo e hora real: confirma-os sempre visualmente.
+- Cada pesquisa fica na auditoria.
+- As análises no modo "procurar" feitas antes desta versão não têm índice e aparecem contadas à parte.
+
+### Percurso multi-câmara
+O separador **Percurso** do caso junta as aparições das análises escolhidas e ordena-as pela **hora real do DVR**.
+- Mostra uma linha por câmara, com blocos coloridos por pessoa (tracejados se a aparição vier só do vestuário), e a lista cronológica, exportável em CSV.
+- Clicar num bloco abre os resultados nesse vídeo e instante.
+- Os vídeos sem hora acertada ficam fora do eixo e são assinalados.
+
+### Melhoria de imagem para revisão
+No frame de uma deteção, **Melhorar (revisão)** aplica operações clássicas e determinísticas e mostra o resultado lado a lado com o original:
+- contraste adaptativo (CLAHE);
+- nitidez;
+- redução de ruído;
+- gama;
+- ampliação Lanczos 2×/4×.
+
+**Não se usa IA generativa**, que poderia "inventar" traços do rosto. A imagem melhorada serve só para ver. O relatório, as exportações e o ZIP dos validados usam sempre os originais. O download da versão melhorada leva uma faixa "MELHORADA … NÃO É O ORIGINAL" e fica na auditoria com as operações e o SHA-256.
 
 ### Modo descoberta (sem amostra)
 
@@ -302,7 +345,7 @@ FACEAI_E2E_DATASET=/caminho/deepface/tests/unit/dataset pytest -m e2e   # modelo
 
 ## Próximos passos possíveis
 
-- Hash SHA-256 das evidências na importação e log de auditoria encadeado.
-- Identidade do analista a partir do Cloudflare Access.
-- Comparar pessoas descobertas entre análises diferentes (os embeddings já ficam guardados).
-- Várias pessoas por caso numa única passagem pelo vídeo.
+- Hash SHA-256 das evidências na importação e log de auditoria encadeado (deteção de alterações).
+- Assinatura digital ou carimbo temporal (RFC 3161) dos relatórios.
+- Dupla validação: uma correspondência só conta como validada depois de confirmada por dois analistas.
+- Reindexar as análises antigas no modo "procurar", para entrarem na pesquisa entre análises.

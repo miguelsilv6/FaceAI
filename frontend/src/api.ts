@@ -1,5 +1,5 @@
 import type {
-  AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
+  Activity, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
 
@@ -187,6 +187,17 @@ export const api = {
     request<void>("DELETE", `/api/cases/${caseId}/members/${userId}`),
   system: () => request<SystemInfo>("GET", "/api/system"),
   cases: () => request<Case[]>("GET", "/api/cases"),
+  similarToTrack: (trackId: number, scope: "all" | "case", threshold?: number) =>
+    request<SimilarResult>("GET", `/api/tracks/${trackId}/similar?scope=${scope}${threshold != null ? `&threshold=${threshold}` : ""}`),
+  similarToPerson: (jobId: number, personId: number, scope: "all" | "case", threshold?: number) =>
+    request<SimilarResult>("GET",
+      `/api/jobs/${jobId}/persons/${personId}/similar?scope=${scope}${threshold != null ? `&threshold=${threshold}` : ""}`),
+  route: (caseId: number, jobIds: number[], only: "matches" | "confirmed") =>
+    request<CaseRoute>("GET", `/api/cases/${caseId}/route?only=${only}${jobIds.length ? `&job_ids=${jobIds.join(",")}` : ""}`),
+  activity: () => request<Activity>("GET", "/api/activity"),
+  validatedSummary: (caseId: number) =>
+    request<{ detections: number; frames: number }>("GET", `/api/cases/${caseId}/frames/validated`),
+  validatedFramesUrl: (scope: "jobs" | "cases", id: number) => `/api/${scope}/${id}/frames/validated.zip`,
   case: (id: number) => request<Case>("GET", `/api/cases/${id}`),
   createCase: (body: { name: string; description: string }) =>
     request<Case>("POST", "/api/cases", body),
@@ -202,6 +213,8 @@ export const api = {
   uploadReferences: (caseId: number, files: File[], onProgress?: (f: number) => void) =>
     uploadMany<ReferenceImage>(caseId, "reference", files, onProgress),
   deleteReference: (id: number) => request<void>("DELETE", `/api/references/${id}`),
+  labelReference: (id: number, person_label: string) =>
+    request<ReferenceImage>("PATCH", `/api/references/${id}`, { person_label }),
   referenceImageUrl: (id: number, face = false) => `/api/references/${id}/image${face ? "?face=true" : ""}`,
 
   videos: (caseId: number) => request<Video[]>("GET", `/api/cases/${caseId}/videos`),
@@ -233,6 +246,8 @@ export const api = {
       reference_ids: referenceIds,
     }),
   cancelJob: (id: number) => request<Job>("POST", `/api/jobs/${id}/cancel`),
+  updateQueue: (id: number, body: { priority?: number; held?: boolean }) =>
+    request<Job>("PATCH", `/api/jobs/${id}/queue`, body),
   deleteJob: (id: number, reason: string) =>
     request<void>("DELETE", `/api/jobs/${id}`, { confirm_job_id: id, reason }),
   detections: (jobId: number) => request<Detection[]>("GET", `/api/jobs/${jobId}/detections`),
@@ -244,6 +259,9 @@ export const api = {
   review: (detId: number, status: ReviewStatus, note = "") =>
     request<Detection>("PATCH", `/api/detections/${detId}/review`, { status, note }),
   detectionImageUrl: (id: number, kind: "crop" | "frame") => `/api/detections/${id}/${kind}`,
+  enhancedUrl: (id: number, o: { src: "crop" | "original"; ops: string[]; upscale: number; gamma: number }, download = false) =>
+    `/api/detections/${id}/enhanced?src=${o.src}&ops=${o.ops.join(",")}&upscale=${o.upscale}&gamma=${o.gamma}`
+    + (download ? "&download=1" : ""),
   /** Frame completo: "annotated" (JPEG com a caixa) ou "original" (PNG extraído do vídeo, sem marcações). */
   detectionFrameUrl: (id: number, variant: "annotated" | "original", download = false) => {
     const base = variant === "original" ? `/api/detections/${id}/frame/original` : `/api/detections/${id}/frame`;

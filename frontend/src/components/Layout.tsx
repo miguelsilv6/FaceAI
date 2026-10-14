@@ -7,6 +7,7 @@ import { Link, Outlet, useNavigate } from "react-router-dom";
 
 import { api } from "../api";
 import { useAuth } from "../auth";
+import ActivityBar from "./ActivityBar";
 import type { SystemInfo } from "../types";
 
 export default function Layout() {
@@ -64,6 +65,7 @@ export default function Layout() {
         </Group>
       </AppShell.Header>
       <AppShell.Main>
+        <ActivityBar />
         <Outlet />
       </AppShell.Main>
     </AppShell>

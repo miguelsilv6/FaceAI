@@ -1,22 +1,25 @@
 import {
-  ActionIcon, Alert, Anchor, Badge, Breadcrumbs, Button, Card, Group, Image, Menu, Modal, Progress, SegmentedControl, Select,
+  ActionIcon, Alert, Anchor, Badge, Breadcrumbs, Button, Card, Chip, Group, Image, Menu, Modal, Progress, SegmentedControl, Select,
   SimpleGrid, Slider, Stack, Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
 import {
   IconAlertTriangle, IconChevronLeft, IconChevronRight, IconDownload, IconInfoCircle, IconPhoto, IconPlayerStop, IconTrash, IconUserPlus,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { api, browserCodecs, formatEta, formatTime, realTime } from "../api";
 import DeleteJobModal from "../components/DeleteJobModal";
 import BodyTrackCard from "../components/BodyTrackCard";
 import DetectionCard from "../components/DetectionCard";
+import EnhancePanel from "../components/EnhancePanel";
 import PersonCard from "../components/PersonCard";
+import SimilarModal, { type SimilarQuery } from "../components/SimilarModal";
 import TrackCard from "../components/TrackCard";
 import JobStatusBadge from "../components/JobStatusBadge";
 import Timeline from "../components/Timeline";
 import { notifyError, notifyOk } from "../notify";
+import { personColor } from "../personColors";
 import type { Detection, Job, Person, ReviewStatus, Segment, Track, Video, VideoProbe } from "../types";
 
 const EXPORTS = [
@@ -29,6 +32,9 @@ const EXPORTS = [
 
 export default function Results() {
   const jobId = Number(useParams().jobId);
+  // ?video=&t=: abrir num vídeo e instante (ex.: a partir do percurso multi-câmara)
+  const [searchParams] = useSearchParams();
+  const startAt = useRef({ video: Number(searchParams.get("video")) || null, t: Number(searchParams.get("t")) || 0 });
   const [job, setJob] = useState<Job | null>(null);
   const [videos, setVideos] = useState<Video[]>([]);
   const [detections, setDetections] = useState<Detection[]>([]);
@@ -37,6 +43,7 @@ export default function Results() {
   // Vestuário (corpos): separados das faces, para não mudar as contagens nem as vistas faciais.
   const [bodyTracks, setBodyTracks] = useState<Track[]>([]);
   const [bodyDets, setBodyDets] = useState<Detection[]>([]);
+  const confirmedCount = [...detections, ...bodyDets].filter((d) => d.review_status === "confirmed").length;
   const [evidenceFilter, setEvidenceFilter] = useState<"all" | "face" | "vestuário">("all");
   const [persons, setPersons] = useState<Person[]>([]);
   const [view, setView] = useState<"persons" | "tracks" | "detections" | "clothing">("tracks");
@@ -47,7 +54,8 @@ export default function Results() {
   const [showCandidates, setShowCandidates] = useState(false);
   const [order, setOrder] = useState<"time" | "score" | "quality">("time");
   const [frameDet, setFrameDet] = useState<Detection | null>(null);
-  const [frameVariant, setFrameVariant] = useState<"annotated" | "original">("annotated");
+  const [similar, setSimilar] = useState<SimilarQuery | null>(null);
+  const [frameVariant, setFrameVariant] = useState<"annotated" | "original" | "enhanced">("annotated");
   const [deleting, setDeleting] = useState(false);
   // Erro de reprodução no browser (por vídeo), com o diagnóstico mostrado ao analista.
   const [playError, setPlayError] = useState<{ videoId: number; detail: string } | null>(null);
@@ -76,7 +84,8 @@ export default function Results() {
       api.videos(j.case_id).then((vs) => {
         const used = vs.filter((v) => j.video_ids.includes(v.id));
         setVideos(used);
-        setVideoId((cur) => cur ?? used[0]?.id ?? null);
+        const wanted = used.find((v) => v.id === startAt.current.video)?.id;
+        setVideoId((cur) => cur ?? wanted ?? used[0]?.id ?? null);
       });
     }).catch(notifyError);
     loadResults();
@@ -159,7 +168,11 @@ export default function Results() {
   };
   const discover = job?.params.mode === "discover";
   const trackById = useMemo(() => new Map(tracks.map((t) => [t.id, t])), [tracks]);
-  const personOf = (d: Detection) => (d.track_id != null ? trackById.get(d.track_id)?.person_id ?? null : null);
+  // Modo procurar com várias pessoas: n.º e nome de cada uma (job.params.persons).
+  const searched = !discover && (job?.params.persons?.length ?? 0) > 1 ? job!.params.persons! : [];
+  const labelOf = (pid: number | null | undefined) => searched.find((p) => p.id === pid)?.label;
+  const personOf = (d: Detection) => d.person_id
+    ?? (d.track_id != null ? trackById.get(d.track_id)?.person_id ?? null : null);
   const inPerson = (d: Detection) => personFilter == null || personOf(d) === personFilter;
   // Uma deteção conta como correspondência se estiver abaixo do limiar ou pertencer a um track com correspondência.
   const isEffectiveMatch = (d: Detection) => d.is_match || (d.track_id != null && !!trackById.get(d.track_id)?.is_match);
@@ -167,7 +180,7 @@ export default function Results() {
   const visible = useMemo(() => {
     const list = videoDets.filter((d) => (trackFilter == null || d.track_id === trackFilter) && (discover
       ? inPerson(d)
-      : (showCandidates || trackFilter != null || isEffectiveMatch(d)) && d.similarity >= minSim));
+      : (showCandidates || trackFilter != null || isEffectiveMatch(d)) && d.similarity >= minSim && inPerson(d)));
     if (order === "score") return [...list].sort((a, b) => b.similarity - a.similarity);
     if (order === "quality") return [...list].sort((a, b) => b.quality - a.quality);
     return list;
@@ -175,7 +188,8 @@ export default function Results() {
   const visibleTracks = useMemo(() => {
     const list = tracks.filter((t) => t.video_id === videoId && (discover
       ? personFilter == null || t.person_id === personFilter
-      : (showCandidates || t.is_match) && 1 - t.track_distance >= minSim));
+      : (showCandidates || t.is_match) && 1 - t.track_distance >= minSim
+        && (personFilter == null || t.person_id === personFilter)));
     if (order === "score") return [...list].sort((a, b) => (discover ? b.n_faces - a.n_faces : a.track_distance - b.track_distance));
     if (order === "quality") return [...list].sort((a, b) => b.best_quality - a.best_quality);
     return list;
@@ -343,6 +357,11 @@ export default function Results() {
               {EXPORTS.map(([fmt, label]) => (
                 <Menu.Item key={fmt} component="a" href={api.exportUrl(job.id, fmt)}>{label}</Menu.Item>
               ))}
+              <Menu.Divider />
+              <Menu.Item component="a" href={api.validatedFramesUrl("jobs", job.id)} disabled={!confirmedCount}
+                title="Frames completos do vídeo original, sem anotações, de todas as deteções confirmadas (com manifesto e SHA-256)">
+                Frames originais validados (ZIP · {confirmedCount})
+              </Menu.Item>
             </Menu.Dropdown>
           </Menu>
         </Group>
@@ -390,7 +409,15 @@ export default function Results() {
                 ) : (
                   <video ref={videoRef} key={`${video.id}-${video.playback_status}-${video.playback_format}`} src={api.videoUrl(video)} controls
                     preload="metadata" style={{ width: "100%", maxHeight: 420, background: "#000", borderRadius: 6 }}
-                    onError={(e) => onVideoError(video, e.currentTarget.error)} onLoadedData={() => setPlayError(null)}
+                    onError={(e) => onVideoError(video, e.currentTarget.error)}
+                    onLoadedData={(e) => {
+                      setPlayError(null);
+                      if (startAt.current.video === video.id && startAt.current.t) { // instante pedido no URL (uma vez)
+                        e.currentTarget.currentTime = startAt.current.t;
+                        setCurrentTime(startAt.current.t);
+                        startAt.current = { video: null, t: 0 };
+                      }
+                    }}
                     onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)} />
                 )}
                 {!converting && (playError?.videoId === video.id || video.playback_status === "failed"
@@ -495,6 +522,17 @@ export default function Results() {
                   ...(clothing ? [{ value: "clothing", label: `Vestuário (${bodyTracks.filter((t) => t.evidence === "vestuário").length})` }] : [])]} />
             )}
             {!showTracks && !showPersons && view !== "clothing" && <Text fw={600}>{discover ? "Faces" : "Deteções"} ({visible.length})</Text>}
+            {searched.length > 0 && view !== "clothing" && (
+              <Chip.Group multiple={false} value={personFilter == null ? "all" : String(personFilter)}
+                onChange={(v) => setPersonFilter(v === "all" ? null : Number(v))}>
+                <Group gap={4}>
+                  <Chip size="xs" value="all">Todas as pessoas</Chip>
+                  {searched.map((p) => (
+                    <Chip key={p.id} size="xs" value={String(p.id)} color={personColor(p.id)}>{p.label}</Chip>
+                  ))}
+                </Group>
+              </Chip.Group>
+            )}
             {discover && personFilter != null && !showPersons && (
               <Button size="compact-xs" variant="light" onClick={() => setPersonFilter(null)}>
                 Pessoa #{personFilter} · mostrar todas
@@ -554,7 +592,9 @@ export default function Results() {
                   others={persons.filter((o) => o.person_id !== p.person_id)}
                   firstRealTime={realTime(videoById.get(p.first.video_id), p.first.start_s)}
                   onSelect={selectPerson} onReview={reviewPerson} onMerge={mergePerson}
-                  onUseAsReference={(x) => addAsReference(x.best_detection_id)} />
+                  onUseAsReference={(x) => addAsReference(x.best_detection_id)}
+                  onFindSimilar={job.status === "completed"
+                    ? (x) => setSimilar({ kind: "person", jobId: job.id, personId: x.person_id }) : undefined} />
               ))}
             </SimpleGrid>
           )
@@ -567,6 +607,8 @@ export default function Results() {
                 <TrackCard key={t.id} track={t} onSeek={seek} onReview={reviewTrack}
                   realStart={realTime(video, t.start_s)} realEnd={realTime(video, t.end_s)} onOpenFrame={openFrame}
                   personIds={discover ? personIds : undefined} onMove={discover ? moveTrack : undefined}
+                  personLabel={labelOf(t.person_id)}
+                  onFindSimilar={job.status === "completed" ? (x) => setSimilar({ kind: "track", trackId: x.id }) : undefined}
                   onShowDetections={(x) => { setTrackFilter(x.id); setView("detections"); }} />
               ))}
             </SimpleGrid>
@@ -577,12 +619,14 @@ export default function Results() {
           <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
             {visible.map((d) => (
               <DetectionCard key={d.id} det={d} onSeek={(x) => seek(x.timestamp_s)} onReview={review} onOpenFrame={setFrameDet}
-                realTime={realTime(video, d.timestamp_s)} personId={personOf(d)} />
+                realTime={realTime(video, d.timestamp_s)} personId={personOf(d)} personLabel={labelOf(personOf(d))} />
             ))}
           </SimpleGrid>
         )}
       </Card>
 
+      <SimilarModal query={similar} onClose={() => setSimilar(null)}
+        defaultThreshold={Math.min(0.9, Math.max(0.05, Number(job.params.threshold ?? 0.5)))} />
       <DeleteJobModal job={deleting ? job : null} onClose={() => setDeleting(false)}
         onDeleted={(j) => navigate(`/cases/${j.case_id}`)} />
 
@@ -592,16 +636,19 @@ export default function Results() {
           <Stack gap="sm">
             <Group justify="space-between" wrap="wrap">
               <SegmentedControl size="xs" value={frameVariant}
-                onChange={(v) => setFrameVariant(v as "annotated" | "original")}
-                data={[{ value: "annotated", label: "Com marcação" }, { value: "original", label: "Original (sem marcação)" }]} />
+                onChange={(v) => setFrameVariant(v as "annotated" | "original" | "enhanced")}
+                data={[{ value: "annotated", label: "Com marcação" }, { value: "original", label: "Original (sem marcação)" },
+                  { value: "enhanced", label: "Melhorar (revisão)" }]} />
               {(() => {
                 const fv = videoById.get(frameDet.video_id);
                 const rt = realTime(fv, frameDet.timestamp_s);
                 return <Text size="xs" c="dimmed">{fv?.filename}{rt ? ` · hora real ${rt}` : ""}</Text>;
               })()}
             </Group>
-            <Image key={`${frameDet.id}-${frameVariant}`} alt="Frame completo"
-              src={api.detectionFrameUrl(frameDet.id, frameVariant)} />
+            {frameVariant === "enhanced" ? <EnhancePanel detectionId={frameDet.id} /> : (
+              <Image key={`${frameDet.id}-${frameVariant}`} alt="Frame completo"
+                src={api.detectionFrameUrl(frameDet.id, frameVariant)} />
+            )}
             <Group justify="space-between" wrap="wrap">
               <Text size="xs" c="dimmed" maw={520}>
                 O original é extraído do vídeo analisado (PNG, sem perdas) e verificado contra o recorte da face guardado na

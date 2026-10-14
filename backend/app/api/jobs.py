@@ -3,34 +3,36 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import shutil
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
 import cv2
+import numpy as np
 from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlmodel import select
 
 from ..config import settings
 from ..models import Detection, Job, JobStatus, ReferenceImage, ReviewStatus, Track, Video, utcnow
-from ..schemas import JobCreate, JobDelete, PersonMerge, ReviewUpdate, TrackPerson
-from ..services import reports
+from ..schemas import JobCreate, JobDelete, PersonMerge, QueueUpdate, ReviewUpdate, TrackPerson
+from ..services import disk, enhance, linking, reports, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
+from ..services.clock import real_time
 from ..services.face_engine import default_threshold, get_engine
-from ..services.frames import extract_frame
 from ..services.imageio import read_image, write_jpeg
 from ..services.jobs import job_dir, runner
 from ..services.persons import person_segments, summarize_persons
+from ..services.references import person_groups
 from ..services.video_processor import format_timestamp
 from .cases import register_reference
 from .deps import (
     ActorDep,
     CurrentUser,
     SessionDep,
+    accessible_case_ids,
     authorize_objects,
     can_manage_case,
     get_case_or_404,
@@ -44,6 +46,9 @@ router = APIRouter(prefix="/api", tags=["análises"], dependencies=[Depends(auth
 @router.post("/cases/{case_id}/jobs", response_model=Job, status_code=201)
 def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorDep) -> Job:
     get_case_or_404(session, case_id)
+    if disk.disk_status()["level"] == "critical":
+        disk.check_space(0)
+        raise HTTPException(507, "Disco do servidor quase cheio: liberte espaço antes de iniciar novas análises.")
     params = body.params
     engine = get_engine()
     models = [m.name for m in engine.models()]
@@ -74,14 +79,19 @@ def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorD
     if not video_ids:
         raise HTTPException(422, "Selecione pelo menos um vídeo do caso.")
     ref_ids: list[int] = []
+    job_params = params.model_dump()
     if not discover:
-        refs = list(session.exec(select(ReferenceImage).where(ReferenceImage.case_id == case_id)))
-        ref_ids = [r.id for r in refs if r.valid and (body.reference_ids is None or r.id in body.reference_ids)]
+        refs = list(session.exec(select(ReferenceImage).where(ReferenceImage.case_id == case_id)
+                                 .order_by(ReferenceImage.id)))
+        chosen = [r for r in refs if r.valid and (body.reference_ids is None or r.id in body.reference_ids)]
+        ref_ids = [r.id for r in chosen]
+        # Várias pessoas na mesma passagem: as referências agrupam-se pelo rótulo de pessoa.
+        job_params["persons"] = person_groups(chosen)
         if not ref_ids:
             raise HTTPException(422, "Não há imagens de referência válidas selecionadas. Sem amostra da pessoa, "
                                      "use o modo \"Descobrir todas as faces\".")
 
-    job = Job(case_id=case_id, params=params.model_dump(), video_ids=video_ids, reference_ids=ref_ids,
+    job = Job(case_id=case_id, params=job_params, video_ids=video_ids, reference_ids=ref_ids,
               created_by=actor)
     session.add(job)
     session.commit()
@@ -110,6 +120,31 @@ def cancel_job(job_id: int, session: SessionDep, actor: ActorDep) -> Job:
     runner.cancel(job_id)
     log_event(session, "job.cancel_requested", case_id=job.case_id, actor=actor, details={"job_id": job_id})
     session.refresh(job)
+    return job
+
+
+@router.patch("/jobs/{job_id}/queue", response_model=Job)
+def update_queue(job_id: int, body: QueueUpdate, session: SessionDep, user: CurrentUser) -> Job:
+    """Prioridade e retenção de uma análise em fila (quem a criou, o responsável do caso ou um admin)."""
+    job = get_job_or_404(session, job_id)
+    if job.created_by != user.username and not can_manage_case(session, user, job.case_id):
+        raise HTTPException(403, "Só quem criou a análise, o responsável do caso ou um administrador pode alterar.")
+    if job.status != JobStatus.queued:
+        raise HTTPException(409, "Só é possível alterar análises em fila.")
+    changes = {}
+    if body.priority is not None and body.priority != job.priority:
+        changes["priority"] = [job.priority, body.priority]
+        job.priority = body.priority
+    if body.held is not None and body.held != job.held:
+        changes["held"] = [job.held, body.held]
+        job.held = body.held
+    if changes:
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        log_event(session, "job.queue_changed", case_id=job.case_id, actor=user.username,
+                  details={"job_id": job.id, "changes": changes})
+        runner.wake()
     return job
 
 
@@ -183,8 +218,68 @@ def list_segments(job_id: int, session: SessionDep, gap_s: float | None = None,
         return person_segments(tracks_, person_id, gap)
     dets = list(session.exec(select(Detection).where(Detection.job_id == job_id)))
     tracks = {t.id: t for t in session.exec(select(Track).where(Track.job_id == job_id))}
-    return reports.match_segments(dets, gap_s if gap_s is not None else job.params.get("segment_gap_s", 2.0),
-                                  tracks)
+    if len(job.params.get("persons") or []) > 1:  # várias pessoas: segmentos de cada uma, com o seu n.º
+        out: list[dict] = []
+        for pid in [p["id"] for p in job.params["persons"]]:
+            if person_id is not None and pid != person_id:
+                continue
+            mine = [d for d in dets if (d.person_id or getattr(tracks.get(d.track_id), "person_id", None)) == pid]
+            out += [{**seg, "person_id": pid} for seg in reports.match_segments(mine, gap, tracks)]
+        return sorted(out, key=lambda x: (x["video_id"], x["start_s"]))
+    return reports.match_segments(dets, gap, tracks)
+
+
+# ---------------------------------------------------------------- percurso multi-câmara (hora real)
+@router.get("/cases/{case_id}/route")
+def case_route(case_id: int, session: SessionDep, job_ids: str | None = None, person_id: int | None = None,
+               only: str = "matches") -> dict:
+    """Aparições das análises indicadas (por omissão: todas as concluídas) ordenadas pela hora real do DVR, para
+    reconstruir o percurso da pessoa entre câmaras. only=confirmed: só segmentos com deteções confirmadas.
+    Os segmentos de vídeos sem hora real acertada vão em `unsynced`."""
+    get_case_or_404(session, case_id)
+    if only not in ("matches", "confirmed"):
+        raise HTTPException(422, "only deve ser 'matches' ou 'confirmed'.")
+    q = select(Job).where(Job.case_id == case_id, Job.status == JobStatus.completed).order_by(Job.id)
+    jobs = list(session.exec(q))
+    if job_ids:
+        try:
+            wanted = {int(x) for x in job_ids.split(",") if x.strip()}
+        except ValueError as exc:
+            raise HTTPException(422, "job_ids inválido.") from exc
+        jobs = [j for j in jobs if j.id in wanted]
+    videos: dict[int, Video | None] = {}
+    synced, unsynced = [], []
+    for job in jobs:
+        discover = job.params.get("mode") == "discover"
+        labels = {p["id"]: p["label"] for p in job.params.get("persons") or []}
+        segs = list_segments(job.id, session, person_id=person_id if len(jobs) == 1 else None)
+        if only == "confirmed" and segs:
+            ids = {i for seg in segs for i in seg["detection_ids"]}
+            confirmed = {d.id for d in session.exec(select(Detection).where(
+                Detection.id.in_(ids), Detection.review_status == ReviewStatus.confirmed))}
+            segs = [seg for seg in segs if confirmed & set(seg["detection_ids"])]
+        for seg in segs:
+            vid = seg["video_id"]
+            if vid not in videos:
+                videos[vid] = session.get(Video, vid)
+            v = videos[vid]
+            pid = seg.get("person_id")
+            label = (f"Pessoa #{pid}" if discover else labels.get(pid)) if pid else None
+            start = real_time(v.dvr_start, v.dvr_rate, v.clock_offset_s, seg["start_s"]) if v else None
+            end = real_time(v.dvr_start, v.dvr_rate, v.clock_offset_s, seg["end_s"]) if v else None
+            item = {"job_id": job.id, "job_mode": job.params.get("mode", "match"), "person_id": pid,
+                    "person_label": label or (job.params.get("persons") or [{}])[0].get("label") or "Pessoa",
+                    "video_id": vid, "video_filename": v.filename if v else "", "start_s": seg["start_s"],
+                    "end_s": seg["end_s"], "real_start": start.isoformat() if start else None,
+                    "real_end": end.isoformat() if end else None, "evidence": seg.get("evidence", "face"),
+                    "best_detection_id": seg.get("best_detection_id"),
+                    "best_similarity": seg.get("best_similarity")}
+            (synced if start else unsynced).append(item)
+    synced.sort(key=lambda x: (x["real_start"], x["video_id"]))
+    unsynced.sort(key=lambda x: (x["video_id"], x["start_s"]))
+    return {"segments": synced, "unsynced": unsynced, "jobs": [j.id for j in jobs],
+            "videos": [{"id": v.id, "filename": v.filename, "synced": bool(v.dvr_start)}
+                       for v in videos.values() if v is not None]}
 
 
 @router.get("/jobs/{job_id}/tracks", response_model=list[Track])
@@ -370,31 +465,10 @@ def detection_original_frame(det_id: int, session: SessionDep, actor: ActorDep, 
     video = session.get(Video, det.video_id)
     if job is None or video is None or not Path(video.stored_path).exists():
         raise HTTPException(404, "O vídeo original desta deteção já não está disponível.")
-    cache = job_dir(job) / "originals" / f"v{video.id:04d}_f{det.frame_index:07d}.png"
-    meta_path = cache.with_suffix(".json")
-    if cache.exists():
-        body = cache.read_bytes()
-        try:  # método da extração original (o PNG em cache é o mesmo ficheiro)
-            meta = json.loads(meta_path.read_text())
-            method, err = f"{meta['method']} (cache)", meta.get("crop_error")
-        except (OSError, ValueError, KeyError):
-            method, err = "cache", None
-    else:
-        try:
-            extracted = extract_frame(video.stored_path, det.frame_index, det.crop_path, (det.x, det.y, det.w, det.h),
-                                      margin=0.05 if det.kind == "body" else 0.25)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        ok, buf = cv2.imencode(".png", extracted.image)
-        if not ok:
-            raise HTTPException(500, "Falha ao codificar o frame.")
-        body = buf.tobytes()
-        method, err = extracted.method, extracted.crop_error
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cache.with_suffix(f".{uuid.uuid4().hex}.tmp")
-        tmp.write_bytes(body)
-        tmp.replace(cache)
-        meta_path.write_text(json.dumps({"method": method, "crop_error": err}))
+    try:
+        body, method, err = validated_frames.original_frame_png(job, video, det)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     headers = {"X-FaceAI-Frame-Index": str(det.frame_index), "X-FaceAI-Extraction": method}
     if err is not None:
         headers["X-FaceAI-Crop-Error"] = str(err)
@@ -403,6 +477,52 @@ def detection_original_frame(det_id: int, session: SessionDep, actor: ActorDep, 
         headers["Content-Disposition"] = f'attachment; filename="{filename}"'
         _log_download(session, det, job, actor, "original", body, filename,
                       video_filename=video.filename, extraction=method, crop_error=err)
+    return Response(content=body, media_type="image/png", headers=headers)
+
+
+@router.get("/detections/{det_id}/enhanced")
+def detection_enhanced(det_id: int, session: SessionDep, actor: ActorDep, src: str = "crop", ops: str = "",
+                       upscale: int = 1, gamma: float = 1.0, download: bool = False) -> Response:
+    """Imagem melhorada SÓ para visualização (contraste, nitidez, ruído, gama, ampliação Lanczos).
+
+    src=crop (recorte da face) ou original (frame completo do vídeo, sem anotações). O original não é alterado.
+    Com download=1 a imagem leva uma faixa "MELHORADA" e o download fica na auditoria (operações e SHA-256)."""
+    det = session.get(Detection, det_id)
+    if det is None or src not in ("crop", "original"):
+        raise HTTPException(404, "Imagem não encontrada.")
+    try:
+        e = enhance.Enhancement.parse(ops, upscale, gamma)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    job = session.get(Job, det.job_id)
+    if src == "crop":
+        if not Path(det.crop_path).exists():
+            raise HTTPException(404, "Recorte indisponível.")
+        img = read_image(det.crop_path)
+    else:
+        video = session.get(Video, det.video_id)
+        if job is None or video is None or not Path(video.stored_path).exists():
+            raise HTTPException(404, "O vídeo original desta deteção já não está disponível.")
+        try:
+            png, _, _ = validated_frames.original_frame_png(job, video, det)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        img = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_COLOR)
+    out = enhance.apply(img, e)
+    if download:
+        out = enhance.watermark(out, e)
+    ok, buf = cv2.imencode(".png", out)
+    if not ok:
+        raise HTTPException(500, "Falha ao codificar a imagem.")
+    body = buf.tobytes()
+    headers = {"X-FaceAI-Enhancement": e.describe(), "Cache-Control": "private, max-age=300"}
+    if download and job is not None:
+        filename = _download_name(det, job, f"{'face' if src == 'crop' else 'original'}_melhorada.png")
+        headers["Content-Disposition"] = f'attachment; filename="{filename}"'
+        log_event(session, "detection.enhanced_downloaded", case_id=job.case_id, actor=actor,
+                  details={"job_id": job.id, "detection_id": det.id, "source": src, "enhancement": e.as_dict(),
+                           "filename": filename, "size_bytes": len(body),
+                           "sha256": hashlib.sha256(body).hexdigest()})
     return Response(content=body, media_type="image/png", headers=headers)
 
 
@@ -462,6 +582,88 @@ EXPORTS = {
     "json": ("application/json", "json"),
     "zip": ("application/zip", "zip"),
 }
+
+
+# ---------------------------------------------------------------- ligar pessoas entre análises
+def _similar(session, user, job: Job, query, *, source: dict, threshold: float | None, scope: str,
+             limit: int) -> dict:
+    if query is None:
+        raise HTTPException(404, "Sem embedding guardado para comparar (análises anteriores a esta versão não "
+                                 "guardavam os embeddings dos tracks no modo procurar).")
+    if scope not in ("case", "all"):
+        raise HTTPException(422, "scope deve ser 'case' ou 'all'.")
+    emb, model = query
+    th = float(threshold if threshold is not None else job.params.get("threshold") or 0.5)
+    if not 0 < th <= 1.5:
+        raise HTTPException(422, "Limiar inválido.")
+    case_ids = {job.case_id} if scope == "case" else accessible_case_ids(session, user)
+    out = linking.find_similar(session, emb, model, case_ids=case_ids, exclude_job_id=job.id, threshold=th,
+                               limit=max(1, min(limit, 500)))
+    log_event(session, "person.linked_search", case_id=job.case_id, actor=user.username,
+              details={**source, "job_id": job.id, "threshold": th, "scope": scope,
+                       "results": len(out["results"]),
+                       "cases_with_results": sorted({r["case_id"] for r in out["results"]})})
+    return out
+
+
+@router.get("/tracks/{track_id}/similar")
+def similar_to_track(track_id: int, session: SessionDep, user: CurrentUser, threshold: float | None = None,
+                     scope: str = "all", limit: int = 100) -> dict:
+    """Tracks parecidos noutras análises dos casos acessíveis (scope=case: só o mesmo caso)."""
+    track = session.get(Track, track_id)
+    job = get_job_or_404(session, track.job_id) if track else None
+    if job is None:
+        raise HTTPException(404, "Track não encontrado.")
+    return _similar(session, user, job, linking.track_query(job, track_id), source={"track_id": track_id},
+                    threshold=threshold, scope=scope, limit=limit)
+
+
+@router.get("/jobs/{job_id}/persons/{person_id}/similar")
+def similar_to_person(job_id: int, person_id: int, session: SessionDep, user: CurrentUser,
+                      threshold: float | None = None, scope: str = "all", limit: int = 100) -> dict:
+    """Como /tracks/{id}/similar, com a média dos tracks da pessoa (descoberta ou várias pessoas procuradas)."""
+    job = get_job_or_404(session, job_id)
+    return _similar(session, user, job, linking.person_query(job, person_id), source={"person_id": person_id},
+                    threshold=threshold, scope=scope, limit=limit)
+
+
+@router.get("/jobs/{job_id}/frames/validated.zip")
+def job_validated_frames(job_id: int, session: SessionDep, actor: ActorDep) -> StreamingResponse:
+    """ZIP com os frames originais de todas as deteções confirmadas da análise (+ manifesto com SHA-256)."""
+    job = get_job_or_404(session, job_id)
+    return validated_zip_response(session, [job], case_id=job.case_id, actor=actor, scope=f"análise {job.id}",
+                                  filename=f"faceai_caso{job.case_id}_analise{job.id}_frames_validados")
+
+
+@router.get("/cases/{case_id}/frames/validated")
+def case_validated_summary(case_id: int, session: SessionDep) -> dict:
+    """Quantas deteções confirmadas (e frames distintos) iriam para o ZIP do caso."""
+    get_case_or_404(session, case_id)
+    jobs = list(session.exec(select(Job).where(Job.case_id == case_id)))
+    items = validated_frames.collect(session, jobs).items
+    return {"detections": len(items), "frames": len({(j.id, v.id, d.frame_index) for d, j, v in items})}
+
+
+@router.get("/cases/{case_id}/frames/validated.zip")
+def case_validated_frames(case_id: int, session: SessionDep, actor: ActorDep) -> StreamingResponse:
+    """ZIP com os frames originais das deteções confirmadas de todas as análises do caso."""
+    get_case_or_404(session, case_id)
+    jobs = list(session.exec(select(Job).where(Job.case_id == case_id).order_by(Job.id)))
+    return validated_zip_response(session, jobs, case_id=case_id, actor=actor, scope=f"caso {case_id}",
+                                  filename=f"faceai_caso{case_id}_frames_validados")
+
+
+def validated_zip_response(session, jobs: list[Job], *, case_id: int, actor: str, scope: str,
+                           filename: str) -> StreamingResponse:
+    validated = validated_frames.collect(session, jobs)
+    if not validated.items:
+        raise HTTPException(404, "Não há deteções confirmadas: valide primeiro as deteções que quer exportar.")
+    log_event(session, "frames.validated_exported", case_id=case_id, actor=actor,
+              details={"scope": scope, "jobs": [j.id for j in jobs], "detections": validated.detection_ids})
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return StreamingResponse(validated_frames.stream_zip(validated, scope=scope, actor=actor),
+                             media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{filename}_{stamp}.zip"'})
 
 
 @router.get("/jobs/{job_id}/export/{fmt}")

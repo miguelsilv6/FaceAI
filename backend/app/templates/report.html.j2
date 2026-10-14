@@ -91,6 +91,7 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
 
 {{ h("Parâmetros e ambiente") }}
 <table class="kv">
+  {% if (job.params.get("persons") or [])|length > 1 %}<tr><th>Pessoas procuradas</th><td>{% for p in job.params.persons %}{{ p.id }}. {{ p.label }} ({{ p.reference_ids|length }} referência{{ "s" if p.reference_ids|length != 1 }}){% if not loop.last %} · {% endif %}{% endfor %}</td></tr>{% endif %}
   <tr><th>Modelo de reconhecimento</th><td>{{ job.params.model }}</td></tr>
   <tr><th>Detetor facial</th><td>{{ job.params.detector }}</td></tr>
   {% if discover %}
@@ -153,7 +154,7 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
   <colgroup><col style="width:62px"><col style="width:7%"><col><col style="width:14%"><col style="width:14%"><col style="width:8%"><col style="width:11%"><col style="width:9%"><col style="width:12%"></colgroup>
   <tr><th>Face</th><th>Track</th><th>Vídeo</th><th>Início</th><th>Fim</th><th>Faces</th><th>{{ "Dist. ao centro" if discover else "Dist. track" }}</th><th>Qualid.</th><th>Revisão</th></tr>
   {% for x in tracks %}
-  <tr><td>{% if x.crop_img %}<img src="{{ x.crop_img }}" alt="">{% endif %}</td><td>#{{ x.t.id }}{% if x.t.person_id %}<br>P{{ x.t.person_id }}{% endif %}</td><td>{{ x.video.filename if x.video else x.t.video_id }}</td>
+  <tr><td>{% if x.crop_img %}<img src="{{ x.crop_img }}" alt="">{% endif %}</td><td>#{{ x.t.id }}{% if x.t.person_id %}<br>{% if discover %}P{{ x.t.person_id }}{% else %}{{ (job.params.persons | selectattr("id", "equalto", x.t.person_id) | map(attribute="label") | first) or ("P" ~ x.t.person_id) }}{% endif %}{% endif %}</td><td>{{ x.video.filename if x.video else x.t.video_id }}</td>
       <td>{{ x.t.start_s | ts }}{% if x.real_start %}<br><strong>{{ x.real_start }}</strong>{% endif %}</td><td>{{ x.t.end_s | ts }}{% if x.real_end %}<br><strong>{{ x.real_end }}</strong>{% endif %}</td><td>{{ x.t.n_faces }}</td><td>{{ "%.3f"|format(x.t.track_distance) }}</td><td>{{ "%.2f"|format(x.t.best_quality) }}</td>
       <td class="{{ {'confirmed':'ok','rejected':'bad'}.get(x.t.review_status.value, 'pend') }}">{{ {'confirmed':'Confirmado','rejected':'Rejeitado'}.get(x.t.review_status.value, 'Por rever') }}</td></tr>
   {% endfor %}
@@ -170,7 +171,7 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
   <tr><th>Face</th><th>#</th><th>Vídeo</th><th>Tempo</th><th>Frame</th><th>{{ "Pessoa" if discover else "Simil." }}</th><th>Dist.{% if discover %} centro{% endif %}</th><th>Q</th><th>Track</th><th>Revisão</th></tr>
   {% for r in rows %}
   <tr><td>{% if r.crop_img %}<img src="{{ r.crop_img }}" alt="">{% endif %}</td><td>{{ r.detection_id }}</td><td>{{ r.video_filename }}</td>
-      <td>{{ r.timestamp }}{% if r.real_time %}<br><strong>{{ r.real_time }}</strong>{% endif %}</td><td>{{ r.frame_index }}</td><td>{% if discover %}{{ ("#" ~ r.person_id) if r.person_id != "" else "—" }}{% else %}{{ "%.3f"|format(r.similarity) }}{% endif %}</td><td>{{ "%.3f"|format(r.distance) }}</td>
+      <td>{{ r.timestamp }}{% if r.real_time %}<br><strong>{{ r.real_time }}</strong>{% endif %}</td><td>{{ r.frame_index }}</td><td>{% if discover %}{{ ("#" ~ r.person_id) if r.person_id != "" else "—" }}{% else %}{{ "%.3f"|format(r.similarity) }}{% if r.person_label %}<br><strong>{{ r.person_label }}</strong>{% endif %}{% endif %}</td><td>{{ "%.3f"|format(r.distance) }}</td>
       <td>{{ "%.2f"|format(r.quality) }}</td><td>{{ ("#" ~ r.track_id) if r.track_id != "" else "—" }}</td>
       <td class="{{ {'confirmed':'ok','rejected':'bad'}.get(r.review_status, 'pend') }}">{{ {'confirmed':'Confirmada','rejected':'Rejeitada'}.get(r.review_status, 'Por rever') }}
         {% if r.reviewed_by %}<br><span class="muted">{{ r.reviewed_by }}</span>{% endif %}{% if r.review_note %}<br>{{ r.review_note }}{% endif %}</td></tr>

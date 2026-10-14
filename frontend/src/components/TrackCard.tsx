@@ -1,7 +1,8 @@
 import { ActionIcon, Badge, Button, Card, Group, Image, Menu, Stack, Text, Tooltip } from "@mantine/core";
-import { IconCheck, IconPhotoSearch, IconUserShare, IconX } from "@tabler/icons-react";
+import { IconCheck, IconPhotoSearch, IconUserShare, IconUsersGroup, IconX } from "@tabler/icons-react";
 
 import { api, formatTime } from "../api";
+import { personColor } from "../personColors";
 import type { ReviewStatus, Track } from "../types";
 import QualityBadge from "./QualityBadge";
 
@@ -16,6 +17,9 @@ interface Props {
   /** Modo descoberta: pessoas para onde o track pode ser movido. */
   personIds?: number[];
   onMove?: (track: Track, personId: number | null) => void;
+  /** Várias pessoas procuradas (modo procurar): nome da pessoa do track. */
+  personLabel?: string;
+  onFindSimilar?: (track: Track) => void;
 }
 
 const REVIEW: Record<ReviewStatus, [string, string]> = {
@@ -26,7 +30,7 @@ const REVIEW: Record<ReviewStatus, [string, string]> = {
 
 /** Um track = a mesma face em vários frames. A revisão aplica-se a todas as deteções do track. */
 export default function TrackCard({ track, onSeek, onReview, onShowDetections, realStart, realEnd, onOpenFrame,
-  personIds, onMove }: Props) {
+  personIds, onMove, personLabel, onFindSimilar }: Props) {
   const [label, color] = REVIEW[track.review_status];
   const sim = 1 - track.track_distance;
   return (
@@ -44,7 +48,7 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
       <Stack gap={4} mt={6}>
         <Group justify="space-between" wrap="nowrap">
           <Text size="sm" fw={600}>Track #{track.id}</Text>
-          {track.person_id != null ? (
+          {track.person_id != null && !personLabel ? (
             <Tooltip label={`Distância ao centro do grupo da pessoa: ${track.track_distance.toFixed(3)}`}>
               <Badge color="blue" variant="filled" size="sm">Pessoa #{track.person_id}</Badge>
             </Tooltip>
@@ -54,6 +58,9 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
             </Tooltip>
           )}
         </Group>
+        {personLabel && (
+          <Badge color={personColor(track.person_id)} variant="light" size="sm" fullWidth>{personLabel}</Badge>
+        )}
         {realStart && (
           <Text size="xs" ff="monospace" fw={600}>{realStart} → {realEnd?.slice(11)}</Text>
         )}
@@ -74,6 +81,14 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
                 <ActionIcon variant="subtle" size="sm" aria-label="Ver frame"
                   onClick={() => onOpenFrame(track.best_detection_id!)}>
                   <IconPhotoSearch size={16} />
+                </ActionIcon>
+              </Tooltip>
+            )}
+            {onFindSimilar && (
+              <Tooltip label="Procurar esta pessoa noutras análises">
+                <ActionIcon variant="subtle" size="sm" aria-label="Procurar noutras análises"
+                  onClick={() => onFindSimilar(track)}>
+                  <IconUsersGroup size={16} />
                 </ActionIcon>
               </Tooltip>
             )}

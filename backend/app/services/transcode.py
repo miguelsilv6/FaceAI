@@ -22,6 +22,7 @@ from pathlib import Path
 
 from sqlmodel import Session, select
 
+from ..config import settings
 from ..db import get_engine
 from ..models import Video
 from .audit import log_event
@@ -250,7 +251,7 @@ def _transcode(video_id: int) -> None:
                  "-crf", "33", "-b:v", "0"]
     else:
         codec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart"]
-    threads = str(max(1, (os.cpu_count() or 2) // 2))
+    threads = str(settings.cpu_threads or max(1, (os.cpu_count() or 2) // 2))
     cmd = [
         "ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
         "-threads", threads, "-i", str(src), "-map", "0:v:0", "-an", *codec, "-threads", threads,

@@ -15,6 +15,21 @@ class CaseCreate(BaseModel):
     analyst: str = ""
 
 
+class CaseOut(BaseModel):
+    """Caso na lista, com o espaço ocupado em disco."""
+
+    id: int
+    name: str
+    description: str
+    analyst: str
+    created_at: datetime
+    size_bytes: int
+
+
+class ReferenceUpdate(BaseModel):
+    person_label: str = Field(max_length=60, description="Pessoa a que a imagem pertence (vazio = sem rótulo)")
+
+
 class MemberAdd(BaseModel):
     username: str = Field(min_length=3, max_length=32)
     role: str = Field("member", pattern="^(owner|member)$")
@@ -28,6 +43,11 @@ class CaseUpdate(BaseModel):
 class CaseDelete(BaseModel):
     confirm_case_id: int = Field(description="Número do caso, repetido como confirmação do pedido")
     reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")
+
+
+class QueueUpdate(BaseModel):
+    priority: int | None = Field(None, ge=-1, le=1, description="1 alta, 0 normal, -1 baixa")
+    held: bool | None = Field(None, description="Reter (não começar) ou libertar")
 
 
 class JobDelete(BaseModel):

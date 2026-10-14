@@ -1,7 +1,9 @@
 import {
   ActionIcon, Anchor, Badge, Breadcrumbs, Button, Group, Modal, Stack, Tabs, Text, TextInput, Textarea, Title, Tooltip,
 } from "@mantine/core";
-import { IconActivity, IconHistory, IconMovie, IconPencil, IconPhoto, IconTrash, IconUsers } from "@tabler/icons-react";
+import {
+  IconActivity, IconHistory, IconMovie, IconPencil, IconPhoto, IconRoute, IconTrash, IconUsers,
+} from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
@@ -11,6 +13,7 @@ import { useAuth } from "../auth";
 import DeleteCaseModal from "../components/DeleteCaseModal";
 import JobsPanel from "../components/JobsPanel";
 import MembersPanel from "../components/MembersPanel";
+import RouteTimeline from "../components/RouteTimeline";
 import ReferencesPanel from "../components/ReferencesPanel";
 import VideosPanel from "../components/VideosPanel";
 import { notifyError, notifyOk } from "../notify";
@@ -132,6 +135,7 @@ export default function CaseView() {
           <Tabs.Tab value="jobs" leftSection={<IconActivity size={16} />}>
             <Group gap={6}>Análises <Badge size="sm" variant="light">{jobs.length}</Badge></Group>
           </Tabs.Tab>
+          <Tabs.Tab value="route" leftSection={<IconRoute size={16} />}>Percurso</Tabs.Tab>
           <Tabs.Tab value="members" leftSection={<IconUsers size={16} />}>
             Equipa <Badge size="xs" variant="light">{members.length}</Badge>
           </Tabs.Tab>
@@ -145,6 +149,9 @@ export default function CaseView() {
         </Tabs.Panel>
         <Tabs.Panel value="jobs" pt="md">
           <JobsPanel caseId={caseId} jobs={jobs} videos={videos} references={references} onChange={reloadJobs} />
+        </Tabs.Panel>
+        <Tabs.Panel value="route" pt="md">
+          <RouteTimeline caseId={caseId} jobs={jobs} />
         </Tabs.Panel>
         <Tabs.Panel value="members" pt="md">
           <MembersPanel caseId={caseId} members={members} canManage={canManage} onChange={() => {

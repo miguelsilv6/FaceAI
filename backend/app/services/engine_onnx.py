@@ -137,6 +137,9 @@ def _session(path: Path):
 
     opts = ort.SessionOptions()
     opts.log_severity_level = 3
+    if settings.cpu_threads > 0:  # FACEAI_CPU_THREADS: limita o CPU usado pelas análises
+        opts.intra_op_num_threads = settings.cpu_threads
+        opts.inter_op_num_threads = 1
     return ort.InferenceSession(str(path), sess_options=opts, providers=_providers())
 
 

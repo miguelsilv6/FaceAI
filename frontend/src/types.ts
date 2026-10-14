@@ -4,6 +4,7 @@ export interface Case {
   description: string;
   analyst: string;
   created_at: string;
+  size_bytes?: number; // só na lista de casos
 }
 
 export interface ReferenceImage {
@@ -18,6 +19,7 @@ export interface ReferenceImage {
   valid: boolean;
   message: string;
   uploaded_at: string;
+  person_label: string;
 }
 
 export interface Video {
@@ -84,8 +86,15 @@ export interface OcrTest {
 
 export type JobMode = "match" | "discover";
 
+export interface SearchedPerson {
+  id: number;
+  label: string;
+  reference_ids: number[];
+}
+
 export interface JobParams {
   mode: JobMode;
+  persons?: SearchedPerson[]; // modo procurar: pessoas (grupos de referências)
   model: string | null;
   detector: string | null;
   sample_fps: number;
@@ -117,6 +126,8 @@ export interface Job {
   id: number;
   case_id: number;
   status: JobStatus;
+  priority: number; // 1 alta, 0 normal, -1 baixa
+  held: boolean;
   params: JobParams;
   video_ids: number[];
   reference_ids: number[];
@@ -160,6 +171,7 @@ export type Evidence = "face" | "vestuário" | "face+vestuário";
 export interface Detection {
   id: number;
   job_id: number;
+  person_id: number | null; // várias pessoas por análise (modo procurar)
   video_id: number;
   reference_id: number | null;
   frame_index: number;
@@ -326,4 +338,108 @@ export interface CaseMember {
   active: boolean;
   added_by: string;
   added_at: string;
+}
+
+export interface ActivityJob {
+  id: number;
+  case_id: number;
+  case_name: string;
+  status: "queued" | "running";
+  mode: string;
+  progress: number;
+  eta_s: number | null;
+  message: string;
+  created_by: string;
+  started_at: string | null;
+  priority: number;
+  held: boolean;
+  queue_position: number | null;
+}
+
+export interface ActivityConversion {
+  video_id: number;
+  case_id: number;
+  case_name: string;
+  filename: string;
+  status: string;
+  progress: number;
+}
+
+export interface ActivityUpload {
+  id: string;
+  case_id: number;
+  case_name: string;
+  kind: string;
+  filename: string;
+  received_bytes: number;
+  size_bytes: number;
+  created_by: string;
+}
+
+export interface DiskStatus {
+  level: "ok" | "warning" | "critical";
+  percent: number;
+  free: number;
+  total?: number; // só para administradores
+  used?: number;
+  warn_percent?: number;
+  critical_percent?: number;
+}
+
+export interface Activity {
+  disk?: DiskStatus;
+  jobs: ActivityJob[];
+  conversions: ActivityConversion[];
+  uploads: ActivityUpload[];
+}
+
+export interface SimilarTrack {
+  case_id: number;
+  case_name: string;
+  job_id: number;
+  job_mode: string;
+  track_id: number;
+  person_id: number | null;
+  video_id: number;
+  video_filename: string;
+  start_s: number;
+  end_s: number;
+  real_start: string | null;
+  distance: number;
+  similarity: number;
+  best_detection_id: number | null;
+  review_status: ReviewStatus;
+  is_match: boolean;
+}
+
+export interface SimilarResult {
+  model: string;
+  threshold: number;
+  results: SimilarTrack[];
+  jobs_searched: number;
+  jobs_not_indexed: number;
+  jobs_other_model: number;
+}
+
+export interface RouteSegment {
+  job_id: number;
+  job_mode: string;
+  person_id: number | null;
+  person_label: string;
+  video_id: number;
+  video_filename: string;
+  start_s: number;
+  end_s: number;
+  real_start: string | null;
+  real_end: string | null;
+  evidence: string;
+  best_detection_id: number | null;
+  best_similarity: number | null;
+}
+
+export interface CaseRoute {
+  segments: RouteSegment[];
+  unsynced: RouteSegment[];
+  jobs: number[];
+  videos: { id: number; filename: string; synced: boolean }[];
 }

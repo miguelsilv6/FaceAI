@@ -49,6 +49,8 @@ class ReferenceImage(SQLModel, table=True):
     valid: bool = False
     message: str = ""
     uploaded_at: datetime = Field(default_factory=utcnow)
+    # Pessoa a que a imagem pertence: referências com o mesmo rótulo são a mesma pessoa (várias pessoas por análise).
+    person_label: str = ""
 
 
 class Video(SQLModel, table=True):
@@ -83,6 +85,8 @@ class Job(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     case_id: int = Field(foreign_key="case.id", index=True)
     status: JobStatus = JobStatus.queued
+    priority: int = 0  # fila: 1 alta, 0 normal, -1 baixa (maior primeiro; empate → ordem de criação)
+    held: bool = False  # retida na fila (não começa até ser libertada)
     params: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     video_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
     reference_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
@@ -131,6 +135,8 @@ class Detection(SQLModel, table=True):
     crop_path: str
     frame_path: str
     track_id: int | None = Field(default=None, index=True)
+    # Modo procurar com várias pessoas: n.º da pessoa (job.params["persons"]) mais próxima desta face.
+    person_id: int | None = None
     kind: str = "face"  # "face" | "body" (vestuário: caixa do corpo inteiro, distância ReID às amostras)
     colors: dict[str, Any] | None = Field(default_factory=dict, sa_column=Column(JSON))  # corpo: cores nomeadas
     quality: float = 0.0
