@@ -237,6 +237,8 @@ export const api = {
       reference_ids: referenceIds,
     }),
   cancelJob: (id: number) => request<Job>("POST", `/api/jobs/${id}/cancel`),
+  updateQueue: (id: number, body: { priority?: number; held?: boolean }) =>
+    request<Job>("PATCH", `/api/jobs/${id}/queue`, body),
   deleteJob: (id: number, reason: string) =>
     request<void>("DELETE", `/api/jobs/${id}`, { confirm_job_id: id, reason }),
   detections: (jobId: number) => request<Detection[]>("GET", `/api/jobs/${jobId}/detections`),

@@ -83,6 +83,8 @@ class Job(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     case_id: int = Field(foreign_key="case.id", index=True)
     status: JobStatus = JobStatus.queued
+    priority: int = 0  # fila: 1 alta, 0 normal, -1 baixa (maior primeiro; empate → ordem de criação)
+    held: bool = False  # retida na fila (não começa até ser libertada)
     params: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     video_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
     reference_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))

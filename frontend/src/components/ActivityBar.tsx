@@ -24,10 +24,11 @@ function items(a: Activity): Item[] {
   const out: Item[] = [];
   for (const j of a.jobs) {
     const queued = j.status === "queued";
+    const qtext = j.held ? "retida na fila" : `em fila${j.queue_position ? ` (n.º ${j.queue_position})` : ""}`;
     out.push({
       key: `job-${j.id}`, icon: <IconActivity size={14} />, color: "indigo",
       title: `Análise #${j.id}${j.mode === "discover" ? " (descoberta)" : ""} · ${j.case_name}`,
-      detail: queued ? "em fila" : `${Math.round(j.progress * 100)}%${j.eta_s != null ? ` · ~${formatDuration(j.eta_s)}` : ""}`,
+      detail: queued ? qtext : `${Math.round(j.progress * 100)}%${j.eta_s != null ? ` · ~${formatDuration(j.eta_s)}` : ""}`,
       progress: queued ? null : j.progress, to: `/jobs/${j.id}`,
     });
   }

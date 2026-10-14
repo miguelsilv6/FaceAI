@@ -7,6 +7,7 @@ import logging
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
+import cv2
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -42,6 +43,9 @@ async def lifespan(_: FastAPI):
     cleanup_stale_uploads()
     resume_pending_copies()
     preload_models()
+    if settings.cpu_threads > 0:
+        cv2.setNumThreads(settings.cpu_threads)
+    runner.start()  # retoma as análises que ficaram em fila
     yield
     runner.shutdown()
 

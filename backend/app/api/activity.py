@@ -12,6 +12,7 @@ from fastapi import APIRouter
 from sqlmodel import select
 
 from ..models import Case, Job, JobStatus, Upload, Video
+from ..services.jobs import queue_positions
 from ..services.transcode import PENDING, RUNNING
 from .deps import CurrentUser, SessionDep, accessible_case_ids
 
@@ -36,7 +37,8 @@ def activity(session: SessionDep, user: CurrentUser) -> dict:
         return names[case_id]
 
     jobs = session.exec(visible(select(Job).where(Job.status.in_([JobStatus.queued, JobStatus.running])),
-                                Job.case_id).order_by(Job.id))
+                                Job.case_id).order_by(Job.status.desc(), Job.priority.desc(), Job.id))
+    positions = queue_positions(session)
     conversions = session.exec(visible(select(Video).where(Video.playback_status.in_([PENDING, RUNNING])),
                                        Video.case_id).order_by(Video.id))
     uploads = []
@@ -55,7 +57,8 @@ def activity(session: SessionDep, user: CurrentUser) -> dict:
     return {
         "jobs": [{"id": j.id, "case_id": j.case_id, "case_name": case_name(j.case_id), "status": j.status,
                   "mode": (j.params or {}).get("mode", "search"), "progress": j.progress, "eta_s": j.eta_s,
-                  "message": j.message, "created_by": j.created_by, "started_at": j.started_at} for j in jobs],
+                  "message": j.message, "created_by": j.created_by, "started_at": j.started_at,
+                  "priority": j.priority, "held": j.held, "queue_position": positions.get(j.id)} for j in jobs],
         "conversions": [{"video_id": v.id, "case_id": v.case_id, "case_name": case_name(v.case_id),
                          "filename": v.filename, "status": v.playback_status, "progress": v.playback_progress}
                         for v in conversions],

@@ -5,11 +5,11 @@ from __future__ import annotations
 import bisect
 import logging
 import math
+import os
 import threading
 import time
 import traceback
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -42,37 +42,106 @@ class JobCancelled(Exception):
 
 
 class JobRunner:
-    def __init__(self) -> None:
-        self._executor: ThreadPoolExecutor | None = None
-        self._cancel: dict[int, threading.Event] = {}
+    """Fila de análises persistente (na base de dados), executada uma de cada vez por uma thread própria.
 
-    def submit(self, job_id: int) -> None:
-        if self._executor is None:
-            self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="faceai-job")
-        self._cancel[job_id] = threading.Event()
-        self._executor.submit(self._run_safe, job_id)
+    A próxima análise é a de maior prioridade (empate: a mais antiga) que não esteja retida. As análises em fila
+    sobrevivem a um reinício do servidor; as que estavam a decorrer são marcadas como interrompidas.
+    """
+
+    IDLE_WAIT_S = 30.0
+
+    def __init__(self) -> None:
+        self._cond = threading.Condition()
+        self._thread: threading.Thread | None = None
+        self._stop = False
+        self._current: tuple[int, threading.Event] | None = None
+
+    def start(self) -> None:
+        with self._cond:
+            if self._thread is not None and self._thread.is_alive():
+                self._cond.notify_all()
+                return
+            self._stop = False
+            self._thread = threading.Thread(target=self._loop, name="faceai-job", daemon=True)
+            self._thread.start()
+
+    def submit(self, job_id: int | None = None) -> None:
+        """Acorda o worker (nova análise em fila, prioridade alterada ou análise libertada)."""
+        self.start()
+
+    wake = submit
 
     def cancel(self, job_id: int) -> bool:
-        ev = self._cancel.get(job_id)
-        if ev is None:
-            return False
-        ev.set()
-        return True
+        with self._cond:
+            if self._current is not None and self._current[0] == job_id:
+                self._current[1].set()
+                return True
+        with Session(get_db_engine(), expire_on_commit=False) as s:  # ainda em fila: cancela já
+            job = s.get(Job, job_id)
+            if job is not None and job.status == JobStatus.queued:
+                _finish(s, job, JobStatus.cancelled, "Cancelada antes de iniciar.")
+                return True
+        return False
 
     def shutdown(self) -> None:
-        for ev in self._cancel.values():
-            ev.set()
-        if self._executor is not None:
-            self._executor.shutdown(wait=False, cancel_futures=True)
-            self._executor = None
+        with self._cond:
+            self._stop = True
+            if self._current is not None:
+                self._current[1].set()
+            self._cond.notify_all()
+            thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=10)
+        self._thread = None
 
-    def _run_safe(self, job_id: int) -> None:
-        try:
-            run_job(job_id, self._cancel.get(job_id) or threading.Event())
-        except Exception:  # pragma: no cover - registado no próprio job
-            log.exception("Falha inesperada no job %s", job_id)
-        finally:
-            self._cancel.pop(job_id, None)
+    def _next_job_id(self) -> int | None:
+        with Session(get_db_engine()) as s:
+            return s.exec(select(Job.id).where(Job.status == JobStatus.queued, Job.held == False)  # noqa: E712
+                          .order_by(Job.priority.desc(), Job.id).limit(1)).first()
+
+    def _loop(self) -> None:
+        _lower_thread_priority()
+        while True:
+            with self._cond:
+                if self._stop:
+                    return
+            try:
+                job_id = self._next_job_id()
+            except Exception:  # pragma: no cover - base de dados indisponível (ex.: entre testes)
+                log.exception("Fila de análises: erro ao escolher a próxima")
+                job_id = None
+            if job_id is None:
+                with self._cond:
+                    if not self._stop:
+                        self._cond.wait(self.IDLE_WAIT_S)
+                continue
+            event = threading.Event()
+            with self._cond:
+                self._current = (job_id, event)
+            try:
+                run_job(job_id, event)
+            except Exception:  # pragma: no cover - registado no próprio job
+                log.exception("Falha inesperada no job %s", job_id)
+            finally:
+                with self._cond:
+                    self._current = None
+
+
+def _lower_thread_priority() -> None:
+    """FACEAI_JOB_NICE: no Linux o "nice" aplica-se só a esta thread (a interface continua fluida)."""
+    if settings.job_nice <= 0 or not hasattr(os, "setpriority"):
+        return
+    try:
+        os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), min(19, settings.job_nice))
+    except OSError:  # pragma: no cover - sem permissão / plataforma sem suporte
+        log.warning("Não foi possível baixar a prioridade da thread das análises")
+
+
+def queue_positions(s: Session) -> dict[int, int]:
+    """Posição (1 = a seguir) de cada análise em fila não retida."""
+    rows = s.exec(select(Job.id).where(Job.status == JobStatus.queued, Job.held == False)  # noqa: E712
+                  .order_by(Job.priority.desc(), Job.id)).all()
+    return {jid: i + 1 for i, jid in enumerate(rows)}
 
 
 runner = JobRunner()
@@ -83,9 +152,10 @@ def job_dir(job: Job) -> Path:
 
 
 def recover_interrupted_jobs() -> None:
-    """Marca como falhadas as análises que estavam a correr quando o servidor parou."""
+    """Marca como falhadas as análises que estavam a correr quando o servidor parou. As que estavam em fila
+    continuam na fila e são executadas a seguir."""
     with Session(get_db_engine(), expire_on_commit=False) as s:
-        for job in s.exec(select(Job).where(Job.status.in_([JobStatus.running, JobStatus.queued]))):
+        for job in s.exec(select(Job).where(Job.status == JobStatus.running)):
             job.status = JobStatus.failed
             job.message = "Interrompida (o servidor foi reiniciado)."
             job.finished_at = utcnow()
@@ -99,7 +169,7 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
     engine = get_engine()
     with Session(get_db_engine(), expire_on_commit=False) as s:
         job = s.get(Job, job_id)
-        if job is None:
+        if job is None or job.status != JobStatus.queued:
             return
         if cancel.is_set():
             _finish(s, job, JobStatus.cancelled, "Cancelada antes de iniciar.")
@@ -107,7 +177,8 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
         p = job.params
         job.status = JobStatus.running
         job.started_at = utcnow()
-        job.environment = engine.environment()
+        job.environment = {**engine.environment(),
+                           "resources": {"cpu_threads": settings.cpu_threads or "auto", "job_nice": settings.job_nice}}
         s.add(job)
         s.commit()
         log_event(s, "job.started", case_id=job.case_id, actor=job.created_by,

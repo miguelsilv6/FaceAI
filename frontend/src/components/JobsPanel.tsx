@@ -1,6 +1,6 @@
 import {
-  Accordion, ActionIcon, Alert, Button, Card, Group, MultiSelect, NumberInput, Progress, SegmentedControl, Select, SimpleGrid, Stack,
-  Switch, Table, Text, Title, Tooltip,
+  Accordion, ActionIcon, Alert, Badge, Button, Card, Group, MultiSelect, NumberInput, Progress, SegmentedControl, Select, SimpleGrid, Stack,
+  Menu, Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
 import { IconDownload, IconInfoCircle, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
@@ -233,7 +233,12 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                 {jobs.map((j) => (
                   <Table.Tr key={j.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/jobs/${j.id}`)}>
                     <Table.Td>{j.id}</Table.Td>
-                    <Table.Td><JobStatusBadge status={j.status} /></Table.Td>
+                    <Table.Td onClick={(e) => j.status === "queued" && e.stopPropagation()}>
+                      <Group gap={4} wrap="nowrap">
+                        <JobStatusBadge status={j.status} />
+                        {j.status === "queued" && <QueueControls job={j} onChange={onChange} />}
+                      </Group>
+                    </Table.Td>
                     <Table.Td w={200}>
                       <Progress value={j.progress * 100} animated={j.status === "running"} />
                       {j.status === "running" && (
@@ -263,5 +268,43 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
       <DeleteJobModal job={toDelete} onClose={() => setToDelete(null)}
         onDeleted={() => { setToDelete(null); onChange(); }} />
     </Stack>
+  );
+}
+
+const PRIORITY_LABEL: Record<number, string> = { 1: "alta", 0: "normal", [-1]: "baixa" };
+
+/** Prioridade e retenção de uma análise em fila (a análise a decorrer só pode ser cancelada). */
+function QueueControls({ job, onChange }: { job: Job; onChange: () => void }) {
+  const update = async (body: { priority?: number; held?: boolean }) => {
+    try {
+      await api.updateQueue(job.id, body);
+      onChange();
+    } catch (e) {
+      notifyError(e);
+    }
+  };
+  return (
+    <Menu position="bottom-start" withinPortal>
+      <Menu.Target>
+        <Tooltip label="Prioridade e retenção na fila">
+          <Badge component="button" variant="light" style={{ cursor: "pointer" }}
+            color={job.held ? "gray" : job.priority > 0 ? "red" : job.priority < 0 ? "blue" : "indigo"}>
+            {job.held ? "retida" : `prioridade ${PRIORITY_LABEL[job.priority] ?? job.priority}`}
+          </Badge>
+        </Tooltip>
+      </Menu.Target>
+      <Menu.Dropdown>
+        <Menu.Label>Prioridade</Menu.Label>
+        {[1, 0, -1].map((p) => (
+          <Menu.Item key={p} disabled={job.priority === p} onClick={() => update({ priority: p })}>
+            {PRIORITY_LABEL[p][0].toUpperCase() + PRIORITY_LABEL[p].slice(1)}
+          </Menu.Item>
+        ))}
+        <Menu.Divider />
+        <Menu.Item onClick={() => update({ held: !job.held })}>
+          {job.held ? "Libertar (pode começar)" : "Reter na fila (não começa)"}
+        </Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
   );
 }

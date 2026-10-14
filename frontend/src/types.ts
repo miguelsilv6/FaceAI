@@ -118,6 +118,8 @@ export interface Job {
   id: number;
   case_id: number;
   status: JobStatus;
+  priority: number; // 1 alta, 0 normal, -1 baixa
+  held: boolean;
   params: JobParams;
   video_ids: number[];
   reference_ids: number[];
@@ -340,6 +342,9 @@ export interface ActivityJob {
   message: string;
   created_by: string;
   started_at: string | null;
+  priority: number;
+  held: boolean;
+  queue_position: number | null;
 }
 
 export interface ActivityConversion {

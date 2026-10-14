@@ -15,7 +15,7 @@ from sqlmodel import select
 
 from ..config import settings
 from ..models import Detection, Job, JobStatus, ReferenceImage, ReviewStatus, Track, Video, utcnow
-from ..schemas import JobCreate, JobDelete, PersonMerge, ReviewUpdate, TrackPerson
+from ..schemas import JobCreate, JobDelete, PersonMerge, QueueUpdate, ReviewUpdate, TrackPerson
 from ..services import reports, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
@@ -108,6 +108,31 @@ def cancel_job(job_id: int, session: SessionDep, actor: ActorDep) -> Job:
     runner.cancel(job_id)
     log_event(session, "job.cancel_requested", case_id=job.case_id, actor=actor, details={"job_id": job_id})
     session.refresh(job)
+    return job
+
+
+@router.patch("/jobs/{job_id}/queue", response_model=Job)
+def update_queue(job_id: int, body: QueueUpdate, session: SessionDep, user: CurrentUser) -> Job:
+    """Prioridade e retenção de uma análise em fila (quem a criou, o responsável do caso ou um admin)."""
+    job = get_job_or_404(session, job_id)
+    if job.created_by != user.username and not can_manage_case(session, user, job.case_id):
+        raise HTTPException(403, "Só quem criou a análise, o responsável do caso ou um administrador pode alterar.")
+    if job.status != JobStatus.queued:
+        raise HTTPException(409, "Só é possível alterar análises em fila.")
+    changes = {}
+    if body.priority is not None and body.priority != job.priority:
+        changes["priority"] = [job.priority, body.priority]
+        job.priority = body.priority
+    if body.held is not None and body.held != job.held:
+        changes["held"] = [job.held, body.held]
+        job.held = body.held
+    if changes:
+        session.add(job)
+        session.commit()
+        session.refresh(job)
+        log_event(session, "job.queue_changed", case_id=job.case_id, actor=user.username,
+                  details={"job_id": job.id, "changes": changes})
+        runner.wake()
     return job
 
 

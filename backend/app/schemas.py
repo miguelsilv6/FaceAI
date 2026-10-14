@@ -41,6 +41,11 @@ class CaseDelete(BaseModel):
     reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")
 
 
+class QueueUpdate(BaseModel):
+    priority: int | None = Field(None, ge=-1, le=1, description="1 alta, 0 normal, -1 baixa")
+    held: bool | None = Field(None, description="Reter (não começar) ou libertar")
+
+
 class JobDelete(BaseModel):
     confirm_job_id: int = Field(description="Número da análise, repetido como confirmação do pedido")
     reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")

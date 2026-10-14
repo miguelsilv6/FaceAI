@@ -44,6 +44,15 @@ class Settings:
     session_idle_minutes: int = field(default_factory=lambda: int(_env("SESSION_IDLE_MINUTES", "30")))
     session_max_hours: int = field(default_factory=lambda: int(_env("SESSION_MAX_HOURS", "12")))
     # Documentação interativa da API (/docs): desligada por omissão em produção.
+    # --- Recursos ---
+    # Threads de CPU para o ONNX Runtime, OpenCV e ffmpeg (0 = automático: todos os núcleos).
+    cpu_threads: int = field(default_factory=lambda: int(_env("CPU_THREADS", "0")))
+    # "nice" da thread das análises (0–19): valores maiores deixam a interface e os uploads mais fluidos.
+    job_nice: int = field(default_factory=lambda: int(_env("JOB_NICE", "10")))
+    # Alertas de disco (pasta de dados): % de ocupação e espaço livre mínimo.
+    disk_warn_percent: float = field(default_factory=lambda: float(_env("DISK_WARN_PERCENT", "80")))
+    disk_critical_percent: float = field(default_factory=lambda: float(_env("DISK_CRITICAL_PERCENT", "90")))
+    disk_min_free_gb: float = field(default_factory=lambda: float(_env("DISK_MIN_FREE_GB", "2")))
     # MFA obrigatório para todos ("true") ou opcional, ativado por cada utilizador em "A minha conta" ("false").
     require_mfa: bool = field(default_factory=lambda: _env("REQUIRE_MFA", "false").lower() == "true")
     api_docs: bool = field(default_factory=lambda: _env("API_DOCS", "false").lower() == "true")
