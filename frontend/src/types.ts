@@ -4,6 +4,7 @@ export interface Case {
   description: string;
   analyst: string;
   created_at: string;
+  size_bytes?: number; // só na lista de casos
 }
 
 export interface ReferenceImage {
@@ -326,4 +327,43 @@ export interface CaseMember {
   active: boolean;
   added_by: string;
   added_at: string;
+}
+
+export interface ActivityJob {
+  id: number;
+  case_id: number;
+  case_name: string;
+  status: "queued" | "running";
+  mode: string;
+  progress: number;
+  eta_s: number | null;
+  message: string;
+  created_by: string;
+  started_at: string | null;
+}
+
+export interface ActivityConversion {
+  video_id: number;
+  case_id: number;
+  case_name: string;
+  filename: string;
+  status: string;
+  progress: number;
+}
+
+export interface ActivityUpload {
+  id: string;
+  case_id: number;
+  case_name: string;
+  kind: string;
+  filename: string;
+  received_bytes: number;
+  size_bytes: number;
+  created_by: string;
+}
+
+export interface Activity {
+  jobs: ActivityJob[];
+  conversions: ActivityConversion[];
+  uploads: ActivityUpload[];
 }

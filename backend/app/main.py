@@ -16,8 +16,8 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__
+from .api import activity, cases, clock, jobs, system, uploads, users
 from .api import auth as auth_api
-from .api import cases, clock, jobs, system, uploads, users
 from .api.deps import UNSAFE_METHODS, client_ip, is_https
 from .api.uploads import cleanup_stale_uploads
 from .config import settings
@@ -146,6 +146,7 @@ app.add_middleware(
 app.add_middleware(SecurityMiddleware)
 app.include_router(auth_api.router)
 app.include_router(users.router)
+app.include_router(activity.router)
 app.include_router(system.router)
 app.include_router(cases.router)
 app.include_router(jobs.router)

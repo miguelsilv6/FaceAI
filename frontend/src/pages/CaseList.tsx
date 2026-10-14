@@ -4,7 +4,7 @@ import { IconFolderPlus, IconTrash } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { api, formatDate } from "../api";
+import { api, formatBytes, formatDate } from "../api";
 import DeleteCaseModal from "../components/DeleteCaseModal";
 import { notifyError } from "../notify";
 import type { Case } from "../types";
@@ -45,7 +45,8 @@ export default function CaseList() {
             <Table highlightOnHover>
               <Table.Thead>
                 <Table.Tr><Table.Th>#</Table.Th><Table.Th>Nome</Table.Th><Table.Th>Descrição</Table.Th>
-                  <Table.Th>Analista</Table.Th><Table.Th>Criado</Table.Th><Table.Th /></Table.Tr>
+                  <Table.Th>Analista</Table.Th><Table.Th>Criado</Table.Th>
+                  <Table.Th ta="right">Espaço</Table.Th><Table.Th /></Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {cases.map((c) => (
@@ -55,6 +56,8 @@ export default function CaseList() {
                     <Table.Td>{c.description}</Table.Td>
                     <Table.Td>{c.analyst}</Table.Td>
                     <Table.Td>{formatDate(c.created_at)}</Table.Td>
+                    <Table.Td ta="right" style={{ whiteSpace: "nowrap" }}>
+                      {c.size_bytes !== undefined ? formatBytes(c.size_bytes) : "—"}</Table.Td>
                     <Table.Td w={40} onClick={(e) => e.stopPropagation()}>
                       <Tooltip label="Eliminar caso">
                         <ActionIcon variant="subtle" color="red" aria-label={`Eliminar caso ${c.id}`} onClick={() => setToDelete(c)}>
@@ -65,6 +68,15 @@ export default function CaseList() {
                   </Table.Tr>
                 ))}
               </Table.Tbody>
+              <Table.Tfoot>
+                <Table.Tr>
+                  <Table.Td colSpan={5}><Text size="sm" c="dimmed">{cases.length} caso(s)</Text></Table.Td>
+                  <Table.Td ta="right" style={{ whiteSpace: "nowrap" }}>
+                    <Text size="sm" fw={600}>{formatBytes(cases.reduce((t, c) => t + (c.size_bytes ?? 0), 0))}</Text>
+                  </Table.Td>
+                  <Table.Td />
+                </Table.Tr>
+              </Table.Tfoot>
             </Table>
           </Table.ScrollContainer>
         )}

@@ -12,7 +12,8 @@ from sqlmodel import select
 
 from ..config import settings
 from ..models import AuditEvent, Case, CaseMember, Detection, Job, JobStatus, ReferenceImage, Track, Upload, User, Video
-from ..schemas import CaseCreate, CaseDelete, CaseUpdate, MemberAdd
+from ..schemas import CaseCreate, CaseDelete, CaseOut, CaseUpdate, MemberAdd
+from ..services import disk
 from ..services.audit import log_event
 from ..services.face_engine import get_engine
 from ..services.references import validate_reference
@@ -114,14 +115,14 @@ def create_case(body: CaseCreate, session: SessionDep, user: CurrentUser) -> Cas
     return case
 
 
-@router.get("/cases", response_model=list[Case])
-def list_cases(session: SessionDep, user: CurrentUser) -> list[Case]:
-    """Só os casos a que o utilizador tem acesso (o administrador vê todos)."""
+@router.get("/cases", response_model=list[CaseOut])
+def list_cases(session: SessionDep, user: CurrentUser) -> list[CaseOut]:
+    """Só os casos a que o utilizador tem acesso (o administrador vê todos), com o espaço ocupado em disco."""
     allowed = accessible_case_ids(session, user)
     q = select(Case).order_by(Case.id.desc())
     if allowed is not None:
         q = q.where(Case.id.in_(allowed or [-1]))
-    return list(session.exec(q))
+    return [CaseOut(**c.model_dump(), size_bytes=disk.case_size(session, c.id)) for c in session.exec(q)]
 
 
 @router.get("/cases/{case_id}", response_model=Case)
@@ -212,6 +213,7 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
         shutil.rmtree(folder, ignore_errors=True)
     summary["files_removed_bytes"] = removed_bytes
     summary["folder_removed"] = not folder.exists()
+    disk.forget(case_id)
     log_event(session, "case.deleted", case_id=case_id, actor=actor, details=summary)
 
 

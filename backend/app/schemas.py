@@ -15,6 +15,17 @@ class CaseCreate(BaseModel):
     analyst: str = ""
 
 
+class CaseOut(BaseModel):
+    """Caso na lista, com o espaço ocupado em disco."""
+
+    id: int
+    name: str
+    description: str
+    analyst: str
+    created_at: datetime
+    size_bytes: int
+
+
 class MemberAdd(BaseModel):
     username: str = Field(min_length=3, max_length=32)
     role: str = Field("member", pattern="^(owner|member)$")

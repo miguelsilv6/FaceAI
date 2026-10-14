@@ -23,11 +23,11 @@ def client(tmp_path, monkeypatch):
     importlib.reload(app.config)
     app.db.settings = app.config.settings
     app.db._engine = None
-    from app.services import audit, face_engine, jobs, reports, transcode
+    from app.services import audit, disk, face_engine, jobs, reports, transcode
 
     monkeypatch.setattr(transcode, "ffmpeg_available", lambda: False)
 
-    for mod in (audit, jobs, reports):
+    for mod in (audit, disk, jobs, reports):
         mod.settings = app.config.settings
     import app.api.cases as cases_api
     import app.api.deps as deps

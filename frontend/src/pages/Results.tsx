@@ -37,6 +37,7 @@ export default function Results() {
   // Vestuário (corpos): separados das faces, para não mudar as contagens nem as vistas faciais.
   const [bodyTracks, setBodyTracks] = useState<Track[]>([]);
   const [bodyDets, setBodyDets] = useState<Detection[]>([]);
+  const confirmedCount = [...detections, ...bodyDets].filter((d) => d.review_status === "confirmed").length;
   const [evidenceFilter, setEvidenceFilter] = useState<"all" | "face" | "vestuário">("all");
   const [persons, setPersons] = useState<Person[]>([]);
   const [view, setView] = useState<"persons" | "tracks" | "detections" | "clothing">("tracks");
@@ -343,6 +344,11 @@ export default function Results() {
               {EXPORTS.map(([fmt, label]) => (
                 <Menu.Item key={fmt} component="a" href={api.exportUrl(job.id, fmt)}>{label}</Menu.Item>
               ))}
+              <Menu.Divider />
+              <Menu.Item component="a" href={api.validatedFramesUrl("jobs", job.id)} disabled={!confirmedCount}
+                title="Frames completos do vídeo original, sem anotações, de todas as deteções confirmadas (com manifesto e SHA-256)">
+                Frames originais validados (ZIP · {confirmedCount})
+              </Menu.Item>
             </Menu.Dropdown>
           </Menu>
         </Group>

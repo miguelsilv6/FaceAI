@@ -1,5 +1,5 @@
 import type {
-  AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
+  Activity, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
 
@@ -187,6 +187,10 @@ export const api = {
     request<void>("DELETE", `/api/cases/${caseId}/members/${userId}`),
   system: () => request<SystemInfo>("GET", "/api/system"),
   cases: () => request<Case[]>("GET", "/api/cases"),
+  activity: () => request<Activity>("GET", "/api/activity"),
+  validatedSummary: (caseId: number) =>
+    request<{ detections: number; frames: number }>("GET", `/api/cases/${caseId}/frames/validated`),
+  validatedFramesUrl: (scope: "jobs" | "cases", id: number) => `/api/${scope}/${id}/frames/validated.zip`,
   case: (id: number) => request<Case>("GET", `/api/cases/${id}`),
   createCase: (body: { name: string; description: string }) =>
     request<Case>("POST", "/api/cases", body),

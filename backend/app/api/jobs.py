@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import shutil
 import uuid
 from datetime import UTC, datetime
@@ -11,17 +10,16 @@ from pathlib import Path
 
 import cv2
 from fastapi import APIRouter, Depends, HTTPException, Response
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from sqlmodel import select
 
 from ..config import settings
 from ..models import Detection, Job, JobStatus, ReferenceImage, ReviewStatus, Track, Video, utcnow
 from ..schemas import JobCreate, JobDelete, PersonMerge, ReviewUpdate, TrackPerson
-from ..services import reports
+from ..services import reports, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.face_engine import default_threshold, get_engine
-from ..services.frames import extract_frame
 from ..services.imageio import read_image, write_jpeg
 from ..services.jobs import job_dir, runner
 from ..services.persons import person_segments, summarize_persons
@@ -370,31 +368,10 @@ def detection_original_frame(det_id: int, session: SessionDep, actor: ActorDep, 
     video = session.get(Video, det.video_id)
     if job is None or video is None or not Path(video.stored_path).exists():
         raise HTTPException(404, "O vídeo original desta deteção já não está disponível.")
-    cache = job_dir(job) / "originals" / f"v{video.id:04d}_f{det.frame_index:07d}.png"
-    meta_path = cache.with_suffix(".json")
-    if cache.exists():
-        body = cache.read_bytes()
-        try:  # método da extração original (o PNG em cache é o mesmo ficheiro)
-            meta = json.loads(meta_path.read_text())
-            method, err = f"{meta['method']} (cache)", meta.get("crop_error")
-        except (OSError, ValueError, KeyError):
-            method, err = "cache", None
-    else:
-        try:
-            extracted = extract_frame(video.stored_path, det.frame_index, det.crop_path, (det.x, det.y, det.w, det.h),
-                                      margin=0.05 if det.kind == "body" else 0.25)
-        except ValueError as exc:
-            raise HTTPException(422, str(exc)) from exc
-        ok, buf = cv2.imencode(".png", extracted.image)
-        if not ok:
-            raise HTTPException(500, "Falha ao codificar o frame.")
-        body = buf.tobytes()
-        method, err = extracted.method, extracted.crop_error
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        tmp = cache.with_suffix(f".{uuid.uuid4().hex}.tmp")
-        tmp.write_bytes(body)
-        tmp.replace(cache)
-        meta_path.write_text(json.dumps({"method": method, "crop_error": err}))
+    try:
+        body, method, err = validated_frames.original_frame_png(job, video, det)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     headers = {"X-FaceAI-Frame-Index": str(det.frame_index), "X-FaceAI-Extraction": method}
     if err is not None:
         headers["X-FaceAI-Crop-Error"] = str(err)
@@ -462,6 +439,45 @@ EXPORTS = {
     "json": ("application/json", "json"),
     "zip": ("application/zip", "zip"),
 }
+
+
+@router.get("/jobs/{job_id}/frames/validated.zip")
+def job_validated_frames(job_id: int, session: SessionDep, actor: ActorDep) -> StreamingResponse:
+    """ZIP com os frames originais de todas as deteções confirmadas da análise (+ manifesto com SHA-256)."""
+    job = get_job_or_404(session, job_id)
+    return validated_zip_response(session, [job], case_id=job.case_id, actor=actor, scope=f"análise {job.id}",
+                                  filename=f"faceai_caso{job.case_id}_analise{job.id}_frames_validados")
+
+
+@router.get("/cases/{case_id}/frames/validated")
+def case_validated_summary(case_id: int, session: SessionDep) -> dict:
+    """Quantas deteções confirmadas (e frames distintos) iriam para o ZIP do caso."""
+    get_case_or_404(session, case_id)
+    jobs = list(session.exec(select(Job).where(Job.case_id == case_id)))
+    items = validated_frames.collect(session, jobs).items
+    return {"detections": len(items), "frames": len({(j.id, v.id, d.frame_index) for d, j, v in items})}
+
+
+@router.get("/cases/{case_id}/frames/validated.zip")
+def case_validated_frames(case_id: int, session: SessionDep, actor: ActorDep) -> StreamingResponse:
+    """ZIP com os frames originais das deteções confirmadas de todas as análises do caso."""
+    get_case_or_404(session, case_id)
+    jobs = list(session.exec(select(Job).where(Job.case_id == case_id).order_by(Job.id)))
+    return validated_zip_response(session, jobs, case_id=case_id, actor=actor, scope=f"caso {case_id}",
+                                  filename=f"faceai_caso{case_id}_frames_validados")
+
+
+def validated_zip_response(session, jobs: list[Job], *, case_id: int, actor: str, scope: str,
+                           filename: str) -> StreamingResponse:
+    validated = validated_frames.collect(session, jobs)
+    if not validated.items:
+        raise HTTPException(404, "Não há deteções confirmadas: valide primeiro as deteções que quer exportar.")
+    log_event(session, "frames.validated_exported", case_id=case_id, actor=actor,
+              details={"scope": scope, "jobs": [j.id for j in jobs], "detections": validated.detection_ids})
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    return StreamingResponse(validated_frames.stream_zip(validated, scope=scope, actor=actor),
+                             media_type="application/zip",
+                             headers={"Content-Disposition": f'attachment; filename="{filename}_{stamp}.zip"'})
 
 
 @router.get("/jobs/{job_id}/export/{fmt}")

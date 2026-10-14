@@ -164,6 +164,14 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 6. **Eliminar um caso** (🗑 na lista de casos ou ao lado do nome do caso): pede o motivo e a confirmação, escrevendo o número do caso. Recusa se houver análises a decorrer. Cancela as conversões em curso e apaga do servidor os **vídeos originais e as cópias de reprodução**, as referências, as análises (deteções, recortes, frames) e os uploads por concluir. A auditoria mantém o histórico e regista um `case.deleted` com o motivo e a lista dos ficheiros apagados. Exporta antes os relatórios de que precises.
 7. **Eliminar uma análise** (🗑 na lista de análises ou "Eliminar" nos resultados): pede o motivo e a confirmação, escrevendo o número da análise. Apaga as deteções, os tracks, as revisões e os ficheiros gerados. Os vídeos e as referências do caso mantêm-se. A auditoria é *append-only*: guarda o histórico da análise e regista a eliminação (quem, quando, motivo, parâmetros e totais). Não é possível eliminar uma análise a decorrer; é preciso cancelá-la primeiro.
 8. **Exportar:** relatório PDF ou HTML, com estatísticas, parâmetros, tracks e qualidade; CSV; JSON; ou ZIP.
+   - **Frames originais validados (ZIP):** no menu *Exportar* dos resultados, ou para o caso inteiro no separador *Análises*. Inclui o frame completo do vídeo original, sem anotações, de cada deteção **confirmada** (a revisão de um track aplica-se às suas deteções):
+     - os frames com várias deteções aparecem uma só vez;
+     - `manifesto.csv` com uma linha por deteção (análise, vídeo, frame, tempo e hora real, semelhança, revisor, método de extração e **SHA-256** do PNG);
+     - `LEIAME.txt` com o critério, quem gerou e quando.
+
+     O ZIP é gerado em streaming, porque com muitos frames a extração pode demorar. A exportação fica na auditoria com a lista das deteções.
+9. **Lista de casos:** mostra o **espaço ocupado em disco** por cada caso (vídeos, cópias de reprodução, referências, análises e uploads por concluir) e o total.
+10. **Tarefas em curso:** uma faixa no topo mostra as análises (progresso e tempo restante), as conversões para reprodução e os uploads a decorrer nos casos a que tens acesso, com ligação para cada um. No fim de uma análise aparece uma notificação.
 
 ### Modo descoberta (sem amostra)
 

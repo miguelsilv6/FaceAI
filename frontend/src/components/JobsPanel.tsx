@@ -2,12 +2,12 @@ import {
   Accordion, ActionIcon, Alert, Button, Card, Group, MultiSelect, NumberInput, Progress, SegmentedControl, Select, SimpleGrid, Stack,
   Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconInfoCircle, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
+import { IconDownload, IconInfoCircle, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api, formatDate, formatEta } from "../api";
-import { notifyError } from "../notify";
+import { notifyError, notifyOk } from "../notify";
 import type { Job, JobMode, JobParams, ReferenceImage, SystemInfo, Video } from "../types";
 import DeleteJobModal from "./DeleteJobModal";
 import JobStatusBadge from "./JobStatusBadge";
@@ -22,6 +22,19 @@ interface Props {
 
 export default function JobsPanel({ caseId, jobs, videos, references, onChange }: Props) {
   const navigate = useNavigate();
+  const downloadValidated = async () => {
+    try {
+      const sum = await api.validatedSummary(caseId);
+      if (!sum.detections) {
+        notifyError(new Error("Ainda não há deteções confirmadas neste caso. Valide-as nos resultados das análises."));
+        return;
+      }
+      notifyOk(`A preparar ${sum.frames} frame(s) de ${sum.detections} deteção(ões) confirmada(s)…`, "Download");
+      window.location.href = api.validatedFramesUrl("cases", caseId);
+    } catch (e) {
+      notifyError(e);
+    }
+  };
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [params, setParams] = useState<JobParams | null>(null);
   const [videoIds, setVideoIds] = useState<string[]>([]);
@@ -198,6 +211,13 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
         )}
       </Card>
 
+      {jobs.length > 0 && (
+        <Group justify="flex-end">
+          <Button variant="light" size="xs" leftSection={<IconDownload size={16} />} onClick={downloadValidated}>
+            Descarregar frames originais validados do caso (ZIP)
+          </Button>
+        </Group>
+      )}
       <Card withBorder p={0}>
         {jobs.length === 0 ? (
           <Text c="dimmed" p="md">Ainda não foram feitas análises neste caso.</Text>
