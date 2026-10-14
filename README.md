@@ -196,9 +196,13 @@ O botão **Procurar noutras análises** (👥), num track ou numa pessoa, compar
 
 ### Percurso multi-câmara
 O separador **Percurso** do caso junta as aparições das análises escolhidas e ordena-as pela **hora real do DVR**.
-- Mostra uma linha por câmara, com blocos coloridos por pessoa (tracejados se a aparição vier só do vestuário), e a lista cronológica, exportável em CSV.
-- Clicar num bloco abre os resultados nesse vídeo e instante.
+- Por omissão escolhe todas as análises "procurar" concluídas, para juntar câmaras analisadas à parte.
+- Mostra uma linha por câmara (mesmo as que não têm aparições), com blocos coloridos por pessoa (tracejados se a aparição vier só do vestuário), e a lista cronológica, exportável em CSV.
 - Os vídeos sem hora acertada ficam fora do eixo e são assinalados.
+- **Leitor multi-câmara:** os vídeos das câmaras com hora acertada aparecem lado a lado e são comandados por um relógio comum, na hora real do DVR. Inclui play/pausa, ±10 s, velocidade de 0,5× a 8×, "Próxima aparição", escolha das câmaras visíveis e ampliação de uma câmara.
+  - A câmara onde a pessoa aparece nesse instante fica com contorno vermelho e o nome da pessoa.
+  - Clicar num bloco do percurso leva todas as câmaras para esse instante. "Resultados", na lista, abre a análise.
+  - Funciona mesmo antes de haver análises. É só para visualização: as evidências usam sempre os originais.
 
 ### Melhoria de imagem para revisão
 No frame de uma deteção, **Melhorar (revisão)** aplica operações clássicas e determinísticas e mostra o resultado lado a lado com o original:

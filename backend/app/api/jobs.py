@@ -248,7 +248,13 @@ def case_route(case_id: int, session: SessionDep, job_ids: str | None = None, pe
         except ValueError as exc:
             raise HTTPException(422, "job_ids inválido.") from exc
         jobs = [j for j in jobs if j.id in wanted]
+    # Todas as câmaras (vídeos) das análises escolhidas, mesmo sem aparições: uma linha por câmara no percurso.
     videos: dict[int, Video | None] = {}
+    for job in jobs:
+        for vid in job.video_ids or []:
+            if vid not in videos:
+                videos[vid] = session.get(Video, vid)
+    appearances: dict[int, int] = {}
     synced, unsynced = [], []
     for job in jobs:
         discover = job.params.get("mode") == "discover"
@@ -276,10 +282,12 @@ def case_route(case_id: int, session: SessionDep, job_ids: str | None = None, pe
                     "best_detection_id": seg.get("best_detection_id"),
                     "best_similarity": seg.get("best_similarity")}
             (synced if start else unsynced).append(item)
+            appearances[vid] = appearances.get(vid, 0) + 1
     synced.sort(key=lambda x: (x["real_start"], x["video_id"]))
     unsynced.sort(key=lambda x: (x["video_id"], x["start_s"]))
     return {"segments": synced, "unsynced": unsynced, "jobs": [j.id for j in jobs],
-            "videos": [{"id": v.id, "filename": v.filename, "synced": bool(v.dvr_start)}
+            "videos": [{"id": v.id, "filename": v.filename, "synced": bool(v.dvr_start),
+                        "appearances": appearances.get(v.id, 0)}
                        for v in videos.values() if v is not None]}
 
 

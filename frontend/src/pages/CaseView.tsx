@@ -155,7 +155,7 @@ export default function CaseView() {
             onChange={reloadJobs} />
         </Tabs.Panel>
         <Tabs.Panel value="route" pt="md">
-          <RouteTimeline caseId={caseId} jobs={jobs} />
+          <RouteTimeline caseId={caseId} jobs={jobs} videos={videos} />
         </Tabs.Panel>
         <Tabs.Panel value="members" pt="md">
           <MembersPanel caseId={caseId} members={members} canManage={canManage} onChange={() => {

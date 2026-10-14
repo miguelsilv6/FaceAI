@@ -3,16 +3,18 @@ import {
 } from "@mantine/core";
 import { IconLogout, IconMoon, IconScan, IconSun, IconUser, IconUsers } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { Link, Outlet, useNavigate } from "react-router-dom";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { api } from "../api";
 import { useAuth } from "../auth";
 import ActivityBar from "./ActivityBar";
+import ErrorBoundary from "./ErrorBoundary";
 import type { SystemInfo } from "../types";
 
 export default function Layout() {
   const { user, isAdmin, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const { setColorScheme } = useMantineColorScheme();
   const scheme = useComputedColorScheme("light");
@@ -66,7 +68,7 @@ export default function Layout() {
       </AppShell.Header>
       <AppShell.Main>
         <ActivityBar />
-        <Outlet />
+        <ErrorBoundary key={location.pathname}><Outlet /></ErrorBoundary>
       </AppShell.Main>
     </AppShell>
   );
