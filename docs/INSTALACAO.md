@@ -132,18 +132,27 @@ cd backend
 FACEAI_DATA_DIR=/srv/faceai/data uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-Abre **http://localhost:8000** no browser.
+Antes do primeiro login, cria o administrador (noutro terminal, com o venv ativo):
 
+```bash
+cd backend
+FACEAI_DATA_DIR=/srv/faceai/data python -m app.cli create-admin chefe --name "Nome Apelido"
+```
+
+Abre **http://localhost:8000** no browser e entra com essa conta. No primeiro login configuras o MFA: lês o QR code com uma app autenticadora (Microsoft/Google Authenticator, Aegis, 2FAS…) e guardas os 10 códigos de recuperação. Os restantes utilizadores são criados na interface (menu do utilizador → *Utilizadores*) com uma password temporária, que mudam no primeiro login.
+
+- **Backup da chave:** o ficheiro `$FACEAI_DATA_DIR/secret.key` (ou a variável `FACEAI_SECRET_KEY`) cifra os segredos MFA. Inclui-o nos backups; sem ele, cada utilizador tem de reconfigurar o MFA (`python -m app.cli reset-mfa <utilizador>`).
+- **HTTP numa LAN:** o cookie de sessão só leva a flag `Secure` quando o pedido chega por HTTPS (`FACEAI_COOKIE_SECURE=auto`). Num acesso por `http://` na rede local a sessão funciona, mas a password e o cookie passam em claro: prefere o túnel SSH abaixo ou HTTPS.
 - Para aceder a partir do teu computador sem expor a porta na rede, usa um túnel SSH: `ssh -L 8000:localhost:8000 utilizador@vm`. Depois abre `http://localhost:8000` no teu computador.
 - `FACEAI_DATA_DIR` é onde ficam os casos, as evidências, a base de dados e o `audit.jsonl`. Escolhe um disco com espaço e com backup.
 
 ### 8. Verificar
 
 ```bash
-curl -s http://127.0.0.1:8000/api/system | python3 -m json.tool | head -20
+curl -s http://127.0.0.1:8000/api/auth/status      # {"setup_required": false} depois de criares o admin
 ```
 
-A resposta deve mostrar `"engine": "onnx"`, `"device": "CPU"` (ou `"GPU"`), a versão do ONNX Runtime e os hashes SHA-256 dos modelos.
+Depois do login, o distintivo no cabeçalho mostra o dispositivo (CPU ou GPU). Os restantes endpoints da API exigem sessão.
 
 Opcionalmente, corre os testes:
 
@@ -201,8 +210,13 @@ docker compose up --build -d          # CPU
 docker compose logs -f
 ```
 
-Abre **http://localhost:8000**.
-- Os dados ficam em `./data`.
+Cria o primeiro administrador e abre **http://localhost:8000**:
+
+```bash
+docker compose exec faceai python -m app.cli create-admin chefe --name "Nome Apelido"
+```
+
+- Os dados ficam em `./data`, incluindo `secret.key` (a chave dos segredos MFA): faz backup da pasta inteira.
 - Os modelos ficam no volume `faceai-models` e são descarregados na primeira análise.
 
 **GPU NVIDIA:** instala o driver NVIDIA e o [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), e depois:
@@ -260,6 +274,8 @@ A aplicação não envia imagens nem vídeos para fora. A rede só é usada para
 
 A base de dados é migrada automaticamente no arranque: as colunas novas são acrescentadas e nenhum dado é apagado. Os casos e as análises anteriores mantêm-se.
 
+**Ao atualizar para a versão com contas:** depois do arranque, a API responde 503 até criares o primeiro administrador (`python -m app.cli create-admin`, ou com `docker compose exec faceai …`). Os casos antigos não têm equipa: só os administradores os veem. Atribui-lhes um responsável no separador *Equipa*. Os eventos de auditoria antigos mantêm o nome livre que era indicado no navegador.
+
 **Instalação nativa:**
 ```bash
 cd ~/FaceAI && git pull
@@ -295,7 +311,8 @@ O `!override` substitui a lista de portas do ficheiro base, em vez de a juntar, 
        service: http://localhost:8002
    ```
 3. Reinicia o túnel com `systemctl restart cloudflared` e cria o CNAME `faceai` → `<ID-DO-TÚNEL>.cfargotunnel.com`.
-4. **Obrigatório:** protege o subdomínio com **Cloudflare Access** (Zero Trust → Access → Applications → Self-hosted), com uma policy *Allow* para os emails autorizados. A app não tem login próprio.
+4. Define no serviço `FACEAI_TRUST_PROXY=cloudflare`, para a auditoria e os bloqueios usarem o IP real (`CF-Connecting-IP`) e o cookie ser marcado `Secure`. Opcionalmente, define também `FACEAI_ALLOWED_ORIGINS=https://faceai.exemplo.pt`. Só uses `cloudflare` se a app **não** estiver acessível diretamente, porque esses cabeçalhos poderiam ser forjados.
+5. **Recomendado (defesa em profundidade):** protege também o subdomínio com **Cloudflare Access** (Zero Trust → Access → Applications → Self-hosted), com uma policy *Allow* para os emails autorizados. A app tem login próprio com MFA, mas assim nem chega a ficar exposta a quem não está autorizado.
 
 Os vídeos são enviados em blocos de 8 MB (`FACEAI_UPLOAD_CHUNK_MB`), por isso o limite de 100 MB por pedido do Cloudflare não afeta o upload.
 

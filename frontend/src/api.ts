@@ -1,30 +1,22 @@
 import type {
-  AuditEvent, Case, Detection, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
+  AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
 
-const ANALYST_KEY = "faceai.analyst";
+// Sessão: cookie HttpOnly (enviado automaticamente, também em <img>/<video>/downloads). Os pedidos que alteram
+// dados levam o token CSRF da sessão no cabeçalho X-CSRF-Token.
+let csrfToken = "";
 
-export function getAnalyst(): string {
-  try {
-    return localStorage.getItem(ANALYST_KEY) ?? "";
-  } catch {
-    return "";
-  }
+export function setCsrfToken(token: string): void {
+  csrfToken = token;
 }
 
-export function setAnalyst(name: string): void {
-  try {
-    localStorage.setItem(ANALYST_KEY, name);
-  } catch {
-    /* armazenamento indisponível */
-  }
-}
+/** Evento disparado quando a API responde 401 (sessão expirada ou terminada noutro lado). */
+export const UNAUTHORIZED_EVENT = "faceai:unauthorized";
 
 function headers(extra?: Record<string, string>): Record<string, string> {
   const h: Record<string, string> = { ...extra };
-  const analyst = getAnalyst();
-  if (analyst) h["X-Analyst"] = encodeURIComponent(analyst);
+  if (csrfToken) h["X-CSRF-Token"] = csrfToken;
   return h;
 }
 
@@ -53,6 +45,7 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     headers: headers(body !== undefined ? { "Content-Type": "application/json" } : undefined),
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401 && !url.startsWith("/api/auth/")) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT));
   if (!res.ok) throw await parseError(res);
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -154,11 +147,45 @@ async function uploadMany<T>(caseId: number, kind: "video" | "reference", files:
   return results;
 }
 
+export const authApi = {
+  status: () => request<{ setup_required: boolean }>("GET", "/api/auth/status"),
+  me: () => request<AuthState>("GET", "/api/auth/me"),
+  login: (username: string, password: string) => request<AuthState>("POST", "/api/auth/login", { username, password }),
+  mfaSetup: () => request<MfaSetup>("POST", "/api/auth/mfa/setup"),
+  mfaVerify: (code: string) => request<AuthState>("POST", "/api/auth/mfa/verify", { code }),
+  changePassword: (current_password: string, new_password: string) =>
+    request<AuthState>("POST", "/api/auth/password", { current_password, new_password }),
+  regenerateRecoveryCodes: (password: string) =>
+    request<{ recovery_codes: string[] }>("POST", "/api/auth/mfa/recovery-codes", { password }),
+  logout: () => request<void>("POST", "/api/auth/logout"),
+  sessions: () => request<UserSessionInfo[]>("GET", "/api/auth/sessions"),
+  endSession: (id: string) => request<void>("DELETE", `/api/auth/sessions/${id}`),
+  endOtherSessions: () => request<void>("DELETE", "/api/auth/sessions"),
+};
+
+export const usersApi = {
+  list: () => request<UserAccount[]>("GET", "/api/users"),
+  create: (body: { username: string; display_name: string; role: UserRole; password: string }) =>
+    request<UserAccount>("POST", "/api/users", body),
+  update: (id: number, body: { display_name?: string; role?: UserRole; active?: boolean }) =>
+    request<UserAccount>("PATCH", `/api/users/${id}`, body),
+  resetPassword: (id: number, password: string) =>
+    request<UserAccount>("POST", `/api/users/${id}/reset-password`, { password }),
+  resetMfa: (id: number) => request<UserAccount>("POST", `/api/users/${id}/reset-mfa`),
+  unlock: (id: number) => request<UserAccount>("POST", `/api/users/${id}/unlock`),
+  systemAudit: () => request<AuditEvent[]>("GET", "/api/audit/system"),
+};
+
 export const api = {
+  members: (caseId: number) => request<CaseMember[]>("GET", `/api/cases/${caseId}/members`),
+  addMember: (caseId: number, username: string, role: "owner" | "member") =>
+    request<CaseMember[]>("POST", `/api/cases/${caseId}/members`, { username, role }),
+  removeMember: (caseId: number, userId: number) =>
+    request<void>("DELETE", `/api/cases/${caseId}/members/${userId}`),
   system: () => request<SystemInfo>("GET", "/api/system"),
   cases: () => request<Case[]>("GET", "/api/cases"),
   case: (id: number) => request<Case>("GET", `/api/cases/${id}`),
-  createCase: (body: { name: string; description: string; analyst: string }) =>
+  createCase: (body: { name: string; description: string }) =>
     request<Case>("POST", "/api/cases", body),
   deleteCase: (id: number, reason: string) =>
     request<void>("DELETE", `/api/cases/${id}`, { confirm_case_id: id, reason }),
@@ -217,7 +244,7 @@ export const api = {
   /** Frame completo: "annotated" (JPEG com a caixa) ou "original" (PNG extraído do vídeo, sem marcações). */
   detectionFrameUrl: (id: number, variant: "annotated" | "original", download = false) => {
     const base = variant === "original" ? `/api/detections/${id}/frame/original` : `/api/detections/${id}/frame`;
-    return download ? `${base}?download=1&analyst=${encodeURIComponent(getAnalyst())}` : base;
+    return download ? `${base}?download=1` : base;
   },
   detectionAsReference: (id: number) => request<ReferenceImage>("POST", `/api/detections/${id}/as-reference`),
   persons: (jobId: number) => request<Person[]>("GET", `/api/jobs/${jobId}/persons`),
@@ -228,7 +255,7 @@ export const api = {
   moveTrack: (trackId: number, personId: number | null) =>
     request<Track>("PATCH", `/api/tracks/${trackId}/person`, { person_id: personId }),
   exportUrl: (jobId: number, fmt: string) =>
-    `/api/jobs/${jobId}/export/${fmt}?analyst=${encodeURIComponent(getAnalyst())}`,
+    `/api/jobs/${jobId}/export/${fmt}`,
 };
 
 /** Codecs que este browser diz reproduzir (alguns Firefox/Chromium em Linux não têm H.264). */

@@ -28,8 +28,23 @@ class Settings:
     # Tamanho de cada bloco do upload em blocos (abaixo do limite de 100 MB por pedido do Cloudflare).
     upload_chunk_mb: int = field(default_factory=lambda: int(_env("UPLOAD_CHUNK_MB", "8")))
     cors_origins: list[str] = field(
-        default_factory=lambda: _env("CORS_ORIGINS", "http://localhost:5173").split(",")
+        default_factory=lambda: [o for o in _env("CORS_ORIGINS", "http://localhost:5173").split(",") if o]
     )
+    # --- Autenticação ---
+    # Chave para cifrar os segredos TOTP. Vazio = ficheiro data_dir/secret.key (criado com permissões 0600).
+    secret_key: str = field(default_factory=lambda: _env("SECRET_KEY", ""))
+    # Cookie "Secure": "auto" (só quando o pedido chega por HTTPS, incluindo via Cloudflare), "true" ou "false".
+    cookie_secure: str = field(default_factory=lambda: _env("COOKIE_SECURE", "auto").lower())
+    # Origens extra aceites em pedidos que alteram dados (além do próprio host), ex.: https://faceai.exemplo.pt
+    allowed_origins: list[str] = field(
+        default_factory=lambda: [o.rstrip("/") for o in _env("ALLOWED_ORIGINS", "").split(",") if o]
+    )
+    # "none" ou "cloudflare": confiar em CF-Connecting-IP / X-Forwarded-Proto (só atrás do Cloudflare Tunnel).
+    trust_proxy: str = field(default_factory=lambda: _env("TRUST_PROXY", "none").lower())
+    session_idle_minutes: int = field(default_factory=lambda: int(_env("SESSION_IDLE_MINUTES", "30")))
+    session_max_hours: int = field(default_factory=lambda: int(_env("SESSION_MAX_HOURS", "12")))
+    # Documentação interativa da API (/docs): desligada por omissão em produção.
+    api_docs: bool = field(default_factory=lambda: _env("API_DOCS", "false").lower() == "true")
 
     @property
     def db_url(self) -> str:

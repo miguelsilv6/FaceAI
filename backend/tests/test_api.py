@@ -59,7 +59,7 @@ def test_full_flow(client, tmp_path):
 
     # Revisão humana: rejeitar a primeira deteção encurta o segmento.
     r = client.patch(f"/api/detections/{dets[0]['id']}/review", json={"status": "rejected", "note": "falso positivo"})
-    assert r.json()["review_status"] == "rejected" and r.json()["reviewed_by"] == "Analista Teste"
+    assert r.json()["review_status"] == "rejected" and r.json()["reviewed_by"] == "admin.teste"
     segs = client.get(f"/api/jobs/{job['id']}/segments").json()
     assert segs[0]["start_s"] == 3.5
 

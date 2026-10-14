@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from .. import __version__
 from ..schemas import JobParams
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.face_engine import get_engine
+from .deps import get_current_user
 from .uploads import chunk_size
 
-router = APIRouter(prefix="/api", tags=["sistema"])
+router = APIRouter(prefix="/api", tags=["sistema"], dependencies=[Depends(get_current_user)])
 
 
 def engine_defaults() -> JobParams:

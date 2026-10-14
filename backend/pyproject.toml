@@ -13,6 +13,11 @@ dependencies = [
     "jinja2>=3.1",
     "weasyprint>=62",
     "rapidocr>=3.0",  # OCR da data/hora do CCTV (PP-OCR em ONNX Runtime; modelos incluídos no pacote)
+    # Autenticação: Argon2id, TOTP (MFA), QR code local, AES-GCM para os segredos TOTP
+    "argon2-cffi>=23.1",
+    "pyotp>=2.9",
+    "segno>=1.6",
+    "cryptography>=42",
 ]
 
 [project.optional-dependencies]
@@ -31,7 +36,7 @@ build-backend = "setuptools.build_meta"
 include = ["app*"]
 
 [tool.setuptools.package-data]
-app = ["templates/*.j2"]
+app = ["templates/*.j2", "data/*.txt"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,18 +1,20 @@
 import {
   ActionIcon, Anchor, Badge, Breadcrumbs, Button, Group, Modal, Stack, Tabs, Text, TextInput, Textarea, Title, Tooltip,
 } from "@mantine/core";
-import { IconActivity, IconHistory, IconMovie, IconPencil, IconPhoto, IconTrash } from "@tabler/icons-react";
+import { IconActivity, IconHistory, IconMovie, IconPencil, IconPhoto, IconTrash, IconUsers } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { api, formatDate } from "../api";
 import AuditPanel from "../components/AuditPanel";
+import { useAuth } from "../auth";
 import DeleteCaseModal from "../components/DeleteCaseModal";
 import JobsPanel from "../components/JobsPanel";
+import MembersPanel from "../components/MembersPanel";
 import ReferencesPanel from "../components/ReferencesPanel";
 import VideosPanel from "../components/VideosPanel";
 import { notifyError, notifyOk } from "../notify";
-import type { AuditEvent, Case, Job, ReferenceImage, Video } from "../types";
+import type { AuditEvent, Case, CaseMember, Job, ReferenceImage, Video } from "../types";
 
 export default function CaseView() {
   const caseId = Number(useParams().caseId);
@@ -21,6 +23,8 @@ export default function CaseView() {
   const [videos, setVideos] = useState<Video[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [members, setMembers] = useState<CaseMember[]>([]);
+  const { user, isAdmin } = useAuth();
   const [tab, setTab] = useState<string | null>("references");
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -47,7 +51,13 @@ export default function CaseView() {
     api.jobs(caseId).then(setJobs).catch(() => undefined);
   }, [caseId]);
 
+  const reloadMembers = useCallback(() => {
+    api.members(caseId).then(setMembers).catch(() => setMembers([]));
+  }, [caseId]);
+  const canManage = isAdmin || members.some((m) => m.user_id === user.id && m.role === "owner");
+
   useEffect(reload, [reload]);
+  useEffect(reloadMembers, [reloadMembers]);
   useEffect(() => {
     if (tab === "audit") api.audit(caseId).then(setAudit).catch(notifyError);
   }, [tab, caseId]);
@@ -83,6 +93,7 @@ export default function CaseView() {
       <div>
         <Group gap="xs" wrap="nowrap">
           <Title order={2}>{kase.name}</Title>
+          {canManage && <>
           <Tooltip label="Editar nome e descrição do caso">
             <ActionIcon variant="subtle" onClick={startEdit} aria-label="Editar caso"><IconPencil size={18} /></ActionIcon>
           </Tooltip>
@@ -91,6 +102,7 @@ export default function CaseView() {
               <IconTrash size={18} />
             </ActionIcon>
           </Tooltip>
+          </>}
         </Group>
         <Text c="dimmed" size="sm">{kase.description || "Sem descrição"} · criado em {formatDate(kase.created_at)}
           {kase.analyst ? ` por ${kase.analyst}` : ""}</Text>
@@ -120,6 +132,9 @@ export default function CaseView() {
           <Tabs.Tab value="jobs" leftSection={<IconActivity size={16} />}>
             <Group gap={6}>Análises <Badge size="sm" variant="light">{jobs.length}</Badge></Group>
           </Tabs.Tab>
+          <Tabs.Tab value="members" leftSection={<IconUsers size={16} />}>
+            Equipa <Badge size="xs" variant="light">{members.length}</Badge>
+          </Tabs.Tab>
           <Tabs.Tab value="audit" leftSection={<IconHistory size={16} />}>Auditoria</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="references" pt="md">
@@ -130,6 +145,12 @@ export default function CaseView() {
         </Tabs.Panel>
         <Tabs.Panel value="jobs" pt="md">
           <JobsPanel caseId={caseId} jobs={jobs} videos={videos} references={references} onChange={reloadJobs} />
+        </Tabs.Panel>
+        <Tabs.Panel value="members" pt="md">
+          <MembersPanel caseId={caseId} members={members} canManage={canManage} onChange={() => {
+            reloadMembers();
+            if (!isAdmin) api.case(caseId).catch(() => navigate("/"));
+          }} />
         </Tabs.Panel>
         <Tabs.Panel value="audit" pt="md">
           <AuditPanel events={audit} />

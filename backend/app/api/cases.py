@@ -6,13 +6,13 @@ import shutil
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlmodel import select
 
 from ..config import settings
-from ..models import AuditEvent, Case, Detection, Job, JobStatus, ReferenceImage, Track, Upload, Video
-from ..schemas import CaseCreate, CaseDelete, CaseUpdate
+from ..models import AuditEvent, Case, CaseMember, Detection, Job, JobStatus, ReferenceImage, Track, Upload, User, Video
+from ..schemas import CaseCreate, CaseDelete, CaseUpdate, MemberAdd
 from ..services.audit import log_event
 from ..services.face_engine import get_engine
 from ..services.references import validate_reference
@@ -25,9 +25,19 @@ from ..services.transcode import (
     request_playback_copy,
 )
 from ..services.video_processor import probe
-from .deps import ActorDep, SessionDep, get_case_or_404
+from .deps import (
+    ActorDep,
+    CurrentUser,
+    SessionDep,
+    accessible_case_ids,
+    authorize_objects,
+    can_manage_case,
+    get_case_or_404,
+    membership,
+)
 
-router = APIRouter(prefix="/api", tags=["casos"])
+# Todas as rotas exigem sessão; os objetos do caminho têm de pertencer a um caso acessível (ver deps).
+router = APIRouter(prefix="/api", tags=["casos"], dependencies=[Depends(authorize_objects)])
 
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 VIDEO_EXT = {
@@ -90,11 +100,14 @@ def register_video(session, case_id: int, path: Path, filename: str, size: int, 
 
 # ---------------------------------------------------------------- casos
 @router.post("/cases", response_model=Case, status_code=201)
-def create_case(body: CaseCreate, session: SessionDep, actor: ActorDep) -> Case:
-    case = Case(name=body.name.strip(), description=body.description, analyst=body.analyst or actor)
+def create_case(body: CaseCreate, session: SessionDep, user: CurrentUser) -> Case:
+    actor = user.username
+    case = Case(name=body.name.strip(), description=body.description, analyst=user.display_name or actor)
     session.add(case)
     session.commit()
     session.refresh(case)
+    session.add(CaseMember(case_id=case.id, user_id=user.id, role="owner", added_by=actor))
+    session.commit()
     settings.case_dir(case.id).mkdir(parents=True, exist_ok=True)
     log_event(session, "case.created", case_id=case.id, actor=actor or case.analyst,
               details=body.model_dump())
@@ -102,8 +115,13 @@ def create_case(body: CaseCreate, session: SessionDep, actor: ActorDep) -> Case:
 
 
 @router.get("/cases", response_model=list[Case])
-def list_cases(session: SessionDep) -> list[Case]:
-    return list(session.exec(select(Case).order_by(Case.id.desc())))
+def list_cases(session: SessionDep, user: CurrentUser) -> list[Case]:
+    """Só os casos a que o utilizador tem acesso (o administrador vê todos)."""
+    allowed = accessible_case_ids(session, user)
+    q = select(Case).order_by(Case.id.desc())
+    if allowed is not None:
+        q = q.where(Case.id.in_(allowed or [-1]))
+    return list(session.exec(q))
 
 
 @router.get("/cases/{case_id}", response_model=Case)
@@ -112,9 +130,12 @@ def get_case(case_id: int, session: SessionDep) -> Case:
 
 
 @router.patch("/cases/{case_id}", response_model=Case)
-def update_case(case_id: int, body: CaseUpdate, session: SessionDep, actor: ActorDep) -> Case:
-    """Altera o nome e/ou a descrição do caso. Os valores anteriores ficam na auditoria."""
+def update_case(case_id: int, body: CaseUpdate, session: SessionDep, user: CurrentUser) -> Case:
+    """Altera o nome e/ou a descrição do caso (responsável do caso ou administrador). Os valores anteriores ficam
+    na auditoria."""
+    actor = user.username
     case = get_case_or_404(session, case_id)
+    _require_manager(session, user, case_id)
     changes = {}
     if body.name is not None and body.name.strip() != case.name:
         if not body.name.strip():
@@ -133,14 +154,16 @@ def update_case(case_id: int, body: CaseUpdate, session: SessionDep, actor: Acto
 
 
 @router.delete("/cases/{case_id}", status_code=204)
-def delete_case(case_id: int, body: CaseDelete, session: SessionDep, actor: ActorDep) -> None:
+def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: CurrentUser) -> None:
     """Elimina o caso e tudo o que lhe pertence: vídeos originais e cópias de reprodução, imagens de referência,
     análises (deteções, tracks, recortes, frames) e uploads por concluir.
 
     A auditoria é append-only: os eventos do caso mantêm-se (base de dados e audit.jsonl) e é acrescentado um
     "case.deleted" com o resumo do que foi apagado e o motivo.
     """
+    actor = user.username
     case = get_case_or_404(session, case_id)
+    _require_manager(session, user, case_id)
     if body.confirm_case_id != case_id:
         raise HTTPException(422, "Confirmação inválida: indique o número do caso a eliminar.")
     jobs = list(session.exec(select(Job).where(Job.case_id == case_id)))
@@ -165,7 +188,9 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, actor: Acto
         "jobs": [j.id for j in jobs], "detections": len(detections), "tracks": len(tracks),
         "pending_uploads": len(uploads),
     }
-    for rows in (detections, tracks, jobs, uploads, refs, videos):
+    members = list(session.exec(select(CaseMember).where(CaseMember.case_id == case_id)))
+    summary["members"] = [m.user_id for m in members]
+    for rows in (detections, tracks, jobs, uploads, refs, videos, members):
         for row in rows:
             session.delete(row)
         session.flush()
@@ -188,6 +213,60 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, actor: Acto
     summary["files_removed_bytes"] = removed_bytes
     summary["folder_removed"] = not folder.exists()
     log_event(session, "case.deleted", case_id=case_id, actor=actor, details=summary)
+
+
+def _require_manager(session, user: User, case_id: int) -> None:
+    if not can_manage_case(session, user, case_id):
+        raise HTTPException(403, "Só o responsável do caso ou um administrador pode fazer isto.")
+
+
+# ---------------------------------------------------------------- membros do caso (need-to-know)
+@router.get("/cases/{case_id}/members")
+def list_members(case_id: int, session: SessionDep, user: CurrentUser) -> list[dict]:
+    get_case_or_404(session, case_id)
+    out = []
+    for m in session.exec(select(CaseMember).where(CaseMember.case_id == case_id).order_by(CaseMember.id)):
+        u = session.get(User, m.user_id)
+        if u is not None:
+            out.append({"user_id": u.id, "username": u.username, "display_name": u.display_name, "role": m.role,
+                        "active": u.active, "added_by": m.added_by, "added_at": m.added_at})
+    return out
+
+
+@router.post("/cases/{case_id}/members", status_code=201)
+def add_member(case_id: int, body: MemberAdd, session: SessionDep, user: CurrentUser) -> list[dict]:
+    get_case_or_404(session, case_id)
+    _require_manager(session, user, case_id)
+    target = session.exec(select(User).where(User.username == body.username.strip().lower())).first()
+    if target is None or not target.active:
+        raise HTTPException(404, "Utilizador não encontrado ou inativo.")
+    existing = membership(session, target, case_id)
+    if existing is not None:
+        existing.role = body.role
+        session.add(existing)
+    else:
+        session.add(CaseMember(case_id=case_id, user_id=target.id, role=body.role, added_by=user.username))
+    session.commit()
+    log_event(session, "case.member_added", case_id=case_id, actor=user.username,
+              details={"user": target.username, "role": body.role})
+    return list_members(case_id, session, user)
+
+
+@router.delete("/cases/{case_id}/members/{user_id}", status_code=204)
+def remove_member(case_id: int, user_id: int, session: SessionDep, user: CurrentUser) -> None:
+    get_case_or_404(session, case_id)
+    _require_manager(session, user, case_id)
+    m = session.exec(select(CaseMember).where(CaseMember.case_id == case_id, CaseMember.user_id == user_id)).first()
+    if m is None:
+        raise HTTPException(404, "Membro não encontrado.")
+    owners = session.exec(select(CaseMember).where(CaseMember.case_id == case_id, CaseMember.role == "owner")).all()
+    if m.role == "owner" and len(owners) <= 1:
+        raise HTTPException(409, "O caso tem de ficar com pelo menos um responsável.")
+    target = session.get(User, user_id)
+    session.delete(m)
+    session.commit()
+    log_event(session, "case.member_removed", case_id=case_id, actor=user.username,
+              details={"user": target.username if target else user_id})
 
 
 @router.get("/cases/{case_id}/audit", response_model=list[AuditEvent])

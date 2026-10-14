@@ -207,10 +207,11 @@ pertencer a outra pessoa, e a roupa pode mudar (casaco, mochila). Cada apariçã
 {% endif %}
 
 {{ h("Registo de auditoria do caso") }}
+<p class="muted">O utilizador é a conta autenticada (login com password e MFA). Eventos anteriores à introdução das contas registam o nome indicado livremente no navegador, sem IP.</p>
 <table>
-  <tr><th>#</th><th>Data/hora (UTC)</th><th>Utilizador</th><th>Ação</th><th>Detalhes</th></tr>
+  <tr><th>#</th><th>Data/hora (UTC)</th><th>Utilizador</th><th>IP</th><th>Ação</th><th>Detalhes</th></tr>
   {% for e in audit %}
-  <tr><td>{{ e.id }}</td><td>{{ e.timestamp.strftime("%Y-%m-%d %H:%M:%S") }}</td><td>{{ e.actor }}</td><td>{{ e.action }}</td>
+  <tr><td>{{ e.id }}</td><td>{{ e.timestamp.strftime("%Y-%m-%d %H:%M:%S") }}</td><td>{{ e.actor }}</td><td>{{ e.ip or "—" }}</td><td>{{ e.action }}</td>
       <td><code>{{ e.details | tojson }}</code></td></tr>
   {% endfor %}
 </table>

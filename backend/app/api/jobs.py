@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import cv2
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 from fastapi.responses import FileResponse
 from sqlmodel import select
 
@@ -27,9 +27,18 @@ from ..services.jobs import job_dir, runner
 from ..services.persons import person_segments, summarize_persons
 from ..services.video_processor import format_timestamp
 from .cases import register_reference
-from .deps import ActorDep, SessionDep, get_case_or_404, get_job_or_404
+from .deps import (
+    ActorDep,
+    CurrentUser,
+    SessionDep,
+    authorize_objects,
+    can_manage_case,
+    get_case_or_404,
+    get_job_or_404,
+)
 
-router = APIRouter(prefix="/api", tags=["análises"])
+# Todas as rotas exigem sessão; os objetos do caminho têm de pertencer a um caso acessível (ver deps).
+router = APIRouter(prefix="/api", tags=["análises"], dependencies=[Depends(authorize_objects)])
 
 
 @router.post("/cases/{case_id}/jobs", response_model=Job, status_code=201)
@@ -105,13 +114,16 @@ def cancel_job(job_id: int, session: SessionDep, actor: ActorDep) -> Job:
 
 
 @router.delete("/jobs/{job_id}", status_code=204)
-def delete_job(job_id: int, body: JobDelete, session: SessionDep, actor: ActorDep) -> None:
+def delete_job(job_id: int, body: JobDelete, session: SessionDep, user: CurrentUser) -> None:
     """Elimina uma análise terminada: deteções, tracks e ficheiros gerados (recortes, frames, PNG originais).
 
     Os vídeos e as imagens de referência do caso não são tocados. A auditoria é append-only: os eventos da
     análise mantêm-se e é acrescentado um "job.deleted" com o resumo da análise eliminada e o motivo.
     """
+    actor = user.username
     job = get_job_or_404(session, job_id)
+    if job.created_by != actor and not can_manage_case(session, user, job.case_id):
+        raise HTTPException(403, "Só quem criou a análise, o responsável do caso ou um administrador a pode eliminar.")
     if body.confirm_job_id != job_id:
         raise HTTPException(422, "Confirmação inválida: indique o número da análise a eliminar.")
     if job.status in (JobStatus.queued, JobStatus.running):
@@ -349,7 +361,7 @@ def _log_download(session, det: Detection, job: Job, actor: str, kind: str, body
 
 @router.get("/detections/{det_id}/frame/original")
 def detection_original_frame(det_id: int, session: SessionDep, actor: ActorDep, download: bool = False,
-                             analyst: str | None = None) -> Response:
+                             ) -> Response:
     """Frame completo do vídeo original, sem anotações, em PNG (sem perdas em relação ao frame descodificado)."""
     det = session.get(Detection, det_id)
     if det is None:
@@ -389,14 +401,14 @@ def detection_original_frame(det_id: int, session: SessionDep, actor: ActorDep, 
     if download:
         filename = _download_name(det, job, "original.png")
         headers["Content-Disposition"] = f'attachment; filename="{filename}"'
-        _log_download(session, det, job, actor or (analyst or "").strip()[:100], "original", body, filename,
+        _log_download(session, det, job, actor, "original", body, filename,
                       video_filename=video.filename, extraction=method, crop_error=err)
     return Response(content=body, media_type="image/png", headers=headers)
 
 
 @router.get("/detections/{det_id}/{kind}")
 def detection_image(det_id: int, kind: str, session: SessionDep, actor: ActorDep, download: bool = False,
-                    analyst: str | None = None) -> Response:
+                    ) -> Response:
     det = session.get(Detection, det_id)
     if det is None or kind not in ("crop", "frame"):
         raise HTTPException(404, "Imagem não encontrada.")
@@ -408,7 +420,7 @@ def detection_image(det_id: int, kind: str, session: SessionDep, actor: ActorDep
         raise HTTPException(404, "Imagem não encontrada.")
     body = Path(path).read_bytes()
     filename = _download_name(det, job, "anotado.jpg" if kind == "frame" else "face.jpg")
-    _log_download(session, det, job, actor or (analyst or "").strip()[:100],
+    _log_download(session, det, job, actor,
                   "anotado" if kind == "frame" else "recorte", body, filename)
     return Response(content=body, media_type="image/jpeg",
                     headers={"Content-Disposition": f'attachment; filename="{filename}"'})
@@ -453,13 +465,12 @@ EXPORTS = {
 
 
 @router.get("/jobs/{job_id}/export/{fmt}")
-def export_job(job_id: int, fmt: str, session: SessionDep, actor: ActorDep, analyst: str | None = None) -> Response:
+def export_job(job_id: int, fmt: str, session: SessionDep, actor: ActorDep) -> Response:
     if fmt not in EXPORTS:
         raise HTTPException(404, f"Formato desconhecido: {fmt}")
     job = get_job_or_404(session, job_id)
     if job.status in (JobStatus.queued, JobStatus.running):
         raise HTTPException(409, "A análise ainda está a decorrer.")
-    actor = actor or (analyst or "").strip()[:100]
     # O registo da exportação é feito antes de gerar o ficheiro, para que fique incluído na auditoria exportada.
     log_event(session, "job.exported", case_id=job.case_id, actor=actor, details={"job_id": job_id, "format": fmt})
     data = reports.load_job_data(session, job)

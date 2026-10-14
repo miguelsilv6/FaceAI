@@ -106,12 +106,41 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 | `FACEAI_MODELS_DIR` | `~/.faceai/models` | Pesos ONNX |
 | `FACEAI_UPLOAD_CHUNK_MB` | `8` | Tamanho de cada bloco do upload (o Cloudflare limita os pedidos a 100 MB) |
 | `FACEAI_PRELOAD_MODELS` | `1` | Descarregar/carregar os modelos em segundo plano no arranque |
+| `FACEAI_SECRET_KEY` | *(vazio)* | Chave que cifra os segredos MFA. Se ficar vazia, usa-se `data/secret.key`, gerado no 1.º arranque com permissões 0600. **Faz backup**: sem ela, todos têm de reconfigurar o MFA. |
+| `FACEAI_COOKIE_SECURE` | `auto` | Cookie de sessão só por HTTPS: `auto` (quando o pedido chega por HTTPS), `true` ou `false` |
+| `FACEAI_TRUST_PROXY` | `none` | `cloudflare`: usa `CF-Connecting-IP` e `X-Forwarded-Proto` (IP real na auditoria e nos bloqueios). Só atrás do Cloudflare Tunnel. |
+| `FACEAI_ALLOWED_ORIGINS` | *(vazio)* | Origens extra aceites nos pedidos que alteram dados (ex.: `https://faceai.exemplo.pt`). O próprio host é sempre aceite. |
+| `FACEAI_SESSION_IDLE_MINUTES` / `FACEAI_SESSION_MAX_HOURS` | `30` / `12` | Expiração da sessão por inatividade e duração máxima |
+| `FACEAI_API_DOCS` | `false` | Expor `/api/docs` e `/api/openapi.json` (só para desenvolvimento) |
+
+### Autenticação e controlo de acesso
+
+- **Primeiro administrador:** `python -m app.cli create-admin` (em `backend/`), ou `docker compose exec faceai python -m app.cli create-admin`. Não há registo público: até existir um administrador, a API responde 503. A mesma ferramenta faz `reset-password`, `reset-mfa`, `unlock` e `list-users`.
+- **Contas locais com MFA obrigatório:**
+  - password com hash **Argon2id**, mínimo de 12 caracteres, recusa passwords comuns e as que contêm o nome de utilizador;
+  - **TOTP** (app autenticadora), configurado no primeiro login a partir de um QR code gerado no próprio servidor. O segredo fica cifrado com AES-GCM;
+  - 10 **códigos de recuperação** de uso único.
+- **Sessões:**
+  - cookie `HttpOnly`, `SameSite=Strict`, com `Secure` e prefixo `__Host-` em HTTPS. Na base de dados só fica o SHA-256 do token;
+  - expiram ao fim de **30 min de inatividade** e de **12 h no máximo**; o token é renovado a cada passo do login;
+  - **CSRF:** os pedidos que alteram dados exigem o cabeçalho `X-CSRF-Token` e uma origem permitida.
+- **Força bruta:** a conta é bloqueada 1, 5 e 15 min após 5, 10 e 15 falhas seguidas, e há um limite de 30 falhas por IP a cada 15 min. A mensagem de erro é sempre genérica.
+- **Papéis:**
+  - **Administrador:** gere utilizadores (menu do utilizador → *Utilizadores*), vê todos os casos e a auditoria do sistema (logins, falhas, bloqueios, contas);
+  - **Analista:** só vê os casos que criou ou que lhe foram atribuídos.
+- **Equipa do caso (need-to-know)**, no separador *Equipa*:
+  - quem cria o caso fica **responsável**;
+  - o responsável, ou um administrador, dá acesso a outros utilizadores como **membro** ou responsável;
+  - só o responsável e o administrador editam ou eliminam o caso; uma análise pode ser eliminada também por quem a criou;
+  - o acesso a qualquer objeto (vídeo, referência, análise, deteção, track, upload) é verificado pelo caso a que pertence. Sem acesso, a resposta é sempre **404**.
+- **Auditoria:** o utilizador registado é a conta autenticada, com o **IP** do pedido. Os casos criados antes das contas não têm equipa: só os administradores os veem, até lhes atribuírem um responsável.
+- **Cabeçalhos de segurança:** CSP restritiva, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy` e HSTS em HTTPS.
 
 ---
 
 ## Utilização
 
-1. **Novo caso:** indica o nome ou referência do processo e o teu nome de analista (no cabeçalho). O nome e a descrição podem ser editados depois (✏️ ao lado do nome do caso). Os valores anteriores ficam na auditoria.
+1. **Novo caso:** indica o nome ou referência do processo. Ficas como responsável do caso e podes dar acesso a colegas no separador *Equipa*. O nome e a descrição podem ser editados depois (✏️ ao lado do nome do caso). Os valores anteriores ficam na auditoria.
 2. **Referências:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
 3. **Vídeos:** arrasta os ficheiros de CCTV. O envio é **em blocos e retomável**: se a ligação cair, volta a largar o mesmo ficheiro e o upload continua de onde parou, mesmo depois de recarregar a página. Os metadados são extraídos automaticamente. Se o browser não conseguir reproduzir o vídeo e houver `ffmpeg`, é criada uma **cópia H.264 só para visualização**. A análise usa sempre o original. Os casos típicos são H.265/HEVC, `.dav`, `.avi`/MPEG-4, H.264 a 10 bits ou 4:2:2/4:4:4, que dão a mensagem "nenhum vídeo com formato e tipo MIME suportado".
    - A decisão usa o `ffprobe` (codec e formato de cor), e não só a extensão.
@@ -224,12 +253,12 @@ A hora real aparece nos resultados, nos tracks e nos segmentos, e é exportada n
 
 ## Considerações forenses e legais
 
-- **Auditoria:** todas as ações ficam registadas com utilizador e hora UTC, na base de dados e em `data/audit.jsonl` (append-only). Inclui criação do caso, uploads (incluindo blocos iniciados ou cancelados), parâmetros, início e fim de análise, revisões de deteções e de tracks, e exportações. O registo é incluído no relatório e no ZIP.
+- **Auditoria:** todas as ações ficam registadas com o utilizador autenticado, o IP e a hora UTC, na base de dados e em `data/audit.jsonl` (append-only). Inclui criação do caso, uploads (incluindo blocos iniciados ou cancelados), parâmetros, início e fim de análise, revisões de deteções e de tracks, e exportações. O registo é incluído no relatório e no ZIP.
 - **Reprodutibilidade:** o relatório inclui os parâmetros completos (filtro de movimento, cascata, tracking, limiares) e as versões do Python, ONNX Runtime, OpenCV e NumPy. Inclui também o **SHA-256 de cada modelo** usado e o dispositivo.
 - **Evidências:** os ficheiros originais são guardados sem alterações. A cópia de reprodução é um ficheiro separado.
 - **Transparência dos filtros:** o relatório indica quantos frames foram saltados por falta de movimento e por não terem faces na 1.ª passagem. Um frame saltado não foi analisado pelo modelo completo. Se for preciso, repete a análise com os filtros desligados.
 - **Limitações:** a precisão cai muito com baixa resolução, compressão forte, perfil, oclusões, iluminação infravermelha e *motion blur*. O score de qualidade ajuda a identificar estes casos. Os modelos têm enviesamentos demográficos documentados. Um "não encontrado" **não prova ausência**.
-- **Proteção de dados:** a análise biométrica é tratamento de dados de categoria especial (RGPD art. 9.º; Lei n.º 59/2019 no contexto de investigação criminal). Os dados ficam locais. Se publicares a app (por exemplo, com Cloudflare Tunnel), protege-a com autenticação (Cloudflare Access).
+- **Proteção de dados:** a análise biométrica é tratamento de dados de categoria especial (RGPD art. 9.º; Lei n.º 59/2019 no contexto de investigação criminal). Os dados ficam locais. A app tem contas próprias com MFA. Se a publicares (por exemplo, com Cloudflare Tunnel), põe também o **Cloudflare Access** à frente, como defesa em profundidade.
 - **Licenças:** o código desta aplicação e o pós-processamento SCRFD e ArcFace (adaptado do InsightFace) são MIT. Os **pesos pré-treinados do InsightFace** (`buffalo_l`, `buffalo_sc`) são disponibilizados **apenas para investigação e uso não comercial**. Para uso comercial, usa o motor DeepFace ou modelos com licença adequada.
 
 ---
