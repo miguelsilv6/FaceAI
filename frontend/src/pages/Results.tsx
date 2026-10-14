@@ -6,7 +6,7 @@ import {
   IconAlertTriangle, IconChevronLeft, IconChevronRight, IconDownload, IconInfoCircle, IconPhoto, IconPlayerStop, IconTrash, IconUserPlus,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { api, browserCodecs, formatEta, formatTime, realTime } from "../api";
 import DeleteJobModal from "../components/DeleteJobModal";
@@ -31,6 +31,9 @@ const EXPORTS = [
 
 export default function Results() {
   const jobId = Number(useParams().jobId);
+  // ?video=&t=: abrir num vídeo e instante (ex.: a partir do percurso multi-câmara)
+  const [searchParams] = useSearchParams();
+  const startAt = useRef({ video: Number(searchParams.get("video")) || null, t: Number(searchParams.get("t")) || 0 });
   const [job, setJob] = useState<Job | null>(null);
   const [videos, setVideos] = useState<Video[]>([]);
   const [detections, setDetections] = useState<Detection[]>([]);
@@ -80,7 +83,8 @@ export default function Results() {
       api.videos(j.case_id).then((vs) => {
         const used = vs.filter((v) => j.video_ids.includes(v.id));
         setVideos(used);
-        setVideoId((cur) => cur ?? used[0]?.id ?? null);
+        const wanted = used.find((v) => v.id === startAt.current.video)?.id;
+        setVideoId((cur) => cur ?? wanted ?? used[0]?.id ?? null);
       });
     }).catch(notifyError);
     loadResults();
@@ -404,7 +408,15 @@ export default function Results() {
                 ) : (
                   <video ref={videoRef} key={`${video.id}-${video.playback_status}-${video.playback_format}`} src={api.videoUrl(video)} controls
                     preload="metadata" style={{ width: "100%", maxHeight: 420, background: "#000", borderRadius: 6 }}
-                    onError={(e) => onVideoError(video, e.currentTarget.error)} onLoadedData={() => setPlayError(null)}
+                    onError={(e) => onVideoError(video, e.currentTarget.error)}
+                    onLoadedData={(e) => {
+                      setPlayError(null);
+                      if (startAt.current.video === video.id && startAt.current.t) { // instante pedido no URL (uma vez)
+                        e.currentTarget.currentTime = startAt.current.t;
+                        setCurrentTime(startAt.current.t);
+                        startAt.current = { video: null, t: 0 };
+                      }
+                    }}
                     onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)} />
                 )}
                 {!converting && (playError?.videoId === video.id || video.playback_status === "failed"

@@ -420,3 +420,26 @@ export interface SimilarResult {
   jobs_not_indexed: number;
   jobs_other_model: number;
 }
+
+export interface RouteSegment {
+  job_id: number;
+  job_mode: string;
+  person_id: number | null;
+  person_label: string;
+  video_id: number;
+  video_filename: string;
+  start_s: number;
+  end_s: number;
+  real_start: string | null;
+  real_end: string | null;
+  evidence: string;
+  best_detection_id: number | null;
+  best_similarity: number | null;
+}
+
+export interface CaseRoute {
+  segments: RouteSegment[];
+  unsynced: RouteSegment[];
+  jobs: number[];
+  videos: { id: number; filename: string; synced: boolean }[];
+}

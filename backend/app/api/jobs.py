@@ -19,6 +19,7 @@ from ..schemas import JobCreate, JobDelete, PersonMerge, QueueUpdate, ReviewUpda
 from ..services import disk, linking, reports, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
+from ..services.clock import real_time
 from ..services.face_engine import default_threshold, get_engine
 from ..services.imageio import read_image, write_jpeg
 from ..services.jobs import job_dir, runner
@@ -225,6 +226,59 @@ def list_segments(job_id: int, session: SessionDep, gap_s: float | None = None,
             out += [{**seg, "person_id": pid} for seg in reports.match_segments(mine, gap, tracks)]
         return sorted(out, key=lambda x: (x["video_id"], x["start_s"]))
     return reports.match_segments(dets, gap, tracks)
+
+
+# ---------------------------------------------------------------- percurso multi-câmara (hora real)
+@router.get("/cases/{case_id}/route")
+def case_route(case_id: int, session: SessionDep, job_ids: str | None = None, person_id: int | None = None,
+               only: str = "matches") -> dict:
+    """Aparições das análises indicadas (por omissão: todas as concluídas) ordenadas pela hora real do DVR, para
+    reconstruir o percurso da pessoa entre câmaras. only=confirmed: só segmentos com deteções confirmadas.
+    Os segmentos de vídeos sem hora real acertada vão em `unsynced`."""
+    get_case_or_404(session, case_id)
+    if only not in ("matches", "confirmed"):
+        raise HTTPException(422, "only deve ser 'matches' ou 'confirmed'.")
+    q = select(Job).where(Job.case_id == case_id, Job.status == JobStatus.completed).order_by(Job.id)
+    jobs = list(session.exec(q))
+    if job_ids:
+        try:
+            wanted = {int(x) for x in job_ids.split(",") if x.strip()}
+        except ValueError as exc:
+            raise HTTPException(422, "job_ids inválido.") from exc
+        jobs = [j for j in jobs if j.id in wanted]
+    videos: dict[int, Video | None] = {}
+    synced, unsynced = [], []
+    for job in jobs:
+        discover = job.params.get("mode") == "discover"
+        labels = {p["id"]: p["label"] for p in job.params.get("persons") or []}
+        segs = list_segments(job.id, session, person_id=person_id if len(jobs) == 1 else None)
+        if only == "confirmed" and segs:
+            ids = {i for seg in segs for i in seg["detection_ids"]}
+            confirmed = {d.id for d in session.exec(select(Detection).where(
+                Detection.id.in_(ids), Detection.review_status == ReviewStatus.confirmed))}
+            segs = [seg for seg in segs if confirmed & set(seg["detection_ids"])]
+        for seg in segs:
+            vid = seg["video_id"]
+            if vid not in videos:
+                videos[vid] = session.get(Video, vid)
+            v = videos[vid]
+            pid = seg.get("person_id")
+            label = (f"Pessoa #{pid}" if discover else labels.get(pid)) if pid else None
+            start = real_time(v.dvr_start, v.dvr_rate, v.clock_offset_s, seg["start_s"]) if v else None
+            end = real_time(v.dvr_start, v.dvr_rate, v.clock_offset_s, seg["end_s"]) if v else None
+            item = {"job_id": job.id, "job_mode": job.params.get("mode", "match"), "person_id": pid,
+                    "person_label": label or (job.params.get("persons") or [{}])[0].get("label") or "Pessoa",
+                    "video_id": vid, "video_filename": v.filename if v else "", "start_s": seg["start_s"],
+                    "end_s": seg["end_s"], "real_start": start.isoformat() if start else None,
+                    "real_end": end.isoformat() if end else None, "evidence": seg.get("evidence", "face"),
+                    "best_detection_id": seg.get("best_detection_id"),
+                    "best_similarity": seg.get("best_similarity")}
+            (synced if start else unsynced).append(item)
+    synced.sort(key=lambda x: (x["real_start"], x["video_id"]))
+    unsynced.sort(key=lambda x: (x["video_id"], x["start_s"]))
+    return {"segments": synced, "unsynced": unsynced, "jobs": [j.id for j in jobs],
+            "videos": [{"id": v.id, "filename": v.filename, "synced": bool(v.dvr_start)}
+                       for v in videos.values() if v is not None]}
 
 
 @router.get("/jobs/{job_id}/tracks", response_model=list[Track])

@@ -1,5 +1,5 @@
 import type {
-  Activity, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
+  Activity, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
 
@@ -192,6 +192,8 @@ export const api = {
   similarToPerson: (jobId: number, personId: number, scope: "all" | "case", threshold?: number) =>
     request<SimilarResult>("GET",
       `/api/jobs/${jobId}/persons/${personId}/similar?scope=${scope}${threshold != null ? `&threshold=${threshold}` : ""}`),
+  route: (caseId: number, jobIds: number[], only: "matches" | "confirmed") =>
+    request<CaseRoute>("GET", `/api/cases/${caseId}/route?only=${only}${jobIds.length ? `&job_ids=${jobIds.join(",")}` : ""}`),
   activity: () => request<Activity>("GET", "/api/activity"),
   validatedSummary: (caseId: number) =>
     request<{ detections: number; frames: number }>("GET", `/api/cases/${caseId}/frames/validated`),
