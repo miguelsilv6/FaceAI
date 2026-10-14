@@ -16,7 +16,7 @@ from sqlmodel import select
 from ..config import settings
 from ..models import Detection, Job, JobStatus, ReferenceImage, ReviewStatus, Track, Video, utcnow
 from ..schemas import JobCreate, JobDelete, PersonMerge, QueueUpdate, ReviewUpdate, TrackPerson
-from ..services import reports, validated_frames
+from ..services import disk, reports, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.face_engine import default_threshold, get_engine
@@ -42,6 +42,9 @@ router = APIRouter(prefix="/api", tags=["análises"], dependencies=[Depends(auth
 @router.post("/cases/{case_id}/jobs", response_model=Job, status_code=201)
 def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorDep) -> Job:
     get_case_or_404(session, case_id)
+    if disk.disk_status()["level"] == "critical":
+        disk.check_space(0)
+        raise HTTPException(507, "Disco do servidor quase cheio: liberte espaço antes de iniciar novas análises.")
     params = body.params
     engine = get_engine()
     models = [m.name for m in engine.models()]

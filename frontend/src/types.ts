@@ -367,7 +367,18 @@ export interface ActivityUpload {
   created_by: string;
 }
 
+export interface DiskStatus {
+  level: "ok" | "warning" | "critical";
+  percent: number;
+  free: number;
+  total?: number; // só para administradores
+  used?: number;
+  warn_percent?: number;
+  critical_percent?: number;
+}
+
 export interface Activity {
+  disk?: DiskStatus;
   jobs: ActivityJob[];
   conversions: ActivityConversion[];
   uploads: ActivityUpload[];

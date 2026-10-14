@@ -43,6 +43,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setattr(auth, "hasher", PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1))
     monkeypatch.setattr(auth, "_DUMMY_HASH", auth.hasher.hash("dummy-password-x"))
     monkeypatch.setitem(app.main._setup_state, "done", False)
+    monkeypatch.setitem(disk._last_alert, "level", "ok")
     face_engine.set_engine(FakeEngine())
     with TestClient(app.main.app) as c:
         create_user(ADMIN, ADMIN_PASSWORD, role="admin", must_change=False)

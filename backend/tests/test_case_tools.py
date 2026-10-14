@@ -66,7 +66,9 @@ def test_activity_lists_running_tasks_for_accessible_cases(client):
     assert [(u["filename"], u["received_bytes"]) for u in act["uploads"]] == [("grande.mp4", 10)]
     # Outro analista sem acesso ao caso não vê nada; anónimo → 401
     other = new_client("outro.analista", PW)
-    assert other.get("/api/activity").json() == {"jobs": [], "conversions": [], "uploads": []}
+    act = other.get("/api/activity").json()
+    assert (act["jobs"], act["conversions"], act["uploads"]) == ([], [], [])
+    assert set(act["disk"]) == {"level", "percent", "free"}  # analista: só o essencial
     from fastapi.testclient import TestClient
 
     import app.main
@@ -125,3 +127,45 @@ def test_validated_frames_zip(client, tmp_path):
     rc = client.get(f"/api/cases/{case['id']}/frames/validated.zip")
     assert rc.status_code == 200
     assert sorted(n for n in zipfile.ZipFile(io.BytesIO(rc.content)).namelist() if n.endswith(".png")) == sorted(pngs)
+
+
+def _fake_usage(monkeypatch, total_gb: float, free_gb: float):
+    from collections import namedtuple
+
+    from app.services import disk
+
+    gb = 1024**3
+    usage = namedtuple("usage", "total used free")(int(total_gb * gb), int((total_gb - free_gb) * gb),
+                                                   int(free_gb * gb))
+    monkeypatch.setattr(disk.shutil, "disk_usage", lambda _p: usage)
+
+
+def test_disk_alert_levels_and_guards(client, monkeypatch):
+    from app.services import disk
+
+    _fake_usage(monkeypatch, 100, 50)
+    assert disk.disk_status()["level"] == "ok"
+    _fake_usage(monkeypatch, 100, 15)
+    assert disk.disk_status()["level"] == "warning"
+    _fake_usage(monkeypatch, 100, 5)
+    st = disk.disk_status()
+    assert st["level"] == "critical" and st["percent"] == 95.0
+    _fake_usage(monkeypatch, 10000, 1)  # 99,99 % livre em percentagem não importa: menos de 2 GB livres
+    assert disk.disk_status()["level"] == "critical"
+
+    # Alerta visível na faixa e registado (uma vez) na auditoria do sistema
+    _fake_usage(monkeypatch, 100, 15)
+    assert client.get("/api/activity").json()["disk"]["level"] == "warning"
+    client.get("/api/activity")
+    alerts = [e for e in client.get("/api/audit/system").json() if e["action"] == "system.disk_alert"]
+    assert [a["details"]["level"] for a in alerts] == ["warning"]
+
+    # Upload maior do que o espaço livre (menos a reserva) é recusado; análise com disco crítico também
+    case = client.post("/api/cases", json={"name": "Disco"}).json()
+    r = client.post(f"/api/cases/{case['id']}/uploads",
+                    json={"kind": "video", "filename": "grande.mp4", "size_bytes": 14 * 1024**3})
+    assert r.status_code == 507 and "Espaço em disco insuficiente" in r.json()["detail"]
+    assert client.post(f"/api/cases/{case['id']}/uploads",
+                       json={"kind": "video", "filename": "ok.mp4", "size_bytes": 1024}).status_code == 201
+    _fake_usage(monkeypatch, 100, 5)
+    assert client.post(f"/api/cases/{case['id']}/jobs", json={"params": {}}).status_code == 507

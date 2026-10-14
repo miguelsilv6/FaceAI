@@ -1,11 +1,12 @@
-import { Anchor, Box, Group, Paper, Popover, Progress, Stack, Text, ThemeIcon, Tooltip, UnstyledButton } from "@mantine/core";
+import { Alert, Anchor, Box, Group, Paper, Popover, Progress, Stack, Text, ThemeIcon, Tooltip, UnstyledButton } from "@mantine/core";
 import { notifications } from "@mantine/notifications";
-import { IconActivity, IconCloudUpload, IconMovie } from "@tabler/icons-react";
+import { IconActivity, IconAlertTriangle, IconCloudUpload, IconMovie } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
 import { api, formatBytes, formatDuration } from "../api";
-import type { Activity } from "../types";
+import { useAuth } from "../auth";
+import type { Activity, DiskStatus } from "../types";
 
 const POLL_MS = 4000;
 const VISIBLE = 3;
@@ -123,14 +124,18 @@ export default function ActivityBar() {
   }, []);
 
   const list = activity ? items(activity) : [];
-  if (!list.length) return null;
+  const disk = activity?.disk;
+  const diskAlert = disk && disk.level !== "ok" ? <DiskAlert disk={disk} /> : null;
+  if (!list.length && !diskAlert) return null;
   const rest = list.slice(VISIBLE);
   return (
     // Faixa colada ao cabeçalho, de largura total (anula o padding do AppShell.Main).
+    <Box mx="calc(var(--mantine-spacing-md) * -1)" mt="calc(var(--mantine-spacing-md) * -1)" mb="md"
+      style={{ position: "sticky", top: "var(--app-shell-header-height, 60px)", zIndex: 150 }}>
+    {diskAlert}
+    {list.length > 0 && (
     <Paper withBorder radius={0} px="md" py={6} role="status" aria-label="Tarefas em curso"
-      mx="calc(var(--mantine-spacing-md) * -1)" mt="calc(var(--mantine-spacing-md) * -1)" mb="md"
-      style={{ borderLeft: 0, borderRight: 0, borderTop: 0, position: "sticky",
-        top: "var(--app-shell-header-height, 60px)", zIndex: 150 }} bg="var(--mantine-color-body)">
+      style={{ borderLeft: 0, borderRight: 0, borderTop: 0 }} bg="var(--mantine-color-body)">
       <Group gap="lg" wrap="wrap">
         <Text size="xs" fw={700} c="dimmed" tt="uppercase">Em curso ({list.length})</Text>
         {list.slice(0, VISIBLE).map((it) => <Row key={it.key} item={it} compact />)}
@@ -148,5 +153,24 @@ export default function ActivityBar() {
         )}
       </Group>
     </Paper>
+    )}
+    </Box>
+  );
+}
+
+function DiskAlert({ disk }: { disk: DiskStatus }) {
+  const { isAdmin } = useAuth();
+  const critical = disk.level === "critical";
+  return (
+    <Alert color={critical ? "red" : "yellow"} radius={0} py={6} icon={<IconAlertTriangle size={16} />}
+      role="alert" title={critical ? "Disco do servidor quase cheio" : "Pouco espaço em disco no servidor"}>
+      <Text size="sm">
+        Ocupado {disk.percent.toFixed(1)}% · livres {formatBytes(disk.free)}
+        {isAdmin && disk.total ? ` de ${formatBytes(disk.total)}` : ""}.{" "}
+        {critical ? "Novos uploads e análises podem ser recusados. " : ""}
+        {isAdmin ? "Liberte espaço eliminando análises ou casos antigos (ver a coluna \"Espaço\" na lista de casos)."
+          : "Avise o administrador."}
+      </Text>
+    </Alert>
   );
 }

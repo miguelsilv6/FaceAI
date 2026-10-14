@@ -11,7 +11,8 @@ from pathlib import Path
 from fastapi import APIRouter
 from sqlmodel import select
 
-from ..models import Case, Job, JobStatus, Upload, Video
+from ..models import Case, Job, JobStatus, Upload, UserRole, Video
+from ..services import disk
 from ..services.jobs import queue_positions
 from ..services.transcode import PENDING, RUNNING
 from .deps import CurrentUser, SessionDep, accessible_case_ids
@@ -54,7 +55,10 @@ def activity(session: SessionDep, user: CurrentUser) -> dict:
         uploads.append({"id": u.id, "case_id": u.case_id, "case_name": case_name(u.case_id), "kind": u.kind,
                         "filename": u.filename, "received_bytes": received, "size_bytes": u.size_bytes,
                         "created_by": u.created_by})
+    st = disk.disk_status()
+    disk.note_alert(session, st)
     return {
+        "disk": st if user.role == UserRole.admin else {k: st[k] for k in ("level", "percent", "free")},
         "jobs": [{"id": j.id, "case_id": j.case_id, "case_name": case_name(j.case_id), "status": j.status,
                   "mode": (j.params or {}).get("mode", "search"), "progress": j.progress, "eta_s": j.eta_s,
                   "message": j.message, "created_by": j.created_by, "started_at": j.started_at,
