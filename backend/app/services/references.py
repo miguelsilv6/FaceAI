@@ -67,18 +67,52 @@ def reference_embeddings(
     return used, matrix, warnings
 
 
-def person_groups(refs: list[ReferenceImage]) -> list[dict]:
-    """Agrupa as referências por pessoa (rótulo), pela ordem em que os rótulos aparecem.
-
-    [{"id": 1, "label": "Suspeito A", "reference_ids": [3, 5]}, ...]. Sem rótulos: uma só pessoa."""
-    order: list[str] = []
-    groups: dict[str, list[int]] = {}
+def person_groups(refs: list[ReferenceImage], names: dict[int, str] | None = None) -> list[dict]:
+    """Agrupa as referências pela pessoa do caso (CasePerson), pela ordem em que aparecem; as fotos soltas formam
+    um grupo próprio. [{"id": 1, "label": "Suspeito A", "case_person_id": 3, "reference_ids": [3, 5]}, ...]."""
+    names = names or {}
+    order: list[int | None] = []
+    groups: dict[int | None, list[int]] = {}
     for r in refs:
-        label = (r.person_label or "").strip()
-        if label not in groups:
-            order.append(label)
-            groups[label] = []
-        groups[label].append(r.id)
+        key = r.case_person_id
+        if key not in groups:
+            order.append(key)
+            groups[key] = []
+        groups[key].append(r.id)
     single = len(order) == 1
-    return [{"id": i + 1, "label": lbl or ("Pessoa" if single else "Sem rótulo"), "reference_ids": groups[lbl]}
-            for i, lbl in enumerate(order)]
+    out = []
+    for i, key in enumerate(order):
+        if key is None:
+            label = "Pessoa" if single else "Fotos soltas"
+        else:
+            label = names.get(key) or f"Pessoa {key}"
+        out.append({"id": i + 1, "label": label, "case_person_id": key, "reference_ids": groups[key]})
+    return out
+
+
+def migrate_person_labels(s) -> int:
+    """Versão anterior: o rótulo de texto (ReferenceImage.person_label) definia a pessoa. Converte cada rótulo
+    distinto, por caso, numa CasePerson (uma vez; o rótulo fica como estava). Devolve o n.º de pessoas criadas."""
+    from sqlmodel import select
+
+    from ..models import CasePerson
+
+    created = 0
+    pending = s.exec(select(ReferenceImage).where(ReferenceImage.case_person_id == None,  # noqa: E711
+                                                  ReferenceImage.person_label != "")).all()
+    by_key: dict[tuple[int, str], CasePerson] = {}
+    for r in pending:
+        key = (r.case_id, r.person_label.strip())
+        if key not in by_key:
+            existing = s.exec(select(CasePerson).where(CasePerson.case_id == r.case_id,
+                                                       CasePerson.name == key[1])).first()
+            if existing is None:
+                existing = CasePerson(case_id=r.case_id, name=key[1], created_by="migração")
+                s.add(existing)
+                s.flush()
+                created += 1
+            by_key[key] = existing
+        r.case_person_id = by_key[key].id
+        s.add(r)
+    s.commit()
+    return created

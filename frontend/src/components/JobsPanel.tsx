@@ -8,7 +8,7 @@ import { useNavigate } from "react-router-dom";
 
 import { api, formatDate, formatEta } from "../api";
 import { notifyError, notifyOk } from "../notify";
-import type { Job, JobMode, JobParams, ReferenceImage, SystemInfo, Video } from "../types";
+import type { CasePerson, Job, JobMode, JobParams, ReferenceImage, SystemInfo, Video } from "../types";
 import DeleteJobModal from "./DeleteJobModal";
 import JobStatusBadge from "./JobStatusBadge";
 
@@ -17,10 +17,11 @@ interface Props {
   jobs: Job[];
   videos: Video[];
   references: ReferenceImage[];
+  persons: CasePerson[];
   onChange: () => void;
 }
 
-export default function JobsPanel({ caseId, jobs, videos, references, onChange }: Props) {
+export default function JobsPanel({ caseId, jobs, videos, references, persons, onChange }: Props) {
   const navigate = useNavigate();
   const downloadValidated = async () => {
     try {
@@ -108,10 +109,9 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                 value={videoIds} onChange={setVideoIds} placeholder="Selecione os vídeos" />
               {!discover && (
                 <MultiSelect label="Imagens de referência (válidas)"
-                  data={validRefs.map((r) => ({ value: String(r.id),
-                    label: `#${r.id} ${r.filename}${r.person_label ? ` · ${r.person_label}` : ""}` }))}
+                  data={refOptions(validRefs, persons)}
                   value={refIds} onChange={setRefIds}
-                  description={personsSummary(validRefs.filter((r) => refIds.includes(String(r.id))))}
+                  description={personsSummary(validRefs.filter((r) => refIds.includes(String(r.id))), persons)}
                   placeholder={validRefs.length ? "Selecione as referências" : "Sem amostras válidas — use o modo de descoberta"} />
               )}
             </SimpleGrid>
@@ -311,10 +311,24 @@ function QueueControls({ job, onChange }: { job: Job; onChange: () => void }) {
   );
 }
 
-/** "2 pessoas na mesma passagem: Suspeito A (3) · Suspeito B (1)" (rótulos das referências escolhidas). */
-function personsSummary(refs: ReferenceImage[]): string | undefined {
+/** Referências agrupadas por pessoa do caso (as fotos soltas num grupo próprio). */
+function refOptions(refs: ReferenceImage[], persons: CasePerson[]) {
+  const groups = persons.map((p) => ({
+    group: p.name,
+    items: refs.filter((r) => r.case_person_id === p.id).map((r) => ({ value: String(r.id), label: `${p.name} · #${r.id} ${r.filename}` })),
+  }));
+  const loose = refs.filter((r) => r.case_person_id == null).map((r) => ({ value: String(r.id), label: `#${r.id} ${r.filename}` }));
+  return [...groups, ...(loose.length ? [{ group: persons.length ? "Fotos soltas" : "Fotos", items: loose }] : [])]
+    .filter((g) => g.items.length);
+}
+
+/** "2 pessoas na mesma passagem: Suspeito A (3) · Suspeito B (1)". */
+function personsSummary(refs: ReferenceImage[], persons: CasePerson[]): string | undefined {
   const groups = new Map<string, number>();
-  for (const r of refs) groups.set(r.person_label || "sem rótulo", (groups.get(r.person_label || "sem rótulo") ?? 0) + 1);
+  for (const r of refs) {
+    const name = persons.find((p) => p.id === r.case_person_id)?.name ?? "fotos soltas";
+    groups.set(name, (groups.get(name) ?? 0) + 1);
+  }
   if (groups.size < 2) return undefined;
   return `${groups.size} pessoas na mesma passagem: ${[...groups].map(([l, n]) => `${l} (${n})`).join(" · ")}`;
 }

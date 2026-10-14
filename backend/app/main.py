@@ -27,6 +27,7 @@ from .services import auth
 from .services.audit import request_ip
 from .services.face_engine import preload_models
 from .services.jobs import recover_interrupted_jobs, runner
+from .services.references import migrate_person_labels
 from .services.transcode import resume_pending_copies
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -39,6 +40,8 @@ for _noisy in ("weasyprint", "fontTools"):
 async def lifespan(_: FastAPI):
     settings.ensure_dirs()
     init_db()
+    with Session(get_engine()) as s:
+        migrate_person_labels(s)
     recover_interrupted_jobs()
     cleanup_stale_uploads()
     resume_pending_copies()

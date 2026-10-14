@@ -3,7 +3,7 @@ import {
   SimpleGrid, Slider, Stack, Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconAlertTriangle, IconChevronLeft, IconChevronRight, IconDownload, IconInfoCircle, IconPhoto, IconPlayerStop, IconTrash, IconUserPlus,
+  IconAlertTriangle, IconChevronLeft, IconChevronRight, IconDownload, IconInfoCircle, IconPhoto, IconPlayerStop, IconTrash,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -13,6 +13,8 @@ import DeleteJobModal from "../components/DeleteJobModal";
 import BodyTrackCard from "../components/BodyTrackCard";
 import DetectionCard from "../components/DetectionCard";
 import EnhancePanel from "../components/EnhancePanel";
+import NewPersonModal from "../components/NewPersonModal";
+import PersonAssignMenu from "../components/PersonAssignMenu";
 import PersonCard from "../components/PersonCard";
 import SimilarModal, { type SimilarQuery } from "../components/SimilarModal";
 import TrackCard from "../components/TrackCard";
@@ -20,7 +22,9 @@ import JobStatusBadge from "../components/JobStatusBadge";
 import Timeline from "../components/Timeline";
 import { notifyError, notifyOk } from "../notify";
 import { personColor } from "../personColors";
-import type { Detection, Job, Person, ReviewStatus, Segment, Track, Video, VideoProbe } from "../types";
+import type {
+  CasePerson, Detection, Job, Person, ReferenceImage, ReviewStatus, Segment, Track, Video, VideoProbe,
+} from "../types";
 
 const EXPORTS = [
   ["pdf", "Relatório PDF"],
@@ -55,6 +59,10 @@ export default function Results() {
   const [order, setOrder] = useState<"time" | "score" | "quality">("time");
   const [frameDet, setFrameDet] = useState<Detection | null>(null);
   const [similar, setSimilar] = useState<SimilarQuery | null>(null);
+  // Pessoas do caso e fotos de referência criadas a partir de deteções ("Adicionar esta face à pessoa").
+  const [casePersons, setCasePersons] = useState<CasePerson[]>([]);
+  const [caseRefs, setCaseRefs] = useState<ReferenceImage[]>([]);
+  const [newPersonFor, setNewPersonFor] = useState<number | null>(null);
   const [frameVariant, setFrameVariant] = useState<"annotated" | "original" | "enhanced">("annotated");
   const [deleting, setDeleting] = useState(false);
   // Erro de reprodução no browser (por vídeo), com o diagnóstico mostrado ao analista.
@@ -280,16 +288,46 @@ export default function Results() {
     }
   };
 
-  const addAsReference = async (detectionId: number | null) => {
-    if (detectionId == null) return;
+  const loadCasePeople = useCallback((caseId: number) => {
+    Promise.all([api.casePersons(caseId), api.references(caseId)])
+      .then(([p, r]) => { setCasePersons(p); setCaseRefs(r); }).catch(() => undefined);
+  }, []);
+  useEffect(() => {
+    if (job?.case_id != null) loadCasePeople(job.case_id);
+  }, [job?.case_id, loadCasePeople]);
+
+  const addToPerson = async (detectionId: number | null, personId: number | "new" | null = null) => {
+    if (detectionId == null || !job) return;
+    if (personId === "new") {
+      setNewPersonFor(detectionId);
+      return;
+    }
     try {
-      const ref = await api.detectionAsReference(detectionId);
-      if (ref.valid) notifyOk(`Face adicionada às amostras do caso (${ref.filename}). Pode agora usá-la no modo "Procurar uma pessoa".`);
-      else notifyError(new Error(`A face foi guardada mas não é uma amostra válida: ${ref.message}`));
+      const ref = await api.detectionAsReference(detectionId, personId);
+      const who = casePersons.find((p) => p.id === personId)?.name;
+      if (ref.valid) notifyOk(`Face adicionada ${who ? `às fotos de ${who}` : "às fotos soltas"}. Será usada nas próximas análises.`);
+      else notifyError(new Error(`A face foi guardada mas não é uma foto de referência válida: ${ref.message}`));
+      loadCasePeople(job.case_id);
     } catch (e) {
       notifyError(e);
     }
   };
+  const addAsReference = (detectionId: number | null) => addToPerson(detectionId, null);
+  const removeFromPerson = async (ref: ReferenceImage) => {
+    if (!job) return;
+    try {
+      const r = await api.removeFromPerson(ref.id);
+      notifyOk(r.action === "deleted" ? "Face removida das fotos de referência."
+        : "A face já foi usada numa análise: saiu da pessoa e ficou nas fotos soltas.");
+      loadCasePeople(job.case_id);
+    } catch (e) {
+      notifyError(e);
+    }
+  };
+  const refByDetection = new Map(caseRefs.filter((r) => r.source_detection_id != null).map((r) => [r.source_detection_id!, r]));
+  const assignFor = (detId: number | null | undefined) => (detId == null ? undefined : {
+    persons: casePersons, existing: refByDetection.get(detId), onAdd: addToPerson, onRemove: removeFromPerson,
+  });
 
   const openFrame = (detId: number) => {
     const d = detections.find((x) => x.id === detId) ?? bodyDets.find((x) => x.id === detId);
@@ -607,7 +645,7 @@ export default function Results() {
                 <TrackCard key={t.id} track={t} onSeek={seek} onReview={reviewTrack}
                   realStart={realTime(video, t.start_s)} realEnd={realTime(video, t.end_s)} onOpenFrame={openFrame}
                   personIds={discover ? personIds : undefined} onMove={discover ? moveTrack : undefined}
-                  personLabel={labelOf(t.person_id)}
+                  personLabel={labelOf(t.person_id)} personAssign={assignFor(t.best_detection_id)}
                   onFindSimilar={job.status === "completed" ? (x) => setSimilar({ kind: "track", trackId: x.id }) : undefined}
                   onShowDetections={(x) => { setTrackFilter(x.id); setView("detections"); }} />
               ))}
@@ -619,12 +657,28 @@ export default function Results() {
           <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
             {visible.map((d) => (
               <DetectionCard key={d.id} det={d} onSeek={(x) => seek(x.timestamp_s)} onReview={review} onOpenFrame={setFrameDet}
-                realTime={realTime(video, d.timestamp_s)} personId={personOf(d)} personLabel={labelOf(personOf(d))} />
+                realTime={realTime(video, d.timestamp_s)} personId={personOf(d)} personLabel={labelOf(personOf(d))}
+                personAssign={assignFor(d.id)} />
             ))}
           </SimpleGrid>
         )}
       </Card>
 
+      <NewPersonModal opened={newPersonFor != null} onClose={() => setNewPersonFor(null)}
+        onCreate={async (name) => {
+          if (!job || newPersonFor == null) return;
+          try {
+            const p = await api.createPerson(job.case_id, name);
+            setCasePersons((ps) => [...ps, p]);
+            const det = newPersonFor;
+            setNewPersonFor(null);
+            const ref = await api.detectionAsReference(det, p.id);
+            notifyOk(ref.valid ? `Pessoa "${p.name}" criada com esta face.` : `Pessoa criada, mas a face não é válida: ${ref.message}`);
+            loadCasePeople(job.case_id);
+          } catch (e) {
+            notifyError(e);
+          }
+        }} />
       <SimilarModal query={similar} onClose={() => setSimilar(null)}
         defaultThreshold={Math.min(0.9, Math.max(0.05, Number(job.params.threshold ?? 0.5)))} />
       <DeleteJobModal job={deleting ? job : null} onClose={() => setDeleting(false)}
@@ -659,9 +713,8 @@ export default function Results() {
                   href={api.detectionFrameUrl(frameDet.id, "annotated", true)}>Frame com marcação (JPEG)</Button>
                 <Button component="a" size="xs" leftSection={<IconPhoto size={16} />}
                   href={api.detectionFrameUrl(frameDet.id, "original", true)}>Frame original (PNG)</Button>
-                {discover && (
-                  <Button size="xs" variant="subtle" leftSection={<IconUserPlus size={16} />}
-                    onClick={() => addAsReference(frameDet.id)}>Usar face como amostra</Button>
+                {frameDet.kind !== "body" && (
+                  <PersonAssignMenu detectionId={frameDet.id} compact={false} {...assignFor(frameDet.id)!} />
                 )}
               </Group>
             </Group>

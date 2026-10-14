@@ -27,7 +27,17 @@ class CaseOut(BaseModel):
 
 
 class ReferenceUpdate(BaseModel):
-    person_label: str = Field(max_length=60, description="Pessoa a que a imagem pertence (vazio = sem rótulo)")
+    case_person_id: int | None = Field(description="Pessoa do caso a que a foto pertence (null = foto solta)")
+
+
+class CasePersonCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    notes: str = Field("", max_length=2000)
+
+
+class CasePersonUpdate(BaseModel):
+    name: str | None = Field(None, min_length=1, max_length=80)
+    notes: str | None = Field(None, max_length=2000)
 
 
 class MemberAdd(BaseModel):

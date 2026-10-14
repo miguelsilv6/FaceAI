@@ -1,5 +1,5 @@
 import type {
-  Activity, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
+  Activity, CasePerson, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
 
@@ -213,8 +213,6 @@ export const api = {
   uploadReferences: (caseId: number, files: File[], onProgress?: (f: number) => void) =>
     uploadMany<ReferenceImage>(caseId, "reference", files, onProgress),
   deleteReference: (id: number) => request<void>("DELETE", `/api/references/${id}`),
-  labelReference: (id: number, person_label: string) =>
-    request<ReferenceImage>("PATCH", `/api/references/${id}`, { person_label }),
   referenceImageUrl: (id: number, face = false) => `/api/references/${id}/image${face ? "?face=true" : ""}`,
 
   videos: (caseId: number) => request<Video[]>("GET", `/api/cases/${caseId}/videos`),
@@ -267,7 +265,18 @@ export const api = {
     const base = variant === "original" ? `/api/detections/${id}/frame/original` : `/api/detections/${id}/frame`;
     return download ? `${base}?download=1` : base;
   },
-  detectionAsReference: (id: number) => request<ReferenceImage>("POST", `/api/detections/${id}/as-reference`),
+  detectionAsReference: (id: number, casePersonId?: number | null) =>
+    request<ReferenceImage>("POST", `/api/detections/${id}/as-reference${casePersonId != null ? `?case_person_id=${casePersonId}` : ""}`),
+  casePersons: (caseId: number) => request<CasePerson[]>("GET", `/api/cases/${caseId}/persons`),
+  createPerson: (caseId: number, name: string, notes = "") =>
+    request<CasePerson>("POST", `/api/cases/${caseId}/persons`, { name, notes }),
+  updatePerson: (id: number, body: { name?: string; notes?: string }) =>
+    request<CasePerson>("PATCH", `/api/case-persons/${id}`, body),
+  deletePerson: (id: number) => request<void>("DELETE", `/api/case-persons/${id}`),
+  setReferencePerson: (refId: number, casePersonId: number | null) =>
+    request<ReferenceImage>("PATCH", `/api/references/${refId}`, { case_person_id: casePersonId }),
+  removeFromPerson: (refId: number) =>
+    request<{ action: "deleted" | "detached" }>("POST", `/api/references/${refId}/remove-from-person`),
   persons: (jobId: number) => request<Person[]>("GET", `/api/jobs/${jobId}/persons`),
   reviewPerson: (jobId: number, personId: number, status: ReviewStatus, note = "") =>
     request<Person>("PATCH", `/api/jobs/${jobId}/persons/${personId}/review`, { status, note }),
