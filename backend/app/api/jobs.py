@@ -23,6 +23,7 @@ from ..services.face_engine import default_threshold, get_engine
 from ..services.imageio import read_image, write_jpeg
 from ..services.jobs import job_dir, runner
 from ..services.persons import person_segments, summarize_persons
+from ..services.references import person_groups
 from ..services.video_processor import format_timestamp
 from .cases import register_reference
 from .deps import (
@@ -75,14 +76,19 @@ def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorD
     if not video_ids:
         raise HTTPException(422, "Selecione pelo menos um vídeo do caso.")
     ref_ids: list[int] = []
+    job_params = params.model_dump()
     if not discover:
-        refs = list(session.exec(select(ReferenceImage).where(ReferenceImage.case_id == case_id)))
-        ref_ids = [r.id for r in refs if r.valid and (body.reference_ids is None or r.id in body.reference_ids)]
+        refs = list(session.exec(select(ReferenceImage).where(ReferenceImage.case_id == case_id)
+                                 .order_by(ReferenceImage.id)))
+        chosen = [r for r in refs if r.valid and (body.reference_ids is None or r.id in body.reference_ids)]
+        ref_ids = [r.id for r in chosen]
+        # Várias pessoas na mesma passagem: as referências agrupam-se pelo rótulo de pessoa.
+        job_params["persons"] = person_groups(chosen)
         if not ref_ids:
             raise HTTPException(422, "Não há imagens de referência válidas selecionadas. Sem amostra da pessoa, "
                                      "use o modo \"Descobrir todas as faces\".")
 
-    job = Job(case_id=case_id, params=params.model_dump(), video_ids=video_ids, reference_ids=ref_ids,
+    job = Job(case_id=case_id, params=job_params, video_ids=video_ids, reference_ids=ref_ids,
               created_by=actor)
     session.add(job)
     session.commit()
@@ -209,8 +215,15 @@ def list_segments(job_id: int, session: SessionDep, gap_s: float | None = None,
         return person_segments(tracks_, person_id, gap)
     dets = list(session.exec(select(Detection).where(Detection.job_id == job_id)))
     tracks = {t.id: t for t in session.exec(select(Track).where(Track.job_id == job_id))}
-    return reports.match_segments(dets, gap_s if gap_s is not None else job.params.get("segment_gap_s", 2.0),
-                                  tracks)
+    if len(job.params.get("persons") or []) > 1:  # várias pessoas: segmentos de cada uma, com o seu n.º
+        out: list[dict] = []
+        for pid in [p["id"] for p in job.params["persons"]]:
+            if person_id is not None and pid != person_id:
+                continue
+            mine = [d for d in dets if (d.person_id or getattr(tracks.get(d.track_id), "person_id", None)) == pid]
+            out += [{**seg, "person_id": pid} for seg in reports.match_segments(mine, gap, tracks)]
+        return sorted(out, key=lambda x: (x["video_id"], x["start_s"]))
+    return reports.match_segments(dets, gap, tracks)
 
 
 @router.get("/jobs/{job_id}/tracks", response_model=list[Track])

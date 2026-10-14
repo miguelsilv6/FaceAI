@@ -206,6 +206,8 @@ export const api = {
   uploadReferences: (caseId: number, files: File[], onProgress?: (f: number) => void) =>
     uploadMany<ReferenceImage>(caseId, "reference", files, onProgress),
   deleteReference: (id: number) => request<void>("DELETE", `/api/references/${id}`),
+  labelReference: (id: number, person_label: string) =>
+    request<ReferenceImage>("PATCH", `/api/references/${id}`, { person_label }),
   referenceImageUrl: (id: number, face = false) => `/api/references/${id}/image${face ? "?face=true" : ""}`,
 
   videos: (caseId: number) => request<Video[]>("GET", `/api/cases/${caseId}/videos`),

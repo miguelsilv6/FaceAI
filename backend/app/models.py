@@ -49,6 +49,8 @@ class ReferenceImage(SQLModel, table=True):
     valid: bool = False
     message: str = ""
     uploaded_at: datetime = Field(default_factory=utcnow)
+    # Pessoa a que a imagem pertence: referências com o mesmo rótulo são a mesma pessoa (várias pessoas por análise).
+    person_label: str = ""
 
 
 class Video(SQLModel, table=True):
@@ -133,6 +135,8 @@ class Detection(SQLModel, table=True):
     crop_path: str
     frame_path: str
     track_id: int | None = Field(default=None, index=True)
+    # Modo procurar com várias pessoas: n.º da pessoa (job.params["persons"]) mais próxima desta face.
+    person_id: int | None = None
     kind: str = "face"  # "face" | "body" (vestuário: caixa do corpo inteiro, distância ReID às amostras)
     colors: dict[str, Any] | None = Field(default_factory=dict, sa_column=Column(JSON))  # corpo: cores nomeadas
     quality: float = 0.0

@@ -12,7 +12,7 @@ from sqlmodel import select
 
 from ..config import settings
 from ..models import AuditEvent, Case, CaseMember, Detection, Job, JobStatus, ReferenceImage, Track, Upload, User, Video
-from ..schemas import CaseCreate, CaseDelete, CaseOut, CaseUpdate, MemberAdd
+from ..schemas import CaseCreate, CaseDelete, CaseOut, CaseUpdate, MemberAdd, ReferenceUpdate
 from ..services import disk
 from ..services.audit import log_event
 from ..services.face_engine import get_engine
@@ -304,6 +304,23 @@ def reference_image(ref_id: int, session: SessionDep, face: bool = False) -> Fil
         raise HTTPException(404, "Referência não encontrada.")
     path = ref.face_crop_path if face and ref.face_crop_path else ref.stored_path
     return FileResponse(path)
+
+
+@router.patch("/references/{ref_id}", response_model=ReferenceImage)
+def update_reference(ref_id: int, body: ReferenceUpdate, session: SessionDep, actor: ActorDep) -> ReferenceImage:
+    """Rótulo de pessoa da imagem de referência (referências com o mesmo rótulo são a mesma pessoa)."""
+    ref = session.get(ReferenceImage, ref_id)
+    if ref is None:
+        raise HTTPException(404, "Referência não encontrada.")
+    label = " ".join(body.person_label.split())
+    if label != ref.person_label:
+        previous, ref.person_label = ref.person_label, label
+        session.add(ref)
+        session.commit()
+        session.refresh(ref)
+        log_event(session, "reference.person_labeled", case_id=ref.case_id, actor=actor,
+                  details={"reference_id": ref.id, "filename": ref.filename, "from": previous, "to": label})
+    return ref
 
 
 @router.delete("/references/{ref_id}", status_code=204)

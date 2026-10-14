@@ -108,8 +108,10 @@ export default function JobsPanel({ caseId, jobs, videos, references, onChange }
                 value={videoIds} onChange={setVideoIds} placeholder="Selecione os vídeos" />
               {!discover && (
                 <MultiSelect label="Imagens de referência (válidas)"
-                  data={validRefs.map((r) => ({ value: String(r.id), label: `#${r.id} ${r.filename}` }))}
+                  data={validRefs.map((r) => ({ value: String(r.id),
+                    label: `#${r.id} ${r.filename}${r.person_label ? ` · ${r.person_label}` : ""}` }))}
                   value={refIds} onChange={setRefIds}
+                  description={personsSummary(validRefs.filter((r) => refIds.includes(String(r.id))))}
                   placeholder={validRefs.length ? "Selecione as referências" : "Sem amostras válidas — use o modo de descoberta"} />
               )}
             </SimpleGrid>
@@ -307,4 +309,12 @@ function QueueControls({ job, onChange }: { job: Job; onChange: () => void }) {
       </Menu.Dropdown>
     </Menu>
   );
+}
+
+/** "2 pessoas na mesma passagem: Suspeito A (3) · Suspeito B (1)" (rótulos das referências escolhidas). */
+function personsSummary(refs: ReferenceImage[]): string | undefined {
+  const groups = new Map<string, number>();
+  for (const r of refs) groups.set(r.person_label || "sem rótulo", (groups.get(r.person_label || "sem rótulo") ?? 0) + 1);
+  if (groups.size < 2) return undefined;
+  return `${groups.size} pessoas na mesma passagem: ${[...groups].map(([l, n]) => `${l} (${n})`).join(" · ")}`;
 }

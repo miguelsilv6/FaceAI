@@ -19,6 +19,7 @@ export interface ReferenceImage {
   valid: boolean;
   message: string;
   uploaded_at: string;
+  person_label: string;
 }
 
 export interface Video {
@@ -85,8 +86,15 @@ export interface OcrTest {
 
 export type JobMode = "match" | "discover";
 
+export interface SearchedPerson {
+  id: number;
+  label: string;
+  reference_ids: number[];
+}
+
 export interface JobParams {
   mode: JobMode;
+  persons?: SearchedPerson[]; // modo procurar: pessoas (grupos de referências)
   model: string | null;
   detector: string | null;
   sample_fps: number;
@@ -163,6 +171,7 @@ export type Evidence = "face" | "vestuário" | "face+vestuário";
 export interface Detection {
   id: number;
   job_id: number;
+  person_id: number | null; // várias pessoas por análise (modo procurar)
   video_id: number;
   reference_id: number | null;
   frame_index: number;

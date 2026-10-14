@@ -31,9 +31,9 @@ _TEMPLATES.filters["ts"] = format_timestamp
 CSV_FIELDS = [
     "detection_id", "video_id", "video_filename", "frame_index", "timestamp_s", "timestamp",
     "real_time", "kind", "evidence", "x", "y", "w", "h", "face_confidence", "reference_id", "reference_filename",
-    "distance", "similarity", "is_match", "track_id", "track_is_match", "person_id", "quality", "sharpness",
-    "size_score", "frontal", "colors", "review_status", "reviewed_by", "reviewed_at", "review_note", "crop_file",
-    "frame_file",
+    "distance", "similarity", "is_match", "track_id", "track_is_match", "person_id", "person_label", "quality",
+    "sharpness", "size_score", "frontal", "colors", "review_status", "reviewed_by", "reviewed_at", "review_note",
+    "crop_file", "frame_file",
 ]
 
 
@@ -126,6 +126,18 @@ def effective_match(d: Detection, data: dict[str, Any]) -> bool:
     return d.is_match or bool(t and t.is_match)
 
 
+def _person_of(d: Detection, t) -> int | None:
+    return d.person_id or (t.person_id if t is not None else None)
+
+
+def person_label(job, person_id: int | None) -> str:
+    """Nome da pessoa procurada (várias pessoas por análise); vazio no modo descoberta ou com uma só pessoa."""
+    if person_id is None or is_discover(job):
+        return ""
+    persons = (job.params or {}).get("persons") or []
+    return next((p["label"] for p in persons if p["id"] == person_id), "") if len(persons) > 1 else ""
+
+
 def detection_row(d: Detection, data: dict[str, Any]) -> dict[str, Any]:
     v, r = data["videos"].get(d.video_id), data["references"].get(d.reference_id)
     t = data.get("tracks", {}).get(d.track_id) if d.track_id is not None else None
@@ -138,7 +150,8 @@ def detection_row(d: Detection, data: dict[str, Any]) -> dict[str, Any]:
         "reference_id": d.reference_id, "reference_filename": r.filename if r else "",
         "distance": d.distance, "similarity": d.similarity, "is_match": d.is_match,
         "track_id": d.track_id if d.track_id is not None else "",
-        "track_is_match": bool(t and t.is_match), "person_id": t.person_id if t and t.person_id else "",
+        "track_is_match": bool(t and t.is_match),
+        "person_id": _person_of(d, t) or "", "person_label": person_label(data["job"], _person_of(d, t)),
         "quality": d.quality, "sharpness": d.sharpness,
         "size_score": d.size_score, "frontal": "" if d.frontal is None else d.frontal,
         "colors": "; ".join(f"{k}: {v}" for k, v in (d.colors or {}).items()),

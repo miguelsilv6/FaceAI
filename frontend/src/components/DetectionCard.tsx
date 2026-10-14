@@ -2,6 +2,7 @@ import { ActionIcon, Badge, Card, Group, Image, Stack, Text, Tooltip } from "@ma
 import { IconCheck, IconPhotoSearch, IconX } from "@tabler/icons-react";
 
 import { api, formatTime } from "../api";
+import { personColor } from "../personColors";
 import QualityBadge from "./QualityBadge";
 import type { Detection, ReviewStatus } from "../types";
 
@@ -12,6 +13,8 @@ interface Props {
   onOpenFrame: (det: Detection) => void;
   realTime?: string;
   personId?: number | null;
+  /** Várias pessoas procuradas: nome da pessoa mais próxima desta face. */
+  personLabel?: string;
 }
 
 const REVIEW: Record<ReviewStatus, [string, string]> = {
@@ -20,7 +23,7 @@ const REVIEW: Record<ReviewStatus, [string, string]> = {
   rejected: ["Rejeitada", "red"],
 };
 
-export default function DetectionCard({ det, onSeek, onReview, onOpenFrame, realTime, personId }: Props) {
+export default function DetectionCard({ det, onSeek, onReview, onOpenFrame, realTime, personId, personLabel }: Props) {
   const [label, color] = REVIEW[det.review_status];
   return (
     <Card withBorder padding="xs" style={{ opacity: det.review_status === "rejected" ? 0.55 : 1 }}>
@@ -40,9 +43,12 @@ export default function DetectionCard({ det, onSeek, onReview, onOpenFrame, real
           {det.reference_id == null ? (
             <Badge color="blue" variant="filled" size="sm" style={{ flexShrink: 0 }}>{personId != null ? `P#${personId}` : "—"}</Badge>
           ) : (
-            <Badge color={det.is_match ? "red" : "orange"} variant="filled" size="sm">
-              {(det.similarity * 100).toFixed(1)}%
-            </Badge>
+            <Group gap={4} wrap="nowrap">
+              {personLabel && <Badge color={personColor(personId)} variant="light" size="sm" maw={110}>{personLabel}</Badge>}
+              <Badge color={det.is_match ? "red" : "orange"} variant="filled" size="sm">
+                {(det.similarity * 100).toFixed(1)}%
+              </Badge>
+            </Group>
           )}
         </Group>
         {realTime && <Text size="xs" c="dimmed" ff="monospace">{realTime.slice(0, 10)} · vídeo {formatTime(det.timestamp_s)}</Text>}

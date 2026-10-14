@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Alert, Anchor, Badge, Breadcrumbs, Button, Card, Group, Image, Menu, Modal, Progress, SegmentedControl, Select,
+  ActionIcon, Alert, Anchor, Badge, Breadcrumbs, Button, Card, Chip, Group, Image, Menu, Modal, Progress, SegmentedControl, Select,
   SimpleGrid, Slider, Stack, Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
 import {
@@ -17,6 +17,7 @@ import TrackCard from "../components/TrackCard";
 import JobStatusBadge from "../components/JobStatusBadge";
 import Timeline from "../components/Timeline";
 import { notifyError, notifyOk } from "../notify";
+import { personColor } from "../personColors";
 import type { Detection, Job, Person, ReviewStatus, Segment, Track, Video, VideoProbe } from "../types";
 
 const EXPORTS = [
@@ -160,7 +161,11 @@ export default function Results() {
   };
   const discover = job?.params.mode === "discover";
   const trackById = useMemo(() => new Map(tracks.map((t) => [t.id, t])), [tracks]);
-  const personOf = (d: Detection) => (d.track_id != null ? trackById.get(d.track_id)?.person_id ?? null : null);
+  // Modo procurar com várias pessoas: n.º e nome de cada uma (job.params.persons).
+  const searched = !discover && (job?.params.persons?.length ?? 0) > 1 ? job!.params.persons! : [];
+  const labelOf = (pid: number | null | undefined) => searched.find((p) => p.id === pid)?.label;
+  const personOf = (d: Detection) => d.person_id
+    ?? (d.track_id != null ? trackById.get(d.track_id)?.person_id ?? null : null);
   const inPerson = (d: Detection) => personFilter == null || personOf(d) === personFilter;
   // Uma deteção conta como correspondência se estiver abaixo do limiar ou pertencer a um track com correspondência.
   const isEffectiveMatch = (d: Detection) => d.is_match || (d.track_id != null && !!trackById.get(d.track_id)?.is_match);
@@ -168,7 +173,7 @@ export default function Results() {
   const visible = useMemo(() => {
     const list = videoDets.filter((d) => (trackFilter == null || d.track_id === trackFilter) && (discover
       ? inPerson(d)
-      : (showCandidates || trackFilter != null || isEffectiveMatch(d)) && d.similarity >= minSim));
+      : (showCandidates || trackFilter != null || isEffectiveMatch(d)) && d.similarity >= minSim && inPerson(d)));
     if (order === "score") return [...list].sort((a, b) => b.similarity - a.similarity);
     if (order === "quality") return [...list].sort((a, b) => b.quality - a.quality);
     return list;
@@ -176,7 +181,8 @@ export default function Results() {
   const visibleTracks = useMemo(() => {
     const list = tracks.filter((t) => t.video_id === videoId && (discover
       ? personFilter == null || t.person_id === personFilter
-      : (showCandidates || t.is_match) && 1 - t.track_distance >= minSim));
+      : (showCandidates || t.is_match) && 1 - t.track_distance >= minSim
+        && (personFilter == null || t.person_id === personFilter)));
     if (order === "score") return [...list].sort((a, b) => (discover ? b.n_faces - a.n_faces : a.track_distance - b.track_distance));
     if (order === "quality") return [...list].sort((a, b) => b.best_quality - a.best_quality);
     return list;
@@ -501,6 +507,17 @@ export default function Results() {
                   ...(clothing ? [{ value: "clothing", label: `Vestuário (${bodyTracks.filter((t) => t.evidence === "vestuário").length})` }] : [])]} />
             )}
             {!showTracks && !showPersons && view !== "clothing" && <Text fw={600}>{discover ? "Faces" : "Deteções"} ({visible.length})</Text>}
+            {searched.length > 0 && view !== "clothing" && (
+              <Chip.Group multiple={false} value={personFilter == null ? "all" : String(personFilter)}
+                onChange={(v) => setPersonFilter(v === "all" ? null : Number(v))}>
+                <Group gap={4}>
+                  <Chip size="xs" value="all">Todas as pessoas</Chip>
+                  {searched.map((p) => (
+                    <Chip key={p.id} size="xs" value={String(p.id)} color={personColor(p.id)}>{p.label}</Chip>
+                  ))}
+                </Group>
+              </Chip.Group>
+            )}
             {discover && personFilter != null && !showPersons && (
               <Button size="compact-xs" variant="light" onClick={() => setPersonFilter(null)}>
                 Pessoa #{personFilter} · mostrar todas
@@ -573,6 +590,7 @@ export default function Results() {
                 <TrackCard key={t.id} track={t} onSeek={seek} onReview={reviewTrack}
                   realStart={realTime(video, t.start_s)} realEnd={realTime(video, t.end_s)} onOpenFrame={openFrame}
                   personIds={discover ? personIds : undefined} onMove={discover ? moveTrack : undefined}
+                  personLabel={labelOf(t.person_id)}
                   onShowDetections={(x) => { setTrackFilter(x.id); setView("detections"); }} />
               ))}
             </SimpleGrid>
@@ -583,7 +601,7 @@ export default function Results() {
           <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
             {visible.map((d) => (
               <DetectionCard key={d.id} det={d} onSeek={(x) => seek(x.timestamp_s)} onReview={review} onOpenFrame={setFrameDet}
-                realTime={realTime(video, d.timestamp_s)} personId={personOf(d)} />
+                realTime={realTime(video, d.timestamp_s)} personId={personOf(d)} personLabel={labelOf(personOf(d))} />
             ))}
           </SimpleGrid>
         )}

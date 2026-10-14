@@ -65,3 +65,20 @@ def reference_embeddings(
         vectors.append(face.embedding)
     matrix = np.stack(vectors) if vectors else np.zeros((0, 0), dtype=np.float32)
     return used, matrix, warnings
+
+
+def person_groups(refs: list[ReferenceImage]) -> list[dict]:
+    """Agrupa as referências por pessoa (rótulo), pela ordem em que os rótulos aparecem.
+
+    [{"id": 1, "label": "Suspeito A", "reference_ids": [3, 5]}, ...]. Sem rótulos: uma só pessoa."""
+    order: list[str] = []
+    groups: dict[str, list[int]] = {}
+    for r in refs:
+        label = (r.person_label or "").strip()
+        if label not in groups:
+            order.append(label)
+            groups[label] = []
+        groups[label].append(r.id)
+    single = len(order) == 1
+    return [{"id": i + 1, "label": lbl or ("Pessoa" if single else "Sem rótulo"), "reference_ids": groups[lbl]}
+            for i, lbl in enumerate(order)]

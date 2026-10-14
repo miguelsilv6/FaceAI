@@ -2,6 +2,7 @@ import { ActionIcon, Badge, Button, Card, Group, Image, Menu, Stack, Text, Toolt
 import { IconCheck, IconPhotoSearch, IconUserShare, IconX } from "@tabler/icons-react";
 
 import { api, formatTime } from "../api";
+import { personColor } from "../personColors";
 import type { ReviewStatus, Track } from "../types";
 import QualityBadge from "./QualityBadge";
 
@@ -16,6 +17,8 @@ interface Props {
   /** Modo descoberta: pessoas para onde o track pode ser movido. */
   personIds?: number[];
   onMove?: (track: Track, personId: number | null) => void;
+  /** Várias pessoas procuradas (modo procurar): nome da pessoa do track. */
+  personLabel?: string;
 }
 
 const REVIEW: Record<ReviewStatus, [string, string]> = {
@@ -26,7 +29,7 @@ const REVIEW: Record<ReviewStatus, [string, string]> = {
 
 /** Um track = a mesma face em vários frames. A revisão aplica-se a todas as deteções do track. */
 export default function TrackCard({ track, onSeek, onReview, onShowDetections, realStart, realEnd, onOpenFrame,
-  personIds, onMove }: Props) {
+  personIds, onMove, personLabel }: Props) {
   const [label, color] = REVIEW[track.review_status];
   const sim = 1 - track.track_distance;
   return (
@@ -44,7 +47,14 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
       <Stack gap={4} mt={6}>
         <Group justify="space-between" wrap="nowrap">
           <Text size="sm" fw={600}>Track #{track.id}</Text>
-          {track.person_id != null ? (
+          {personLabel ? (
+            <Group gap={4} wrap="nowrap">
+              <Badge color={personColor(track.person_id)} variant="light" size="sm" maw={110}>{personLabel}</Badge>
+              <Tooltip label="Similaridade do track (média das 3 melhores distâncias)">
+                <Badge color={track.is_match ? "red" : "orange"} variant="filled" size="sm">{(sim * 100).toFixed(1)}%</Badge>
+              </Tooltip>
+            </Group>
+          ) : track.person_id != null ? (
             <Tooltip label={`Distância ao centro do grupo da pessoa: ${track.track_distance.toFixed(3)}`}>
               <Badge color="blue" variant="filled" size="sm">Pessoa #{track.person_id}</Badge>
             </Tooltip>

@@ -26,6 +26,10 @@ class CaseOut(BaseModel):
     size_bytes: int
 
 
+class ReferenceUpdate(BaseModel):
+    person_label: str = Field(max_length=60, description="Pessoa a que a imagem pertence (vazio = sem rótulo)")
+
+
 class MemberAdd(BaseModel):
     username: str = Field(min_length=3, max_length=32)
     role: str = Field("member", pattern="^(owner|member)$")
