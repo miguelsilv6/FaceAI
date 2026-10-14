@@ -190,10 +190,70 @@ class Upload(SQLModel, table=True):
     result_id: int | None = None  # Video/ReferenceImage criado na conclusão (torna /complete idempotente)
 
 
+class UserRole(StrEnum):
+    admin = "admin"
+    analyst = "analyst"
+
+
+class User(SQLModel, table=True):
+    """Utilizador local. Password Argon2id; MFA TOTP obrigatório (segredo cifrado com a chave do servidor)."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = Field(index=True, unique=True)
+    display_name: str = ""
+    role: UserRole = UserRole.analyst
+    password_hash: str
+    must_change_password: bool = True
+    password_changed_at: datetime | None = None
+    totp_secret_enc: str | None = None
+    totp_enabled: bool = False
+    totp_last_step: int = 0  # último passo TOTP aceite (anti-replay)
+    recovery_codes: list[str] | None = Field(default_factory=list, sa_column=Column(JSON))  # hashes SHA-256
+    active: bool = True
+    failed_logins: int = 0
+    locked_until: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+    last_login_at: datetime | None = None
+
+
+class UserSession(SQLModel, table=True):
+    """Sessão: o cookie tem um token aleatório; aqui só fica o seu SHA-256."""
+
+    id: str = Field(primary_key=True)  # sha256(token)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    stage: str = "ok"  # "mfa" | "mfa_setup" | "password" (passos do login por concluir) | "ok"
+    csrf_token: str
+    created_at: datetime = Field(default_factory=utcnow)
+    last_seen_at: datetime = Field(default_factory=utcnow)
+    expires_at: datetime
+    ip: str = ""
+    user_agent: str = ""
+
+
+class CaseMember(SQLModel, table=True):
+    """Acesso a um caso (need-to-know). "owner": quem o criou ou a quem foi entregue; gere membros e o caso."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    case_id: int = Field(foreign_key="case.id", index=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    role: str = "member"  # "owner" | "member"
+    added_by: str = ""
+    added_at: datetime = Field(default_factory=utcnow)
+
+
+class LoginAttempt(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    username: str = ""
+    ip: str = Field(default="", index=True)
+    at: datetime = Field(default_factory=utcnow, index=True)
+    success: bool = False
+
+
 class AuditEvent(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     timestamp: datetime = Field(default_factory=utcnow, index=True)
     case_id: int | None = Field(default=None, index=True)
     actor: str = ""
+    ip: str = ""
     action: str
     details: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))

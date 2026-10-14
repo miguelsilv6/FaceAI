@@ -179,7 +179,7 @@ def test_frame_downloads(client, tmp_path):
     assert events[0]["details"]["extraction"] == "seek (cache)" and events[0]["details"]["crop_error"] <= 4
     assert events[0]["details"]["sha256"] == hashlib.sha256(r.content).hexdigest()
     assert events[1]["details"]["sha256"] == hashlib.sha256(r2.content).hexdigest()
-    assert events[0]["actor"] == "Analista Teste"
+    assert events[0]["actor"] == "admin.teste"
     # Sem download, a imagem anotada é servida normalmente e não gera registo.
     assert "content-disposition" not in client.get(f"/api/detections/{det['id']}/frame").headers
 

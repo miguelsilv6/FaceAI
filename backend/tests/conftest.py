@@ -3,7 +3,9 @@ from __future__ import annotations
 import importlib
 import time
 
+import pyotp
 import pytest
+from argon2 import PasswordHasher
 from fastapi.testclient import TestClient
 
 from .fakes import FakeEngine
@@ -28,15 +30,91 @@ def client(tmp_path, monkeypatch):
     for mod in (audit, jobs, reports):
         mod.settings = app.config.settings
     import app.api.cases as cases_api
+    import app.api.deps as deps
     import app.main
+    from app.services import auth
 
     cases_api.settings = app.config.settings
     app.main.settings = app.config.settings
+    deps.settings = app.config.settings
+    auth.settings = app.config.settings
+    auth._server_key.cache_clear()
+    # Argon2 barato nos testes (os parâmetros reais demoram ~0,1 s por verificação).
+    monkeypatch.setattr(auth, "hasher", PasswordHasher(time_cost=1, memory_cost=1024, parallelism=1))
+    monkeypatch.setattr(auth, "_DUMMY_HASH", auth.hasher.hash("dummy-password-x"))
+    monkeypatch.setitem(app.main._setup_state, "done", False)
     face_engine.set_engine(FakeEngine())
-    with TestClient(app.main.app, headers={"X-Analyst": "Analista%20Teste"}) as c:
+    with TestClient(app.main.app) as c:
+        create_user(ADMIN, ADMIN_PASSWORD, role="admin", must_change=False)
+        c.totp = login(c, ADMIN, ADMIN_PASSWORD)
         yield c
     face_engine.set_engine(None)
     app.db._engine = None
+
+
+ADMIN = "admin.teste"
+ADMIN_PASSWORD = "cavalo-bateria-agrafo-correto"
+
+
+def create_user(username: str, password: str, *, role: str = "analyst", must_change: bool = False,
+                display_name: str = "") -> int:
+    """Cria um utilizador diretamente na base de dados (sem MFA configurado)."""
+    from sqlmodel import Session
+
+    import app.db
+    from app.models import User
+    from app.services import auth
+
+    with Session(app.db.get_engine()) as s:
+        u = User(username=username, display_name=display_name or username, role=role,
+                 password_hash=auth.hash_password(password), must_change_password=must_change)
+        s.add(u)
+        s.commit()
+        return u.id
+
+
+def totp_code(totp: pyotp.TOTP, username: str) -> str:
+    """Código TOTP ainda não usado por este utilizador (o servidor recusa passos repetidos)."""
+    from sqlmodel import Session, select
+
+    import app.db
+    from app.models import User
+
+    with Session(app.db.get_engine()) as s:
+        last = s.exec(select(User).where(User.username == username)).one().totp_last_step
+    while True:
+        now = int(time.time() // 30)
+        step = max(now - 1, last + 1)
+        if step <= now + 1:
+            return totp.at(step * 30)
+        time.sleep(1)
+
+
+def login(c: TestClient, username: str, password: str, totp: pyotp.TOTP | None = None) -> pyotp.TOTP:
+    """Login completo (password → MFA, configurando-o se for o primeiro) e cabeçalho CSRF no cliente.
+    Devolve o gerador TOTP do utilizador."""
+    r = c.post("/api/auth/login", json={"username": username, "password": password})
+    assert r.status_code == 200, r.text
+    c.headers["X-CSRF-Token"] = r.json()["csrf_token"]
+    if r.json()["stage"] == "mfa_setup":
+        setup = c.post("/api/auth/mfa/setup").json()
+        totp = pyotp.TOTP(setup["secret"])
+    assert totp is not None
+    r = c.post("/api/auth/mfa/verify", json={"code": totp_code(totp, username)})
+    assert r.status_code == 200, r.text
+    c.headers["X-CSRF-Token"] = r.json()["csrf_token"]
+    c.stage = r.json()["stage"]
+    return totp
+
+
+def new_client(username: str, password: str, *, role: str = "analyst") -> TestClient:
+    """Outro utilizador, com sessão própria (cookies separados) na mesma aplicação."""
+    import app.main
+
+    create_user(username, password, role=role)
+    c = TestClient(app.main.app)
+    c.totp = login(c, username, password)
+    return c
 
 
 def wait_for_job(client, job_id: int, timeout: float = 30.0) -> dict:

@@ -15,6 +15,11 @@ class CaseCreate(BaseModel):
     analyst: str = ""
 
 
+class MemberAdd(BaseModel):
+    username: str = Field(min_length=3, max_length=32)
+    role: str = Field("member", pattern="^(owner|member)$")
+
+
 class CaseUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=200)
     description: str | None = None

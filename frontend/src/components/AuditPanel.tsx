@@ -10,7 +10,7 @@ export default function AuditPanel({ events }: { events: AuditEvent[] }) {
       <Table.ScrollContainer minWidth={800}>
         <Table striped fz="sm">
           <Table.Thead>
-            <Table.Tr><Table.Th>#</Table.Th><Table.Th>Data/hora</Table.Th><Table.Th>Utilizador</Table.Th>
+            <Table.Tr><Table.Th>#</Table.Th><Table.Th>Data/hora</Table.Th><Table.Th>Utilizador</Table.Th><Table.Th>IP</Table.Th>
               <Table.Th>Ação</Table.Th><Table.Th>Detalhes</Table.Th></Table.Tr>
           </Table.Thead>
           <Table.Tbody>
@@ -19,6 +19,7 @@ export default function AuditPanel({ events }: { events: AuditEvent[] }) {
                 <Table.Td>{e.id}</Table.Td>
                 <Table.Td style={{ whiteSpace: "nowrap" }}>{formatDate(e.timestamp)}</Table.Td>
                 <Table.Td>{e.actor}</Table.Td>
+                <Table.Td>{e.ip || "—"}</Table.Td>
                 <Table.Td><Code>{e.action}</Code></Table.Td>
                 <Table.Td><Code block style={{ maxWidth: 520, whiteSpace: "pre-wrap" }}>{JSON.stringify(e.details)}</Code></Table.Td>
               </Table.Tr>

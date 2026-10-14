@@ -248,6 +248,7 @@ export interface AuditEvent {
   timestamp: string;
   case_id: number | null;
   actor: string;
+  ip?: string;
   action: string;
   details: Record<string, unknown>;
 }
@@ -261,4 +262,67 @@ export interface SystemInfo {
   person_detectors: string[];
   defaults: JobParams;
   upload_chunk_bytes: number;
+}
+
+export type UserRole = "admin" | "analyst";
+export type AuthStage = "mfa_setup" | "mfa" | "password" | "ok";
+
+export interface Me {
+  id: number;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  totp_enabled: boolean;
+  must_change_password: boolean;
+  recovery_codes_left: number;
+  last_login_at: string | null;
+  password_changed_at: string | null;
+}
+
+export interface AuthState {
+  stage: AuthStage;
+  csrf_token: string;
+  user: Me;
+  idle_minutes: number;
+  recovery_codes?: string[];
+}
+
+export interface MfaSetup {
+  otpauth_uri: string;
+  qr_svg: string;
+  secret: string;
+}
+
+export interface UserSessionInfo {
+  id: string;
+  current: boolean;
+  created_at: string;
+  last_seen_at: string;
+  expires_at: string;
+  ip: string;
+  user_agent: string;
+}
+
+export interface UserAccount {
+  id: number;
+  username: string;
+  display_name: string;
+  role: UserRole;
+  active: boolean;
+  totp_enabled: boolean;
+  must_change_password: boolean;
+  locked: boolean;
+  created_at: string;
+  last_login_at: string | null;
+  cases: number;
+}
+
+export interface CaseMember {
+  user_id: number;
+  username: string;
+  display_name: string;
+  role: "owner" | "member";
+  active: boolean;
+  added_by: string;
+  added_at: string;
 }

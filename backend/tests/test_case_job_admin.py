@@ -28,7 +28,7 @@ def test_update_case(client, tmp_path):
     events = [e for e in client.get(f"/api/cases/{case['id']}/audit").json() if e["action"] == "case.updated"]
     assert len(events) == 1
     assert events[0]["details"]["name"] == {"from": "NUIPC 1/26", "to": "NUIPC 1/26 — Loja Centro"}
-    assert events[0]["actor"] == "Analista Teste"
+    assert events[0]["actor"] == "admin.teste"
 
 
 def test_delete_job(client, tmp_path):

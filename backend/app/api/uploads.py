@@ -15,7 +15,7 @@ import uuid
 from datetime import timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from sqlmodel import Session, select
@@ -26,9 +26,10 @@ from ..models import ReferenceImage, Upload, Video, utcnow
 from ..schemas import UploadCreate
 from ..services.audit import log_event
 from .cases import IMAGE_EXT, VIDEO_EXT, register_reference, register_video
-from .deps import ActorDep, SessionDep, get_case_or_404
+from .deps import ActorDep, SessionDep, authorize_objects, get_case_or_404
 
-router = APIRouter(prefix="/api", tags=["uploads"])
+# Todas as rotas exigem sessão; os objetos do caminho têm de pertencer a um caso acessível (ver deps).
+router = APIRouter(prefix="/api", tags=["uploads"], dependencies=[Depends(authorize_objects)])
 
 MAX_CHUNK_BYTES = 64 * 1024 * 1024
 MAX_REFERENCE_BYTES = 50 * 1024 * 1024

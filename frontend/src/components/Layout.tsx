@@ -1,15 +1,17 @@
 import {
-  ActionIcon, AppShell, Badge, Group, TextInput, Title, Tooltip, useComputedColorScheme, useMantineColorScheme,
+  ActionIcon, AppShell, Badge, Button, Group, Menu, Title, Tooltip, useComputedColorScheme, useMantineColorScheme,
 } from "@mantine/core";
-import { IconMoon, IconScan, IconSun, IconUser } from "@tabler/icons-react";
+import { IconLogout, IconMoon, IconScan, IconSun, IconUser, IconUsers } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { Link, Outlet } from "react-router-dom";
+import { Link, Outlet, useNavigate } from "react-router-dom";
 
-import { api, getAnalyst, setAnalyst } from "../api";
+import { api } from "../api";
+import { useAuth } from "../auth";
 import type { SystemInfo } from "../types";
 
 export default function Layout() {
-  const [analyst, setAnalystState] = useState(getAnalyst());
+  const { user, isAdmin, logout } = useAuth();
+  const navigate = useNavigate();
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const { setColorScheme } = useMantineColorScheme();
   const scheme = useComputedColorScheme("light");
@@ -36,17 +38,24 @@ export default function Layout() {
                 <Badge color={env.device === "GPU" ? "green" : "gray"} visibleFrom="xs">{String(env.device)}</Badge>
               </Tooltip>
             )}
-            <TextInput
-              aria-label="Nome do analista"
-              placeholder="Nome do analista"
-              leftSection={<IconUser size={16} />}
-              value={analyst}
-              onChange={(e) => {
-                setAnalystState(e.currentTarget.value);
-                setAnalyst(e.currentTarget.value);
-              }}
-              w={{ base: 150, sm: 220 }}
-            />
+            <Menu position="bottom-end" width={220}>
+              <Menu.Target>
+                <Button variant="default" leftSection={<IconUser size={16} />} aria-label="Menu do utilizador"
+                  maw={{ base: 150, sm: 260 }}>
+                  {user.display_name || user.username}
+                </Button>
+              </Menu.Target>
+              <Menu.Dropdown>
+                <Menu.Label>{user.username} · {isAdmin ? "administrador" : "analista"}</Menu.Label>
+                <Menu.Item leftSection={<IconUser size={16} />} onClick={() => navigate("/account")}>
+                  A minha conta</Menu.Item>
+                {isAdmin && <Menu.Item leftSection={<IconUsers size={16} />} onClick={() => navigate("/users")}>
+                  Utilizadores</Menu.Item>}
+                <Menu.Divider />
+                <Menu.Item color="red" leftSection={<IconLogout size={16} />} onClick={() => void logout()}>
+                  Terminar sessão</Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
             <ActionIcon variant="default" size="lg" aria-label="Alternar tema"
               onClick={() => setColorScheme(scheme === "dark" ? "light" : "dark")}>
               {scheme === "dark" ? <IconSun size={18} /> : <IconMoon size={18} />}

@@ -4,7 +4,7 @@ import { IconFolderPlus, IconTrash } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { api, formatDate, getAnalyst } from "../api";
+import { api, formatDate } from "../api";
 import DeleteCaseModal from "../components/DeleteCaseModal";
 import { notifyError } from "../notify";
 import type { Case } from "../types";
@@ -23,7 +23,7 @@ export default function CaseList() {
 
   const create = async () => {
     try {
-      const c = await api.createCase({ name, description, analyst: getAnalyst() });
+      const c = await api.createCase({ name, description });
       close();
       navigate(`/cases/${c.id}`);
     } catch (e) {

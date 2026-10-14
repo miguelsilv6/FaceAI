@@ -5,15 +5,16 @@ from __future__ import annotations
 from datetime import timedelta
 
 import cv2
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response
 
 from ..models import Video
 from ..schemas import ClockManual, ClockOcr, ClockOcrTest, ClockOffset
 from ..services import ocr
 from ..services.audit import log_event
-from .deps import ActorDep, SessionDep
+from .deps import ActorDep, SessionDep, authorize_objects
 
-router = APIRouter(prefix="/api", tags=["hora real"])
+# Todas as rotas exigem sessão; os objetos do caminho têm de pertencer a um caso acessível (ver deps).
+router = APIRouter(prefix="/api", tags=["hora real"], dependencies=[Depends(authorize_objects)])
 
 
 def _video(session, video_id: int) -> Video:
