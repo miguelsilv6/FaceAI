@@ -36,6 +36,8 @@ def test_route_orders_by_real_time(client, tmp_path):
     assert [s["video_id"] for s in route["unsynced"]] == [sem_hora["id"]]
     assert {v["filename"]: v["synced"] for v in route["videos"]} == {
         "entrada.mp4": True, "caixa.mp4": True, "armazem.mp4": False}
+    assert {v["filename"]: v["appearances"] for v in route["videos"]} == {
+        "entrada.mp4": 1, "caixa.mp4": 1, "armazem.mp4": 1}
 
     # Só confirmadas: nada até confirmar; depois só o track confirmado
     assert client.get(f"/api/cases/{case['id']}/route", params={"only": "confirmed"}).json()["segments"] == []
@@ -45,3 +47,21 @@ def test_route_orders_by_real_time(client, tmp_path):
     assert [s["video_filename"] for s in conf["segments"]] == ["entrada.mp4"]
     assert client.get(f"/api/cases/{case['id']}/route", params={"job_ids": "999"}).json()["segments"] == []
     assert client.get(f"/api/cases/{case['id']}/route", params={"only": "x"}).status_code == 422
+
+
+def test_route_lists_cameras_without_appearances(client, tmp_path):
+    """Câmaras da análise sem aparições também aparecem (linha vazia no percurso)."""
+    case = client.post("/api/cases", json={"name": "Câmaras"}).json()
+    img = make_image(tmp_path / "ref.jpg", RED)
+    with img.open("rb") as fh:
+        client.post(f"/api/cases/{case['id']}/references", files=[("files", ("ref.jpg", fh, "image/jpeg"))])
+    com = _video(client, case["id"], tmp_path, "com.mp4", [(1.0, 2.0, RED)])
+    sem = _video(client, case["id"], tmp_path, "sem.mp4", [])
+    for v in (com, sem):
+        client.put(f"/api/videos/{v['id']}/clock", json={"video_s": 0, "dvr_time": "2026-10-01T10:00:00"})
+    r = client.post(f"/api/cases/{case['id']}/jobs",
+                    json={"params": {"sample_fps": 2, "threshold": 0.05, "motion_filter": False, "tracking": True}})
+    wait_for_job(client, r.json()["id"])
+    route = client.get(f"/api/cases/{case['id']}/route").json()
+    assert {v["filename"]: (v["synced"], v["appearances"]) for v in route["videos"]} == {
+        "com.mp4": (True, 1), "sem.mp4": (True, 0)}

@@ -443,7 +443,7 @@ export interface CaseRoute {
   segments: RouteSegment[];
   unsynced: RouteSegment[];
   jobs: number[];
-  videos: { id: number; filename: string; synced: boolean }[];
+  videos: { id: number; filename: string; synced: boolean; appearances: number }[];
 }
 
 export interface CasePerson {

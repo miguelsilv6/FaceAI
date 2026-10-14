@@ -47,7 +47,11 @@ export default function RouteTimeline({ caseId, jobs }: { caseId: number; jobs: 
   const [route, setRoute] = useState<CaseRoute | null>(null);
 
   useEffect(() => {
-    if (!jobIds.length && completed.length) setJobIds([String(completed[0].id)]); // mais recente
+    // Por omissão, todas as análises "procurar" concluídas: cada câmara pode ter sido analisada à parte.
+    if (!jobIds.length && completed.length) {
+      const match = completed.filter((j) => j.params.mode !== "discover");
+      setJobIds((match.length ? match : completed.slice(0, 1)).map((j) => String(j.id)));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [completed.length]);
 
@@ -59,11 +63,15 @@ export default function RouteTimeline({ caseId, jobs }: { caseId: number; jobs: 
   const segs = route?.segments ?? [];
   const keys = useMemo(() => [...new Set([...segs, ...(route?.unsynced ?? [])]
     .map((s) => `${s.job_id}:${s.person_id ?? 0}`))], [route]);
+  // Uma linha por câmara com hora acertada: primeiro as que têm aparições (pela ordem do percurso), depois as vazias.
   const lanes = useMemo(() => {
     const ids: number[] = [];
     for (const s of segs) if (!ids.includes(s.video_id)) ids.push(s.video_id);
-    return ids.map((id) => ({ id, filename: segs.find((s) => s.video_id === id)!.video_filename }));
-  }, [segs]);
+    const names = new Map((route?.videos ?? []).map((v) => [v.id, v.filename]));
+    for (const v of route?.videos ?? []) if (v.synced && !ids.includes(v.id)) ids.push(v.id);
+    return ids.map((id) => ({ id, filename: names.get(id) ?? segs.find((s) => s.video_id === id)?.video_filename ?? `#${id}` }));
+  }, [segs, route]);
+  const camerasWithSegs = new Set(segs.map((s) => s.video_id)).size;
   const t0 = segs.length ? Math.min(...segs.map((s) => seconds(s.real_start!))) : 0;
   const t1 = segs.length ? Math.max(...segs.map((s) => seconds(s.real_end ?? s.real_start!))) : 1;
   const span = Math.max(1, t1 - t0);
@@ -100,6 +108,14 @@ export default function RouteTimeline({ caseId, jobs }: { caseId: number; jobs: 
           ficam fora da linha temporal. Acerte o relógio no separador <b>Vídeos</b> (botão do relógio).
         </Alert>
       )}
+      {route && segs.length > 0 && camerasWithSegs < 2 && (
+        <Alert color="blue">
+          Só {lanes.length > 1 ? "uma das câmaras tem" : "há uma câmara com"} aparições nas análises escolhidas.
+          {lanes.length > 1
+            ? " As outras câmaras foram analisadas mas a pessoa não foi encontrada nelas (ou só abaixo do limiar)."
+            : " Para ver o percurso entre câmaras, inclua os vídeos das outras câmaras na análise (ou escolha também as análises dessas câmaras no campo Análises) e acerte a hora de cada vídeo."}
+        </Alert>
+      )}
       {segs.length === 0 ? (
         <Text c="dimmed">Sem aparições {confirmedOnly ? "confirmadas " : ""}com hora real nas análises escolhidas.</Text>
       ) : (
@@ -115,6 +131,9 @@ export default function RouteTimeline({ caseId, jobs }: { caseId: number; jobs: 
                 style={{ borderTop: "1px solid var(--mantine-color-default-border)" }}>
                 <Text size="xs" w={LABEL_W} pr="xs" truncate="end" title={lane.filename}>{lane.filename}</Text>
                 <Box style={{ position: "relative", flex: 1, height: LANE_H }}>
+                  {!segs.some((s) => s.video_id === lane.id) && (
+                    <Text size="xs" c="dimmed" lh={`${LANE_H}px`} pl="xs">sem aparições</Text>
+                  )}
                   {segs.filter((s) => s.video_id === lane.id).map((s, i) => {
                     const left = pct(seconds(s.real_start!));
                     const width = Math.max(0.6, pct(seconds(s.real_end ?? s.real_start!)) - left);
