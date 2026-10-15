@@ -414,6 +414,7 @@ export interface SimilarTrack {
   best_detection_id: number | null;
   review_status: ReviewStatus;
   is_match: boolean;
+  threshold?: number | null;
 }
 
 export interface SimilarResult {
@@ -423,6 +424,7 @@ export interface SimilarResult {
   jobs_searched: number;
   jobs_not_indexed: number;
   jobs_other_model: number;
+  jobs_not_searched?: number;
   warnings?: string[];
 }
 

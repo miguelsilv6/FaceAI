@@ -54,6 +54,7 @@ def cleanup_stale_uploads() -> int:
             created = u.created_at if u.created_at.tzinfo else u.created_at.replace(tzinfo=cutoff.tzinfo)
             if created < cutoff:
                 Path(u.temp_path).unlink(missing_ok=True)
+                _locks.pop(u.id, None)
                 s.delete(u)
                 removed += 1
         s.commit()
@@ -195,6 +196,7 @@ def complete_upload(upload_id: str, session: SessionDep, actor: ActorDep):
 def cancel_upload(upload_id: str, session: SessionDep, actor: ActorDep) -> None:
     u = _get_open(session, upload_id)
     Path(u.temp_path).unlink(missing_ok=True)
+    _locks.pop(upload_id, None)
     session.delete(u)
     session.commit()
     log_event(session, "upload.cancelled", case_id=u.case_id, actor=actor,

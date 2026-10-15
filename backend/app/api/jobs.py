@@ -662,7 +662,8 @@ def _photo_search(session, user, case_id: int, refs: list[ReferenceImage], *, so
                                        limit=max(1, min(limit, 500)))
     log_event(session, "person.photo_search", case_id=case_id, actor=user.username,
               details={**source, "reference_ids": [r.id for r in refs], "scope": scope, "threshold": threshold,
-                       "models": out["model"], "jobs_searched": out["jobs_searched"],
+                       "thresholds_by_job": out["thresholds_by_job"], "models": out["model"],
+                       "jobs_searched": out["jobs_searched"], "jobs_not_searched": out["jobs_not_searched"],
                        "results": len(out["results"]),
                        "cases_with_results": sorted({r["case_id"] for r in out["results"]})})
     return out

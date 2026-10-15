@@ -27,7 +27,14 @@ export default function SimilarModal({ query, defaultThreshold, onClose }: {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => setThreshold(defaultThreshold), [defaultThreshold, query]);
+  // Nova pesquisa: limpa os resultados anteriores e repõe as opções por omissão.
+  useEffect(() => {
+    setThreshold(defaultThreshold);
+    setData(null);
+    setError(null);
+    setPerJob(true);
+    setScope("all");
+  }, [defaultThreshold, query]);
   useEffect(() => {
     if (!query) return;
     let alive = true;
@@ -79,6 +86,7 @@ export default function SimilarModal({ query, defaultThreshold, onClose }: {
               {data.results.length} resultado(s) em {data.jobs_searched} análise(s) · modelo {data.model}
               {data.jobs_other_model > 0 && ` · ${data.jobs_other_model} com outro modelo (não comparáveis)`}
               {data.jobs_not_indexed > 0 && ` · ${data.jobs_not_indexed} sem índice (anteriores a esta versão)`}
+              {(data.jobs_not_searched ?? 0) > 0 && ` · ${data.jobs_not_searched} não pesquisada(s): sem embedding das fotos com o modelo/detetor dessas análises (ver avisos)`}
             </Text>
             {data.results.length > 0 && (
               <Card withBorder p={0}>
@@ -108,7 +116,8 @@ export default function SimilarModal({ query, defaultThreshold, onClose }: {
                             {r.real_start && <Text size="xs" ff="monospace" fw={600}>{r.real_start}</Text>}
                             <Text size="xs" ff="monospace" c="dimmed">{formatTime(r.start_s)}–{formatTime(r.end_s)}</Text>
                           </Table.Td>
-                          <Table.Td><Badge color={r.similarity >= 1 - defaultThreshold ? "red" : "orange"}>
+                          <Table.Td><Badge color={r.distance <= (r.threshold ?? defaultThreshold) ? "red" : "orange"}
+                            title={r.threshold != null ? `Limiar aplicado: ${r.threshold}` : undefined}>
                             {(r.similarity * 100).toFixed(1)}%</Badge></Table.Td>
                           <Table.Td><Badge variant="light" color={REVIEW[r.review_status]?.[1]}>
                             {REVIEW[r.review_status]?.[0]}</Badge></Table.Td>

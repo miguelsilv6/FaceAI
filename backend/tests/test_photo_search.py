@@ -44,6 +44,30 @@ def test_search_case_person_in_other_cases(client, tmp_path):
     events = [e for e in client.get(f"/api/cases/{case_a['id']}/audit").json() if e["action"] == "person.photo_search"]
     assert events and events[-1]["details"]["cases_with_results"] == [case_b["id"]]
     assert events[-1]["details"]["reference_ids"] == [ref["id"]]
+    # Limiar efetivo de cada análise registado (pesquisa sem limiar explícito)
+    assert events[-1]["details"]["threshold"] is None
+    assert list(events[-1]["details"]["thresholds_by_job"].values()) == [0.05]
+    assert out["results"][0]["threshold"] == 0.05 and out["jobs_not_searched"] == 0
+
+
+def test_reference_embeddings_cached_and_per_detector(client, tmp_path, monkeypatch):
+    from app.services import linking
+
+    _case_with_job(client, tmp_path, "C", [(1.0, 2.0, RED)])
+    case = client.post("/api/cases", json={"name": "D"}).json()
+    ref = _upload_ref(client, case["id"], tmp_path, "r.jpg", RED)
+    calls: list[tuple[str, str]] = []
+    real = linking.reference_embeddings
+
+    def spy(refs, engine, *, model, detector):
+        calls.append((model, detector))
+        return real(refs, engine, model=model, detector=detector)
+
+    monkeypatch.setattr(linking, "reference_embeddings", spy)
+    linking._ref_cache.clear()
+    first = client.get(f"/api/references/{ref['id']}/search").json()
+    client.get(f"/api/references/{ref['id']}/search", params={"threshold": 0.3}).json()
+    assert len(first["results"]) == 1 and len(calls) == 1  # a 2.ª pesquisa usa a cache
 
 
 def test_search_validation_and_access(client, tmp_path):
