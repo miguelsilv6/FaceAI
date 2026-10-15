@@ -192,6 +192,10 @@ export const api = {
   similarToPerson: (jobId: number, personId: number, scope: "all" | "case", threshold?: number) =>
     request<SimilarResult>("GET",
       `/api/jobs/${jobId}/persons/${personId}/similar?scope=${scope}${threshold != null ? `&threshold=${threshold}` : ""}`),
+  searchCasePerson: (id: number, scope: "all" | "case", threshold?: number) =>
+    request<SimilarResult>("GET", `/api/case-persons/${id}/search?scope=${scope}${threshold != null ? `&threshold=${threshold}` : ""}`),
+  searchReference: (id: number, scope: "all" | "case", threshold?: number) =>
+    request<SimilarResult>("GET", `/api/references/${id}/search?scope=${scope}${threshold != null ? `&threshold=${threshold}` : ""}`),
   route: (caseId: number, jobIds: number[], only: "matches" | "confirmed") =>
     request<CaseRoute>("GET", `/api/cases/${caseId}/route?only=${only}${jobIds.length ? `&job_ids=${jobIds.join(",")}` : ""}`),
   activity: () => request<Activity>("GET", "/api/activity"),

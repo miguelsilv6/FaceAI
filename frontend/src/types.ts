@@ -423,6 +423,7 @@ export interface SimilarResult {
   jobs_searched: number;
   jobs_not_indexed: number;
   jobs_other_model: number;
+  warnings?: string[];
 }
 
 export interface RouteSegment {

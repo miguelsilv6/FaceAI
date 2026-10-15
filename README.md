@@ -196,6 +196,14 @@ O botão **Procurar noutras análises** (👥), num track ou numa pessoa, compar
 - Cada pesquisa fica na auditoria.
 - As análises no modo "procurar" feitas antes desta versão não têm índice e aparecem contadas à parte.
 
+### Pesquisa por foto noutros casos
+Para identificar a mesma pessoa em vários casos, em **Referências/Pessoas** abre o menu da pessoa (ou de uma foto solta) e escolhe **Procurar noutros casos**.
+- As fotos da pessoa são comparadas com os *tracks* de **todas as análises já feitas** nos casos a que o utilizador tem acesso. Os vídeos não são reprocessados.
+- Os embeddings das fotos são calculados com o modelo de cada análise, e conta a foto mais parecida. Por omissão usa o limiar de cada análise.
+- Os resultados mostram o caso, a análise, o vídeo, a hora real, a semelhança e o estado de revisão, com ligação para o instante exato.
+- **Limitação:** só entram as análises com índice. São todas as do modo descoberta e as do modo procurar feitas desde a versão com ligação entre análises.
+- Os resultados são candidatos: confirma sempre visualmente. Cada pesquisa fica na auditoria (`person.photo_search`), com as fotos usadas e os casos onde houve resultados.
+
 ### Percurso multi-câmara
 O separador **Percurso/Multi View** do caso junta as aparições das análises escolhidas e ordena-as pela **hora real do DVR**.
 - Por omissão escolhe todas as análises "procurar" concluídas, para juntar câmaras analisadas à parte.
