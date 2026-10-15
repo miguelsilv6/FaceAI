@@ -6,7 +6,7 @@ import { MantineProvider, createTheme } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import { AuthGate } from "./auth";
 import ErrorBoundary from "./components/ErrorBoundary";
@@ -16,6 +16,13 @@ import CaseList from "./pages/CaseList";
 import CaseView from "./pages/CaseView";
 import Results from "./pages/Results";
 import Users from "./pages/Users";
+
+/** Outra análise (ou outro instante pedido no URL) = página nova: o estado de Results é lido ao montar. */
+function ResultsRoute() {
+  const { jobId } = useParams();
+  const { search } = useLocation();
+  return <Results key={`${jobId}${search}`} />;
+}
 
 const theme = createTheme({ primaryColor: "indigo", defaultRadius: "md" });
 
@@ -31,7 +38,7 @@ createRoot(document.getElementById("root")!).render(
               <Route element={<Layout />}>
                 <Route index element={<CaseList />} />
                 <Route path="cases/:caseId" element={<CaseView />} />
-                <Route path="jobs/:jobId" element={<Results />} />
+                <Route path="jobs/:jobId" element={<ResultsRoute />} />
                 <Route path="account" element={<Account />} />
                 <Route path="users" element={<Users />} />
               </Route>

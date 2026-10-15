@@ -3,13 +3,14 @@ import {
   Title, Tooltip,
 } from "@mantine/core";
 import { Dropzone, IMAGE_MIME_TYPE } from "@mantine/dropzone";
-import { IconDots, IconHelp, IconPhoto, IconPhotoPlus, IconPlus, IconTrash, IconUser } from "@tabler/icons-react";
+import { IconDots, IconHelp, IconPhoto, IconPhotoPlus, IconPlus, IconTrash, IconUser, IconUsersGroup } from "@tabler/icons-react";
 import { useState, type DragEvent } from "react";
 
 import { api } from "../api";
 import { notifyError, notifyOk } from "../notify";
 import { personColor } from "../personColors";
 import type { CasePerson, ReferenceImage } from "../types";
+import SimilarModal, { type SimilarQuery } from "./SimilarModal";
 import UploadZone from "./UploadZone";
 
 interface Props {
@@ -26,6 +27,7 @@ export default function ReferencesPanel({ caseId, references, persons, onChange 
   const [progress, setProgress] = useState<{ target: number | null; value: number } | null>(null);
   const [editing, setEditing] = useState<CasePerson | "new" | null>(null);
   const [dropTarget, setDropTarget] = useState<number | "loose" | null>(null);
+  const [search, setSearch] = useState<SimilarQuery | null>(null);
 
   const upload = async (files: File[], personId: number | null) => {
     if (!files.length) return;
@@ -76,6 +78,7 @@ export default function ReferencesPanel({ caseId, references, persons, onChange 
   const loose = references.filter((r) => r.case_person_id == null);
   const thumb = (r: ReferenceImage) => (
     <RefThumb key={r.id} reference={r} persons={persons} onMove={move}
+      onSearch={(ref) => setSearch({ kind: "reference", id: ref.id, name: ref.filename })}
       onDelete={(ref) => act(() => api.deleteReference(ref.id))} />
   );
 
@@ -111,6 +114,11 @@ export default function ReferencesPanel({ caseId, references, persons, onChange 
                   <ActionIcon variant="subtle" aria-label={`Opções de ${p.name}`}><IconDots size={16} /></ActionIcon>
                 </Menu.Target>
                 <Menu.Dropdown>
+                  <Menu.Item leftSection={<IconUsersGroup size={14} />} disabled={!p.valid_references}
+                    onClick={() => setSearch({ kind: "casePerson", id: p.id, name: p.name, photos: p.valid_references })}>
+                    Procurar noutros casos
+                  </Menu.Item>
+                  <Menu.Divider />
                   <Menu.Item onClick={() => setEditing(p)}>Mudar nome / notas</Menu.Item>
                   <Menu.Item color="red" onClick={() => {
                     if (window.confirm(`Eliminar a pessoa "${p.name}"? As fotos não são apagadas: passam a fotos soltas.`)) {
@@ -147,15 +155,17 @@ export default function ReferencesPanel({ caseId, references, persons, onChange 
         {loose.length > 0 && <SimpleGrid cols={{ base: 2, sm: 4, md: 6 }} spacing="xs" mt="sm">{loose.map(thumb)}</SimpleGrid>}
       </Card>
 
+      <SimilarModal query={search} defaultThreshold={0.5} onClose={() => setSearch(null)} />
       <PersonModal caseId={caseId} person={editing} onClose={() => setEditing(null)}
         onSaved={() => { setEditing(null); onChange(); }} />
     </Stack>
   );
 }
 
-function RefThumb({ reference: r, persons, onMove, onDelete }: {
+function RefThumb({ reference: r, persons, onMove, onSearch, onDelete }: {
   reference: ReferenceImage; persons: CasePerson[];
-  onMove: (refId: number, personId: number | null) => void; onDelete: (r: ReferenceImage) => void;
+  onMove: (refId: number, personId: number | null) => void; onSearch: (r: ReferenceImage) => void;
+  onDelete: (r: ReferenceImage) => void;
 }) {
   return (
     <Card withBorder padding={4} draggable onDragStart={(e) => {
@@ -182,6 +192,9 @@ function RefThumb({ reference: r, persons, onMove, onDelete }: {
             ))}
             {r.case_person_id != null && <Menu.Item onClick={() => onMove(r.id, null)}>Fotos soltas (tirar da pessoa)</Menu.Item>}
             <Menu.Divider />
+            <Menu.Item leftSection={<IconUsersGroup size={14} />} disabled={!r.valid} onClick={() => onSearch(r)}>
+              Procurar esta foto noutros casos
+            </Menu.Item>
             <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={() => onDelete(r)}>Eliminar foto</Menu.Item>
           </Menu.Dropdown>
         </Menu>

@@ -647,6 +647,53 @@ def similar_to_person(job_id: int, person_id: int, session: SessionDep, user: Cu
                     threshold=threshold, scope=scope, limit=limit)
 
 
+# ---------------------------------------------------------------- pesquisa por foto noutros casos
+def _photo_search(session, user, case_id: int, refs: list[ReferenceImage], *, source: dict, scope: str,
+                  threshold: float | None, limit: int) -> dict:
+    if scope not in ("case", "all"):
+        raise HTTPException(422, "scope deve ser 'case' ou 'all'.")
+    if threshold is not None and not 0 < threshold <= 1.5:
+        raise HTTPException(422, "Limiar inválido.")
+    refs = [r for r in refs if r.valid]
+    if not refs:
+        raise HTTPException(422, "Sem fotos de referência válidas para procurar.")
+    case_ids = {case_id} if scope == "case" else accessible_case_ids(session, user)
+    out = linking.search_by_references(session, refs, get_engine(), case_ids=case_ids, threshold=threshold,
+                                       limit=max(1, min(limit, 500)))
+    log_event(session, "person.photo_search", case_id=case_id, actor=user.username,
+              details={**source, "reference_ids": [r.id for r in refs], "scope": scope, "threshold": threshold,
+                       "thresholds_by_job": out["thresholds_by_job"], "models": out["model"],
+                       "jobs_searched": out["jobs_searched"], "jobs_not_searched": out["jobs_not_searched"],
+                       "results": len(out["results"]),
+                       "cases_with_results": sorted({r["case_id"] for r in out["results"]})})
+    return out
+
+
+@router.get("/case-persons/{case_person_id}/search")
+def search_case_person(case_person_id: int, session: SessionDep, user: CurrentUser, scope: str = "all",
+                       threshold: float | None = None, limit: int = 100) -> dict:
+    """Procura a pessoa (todas as suas fotos válidas) nas análises já feitas dos casos acessíveis, sem reprocessar
+    vídeo. threshold vazio = o limiar de cada análise."""
+    person = session.get(CasePerson, case_person_id)
+    if person is None:
+        raise HTTPException(404, "Pessoa não encontrada.")
+    refs = list(session.exec(select(ReferenceImage).where(ReferenceImage.case_person_id == person.id)
+                             .order_by(ReferenceImage.id)))
+    return _photo_search(session, user, person.case_id, refs, source={"case_person_id": person.id,
+                         "name": person.name}, scope=scope, threshold=threshold, limit=limit)
+
+
+@router.get("/references/{ref_id}/search")
+def search_reference(ref_id: int, session: SessionDep, user: CurrentUser, scope: str = "all",
+                     threshold: float | None = None, limit: int = 100) -> dict:
+    """Como /case-persons/{id}/search, só com esta foto."""
+    ref = session.get(ReferenceImage, ref_id)
+    if ref is None:
+        raise HTTPException(404, "Referência não encontrada.")
+    return _photo_search(session, user, ref.case_id, [ref], source={"reference_id": ref.id},
+                         scope=scope, threshold=threshold, limit=limit)
+
+
 @router.get("/jobs/{job_id}/frames/validated.zip")
 def job_validated_frames(job_id: int, session: SessionDep, actor: ActorDep) -> StreamingResponse:
     """ZIP com os frames originais de todas as deteções confirmadas da análise (+ manifesto com SHA-256)."""
