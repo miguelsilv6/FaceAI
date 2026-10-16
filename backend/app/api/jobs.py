@@ -15,7 +15,18 @@ from fastapi.responses import FileResponse, StreamingResponse
 from sqlmodel import select
 
 from ..config import settings
-from ..models import CasePerson, Detection, Job, JobStatus, ReferenceImage, ReviewStatus, Track, Video, utcnow
+from ..models import (
+    AuditEvent,
+    CasePerson,
+    Detection,
+    Job,
+    JobStatus,
+    ReferenceImage,
+    ReviewStatus,
+    Track,
+    Video,
+    utcnow,
+)
 from ..schemas import JobCreate, JobDelete, PersonMerge, QueueUpdate, ReviewUpdate, TrackPerson
 from ..services import disk, enhance, linking, reports, validated_frames
 from ..services.audit import log_event
@@ -289,6 +300,120 @@ def case_route(case_id: int, session: SessionDep, job_ids: str | None = None, pe
             "videos": [{"id": v.id, "filename": v.filename, "synced": bool(v.dvr_start),
                         "appearances": appearances.get(v.id, 0)}
                        for v in videos.values() if v is not None]}
+
+
+@router.get("/cases/{case_id}/dashboard")
+def case_dashboard(case_id: int, session: SessionDep, job_ids: str | None = None) -> dict:
+    """Painel do caso: material, análises, progresso da revisão, correspondências por câmara, por hora real e por
+    pessoa, e atividade recente. Por omissão considera todas as análises concluídas do caso.
+
+    Correspondência = o mesmo critério do relatório: deteção de face com is_match ou num track com correspondência
+    (modo procurar). Vestuário (só pela roupa) e modo descoberta contam à parte."""
+    get_case_or_404(session, case_id)
+    all_jobs = list(session.exec(select(Job).where(Job.case_id == case_id).order_by(Job.id)))
+    jobs = [j for j in all_jobs if j.status == JobStatus.completed]
+    if job_ids:
+        try:
+            wanted = {int(x) for x in job_ids.split(",") if x.strip()}
+        except ValueError as exc:
+            raise HTTPException(422, "job_ids inválido.") from exc
+        jobs = [j for j in jobs if j.id in wanted]
+    videos = {v.id: v for v in session.exec(select(Video).where(Video.case_id == case_id).order_by(Video.id))}
+    refs = list(session.exec(select(ReferenceImage).where(ReferenceImage.case_id == case_id)))
+    n_persons = len(list(session.exec(select(CasePerson.id).where(CasePerson.case_id == case_id))))
+
+    review = {"matches": 0, "confirmed": 0, "rejected": 0, "pending": 0, "clothing": 0,
+              "tracks": 0, "tracks_confirmed": 0, "tracks_rejected": 0, "tracks_pending": 0}
+    cams: dict[int, dict] = {}
+    hours: dict[str, int] = {}
+    persons: dict[str, dict] = {}
+    pending_by_job: dict[int, int] = {}
+    discover = {"jobs": 0, "faces": 0, "persons": 0}
+    unsynced = 0
+
+    def cam(vid: int) -> dict:
+        if vid not in cams:
+            v = videos.get(vid)
+            cams[vid] = {"video_id": vid, "filename": v.filename if v else f"#{vid}", "synced": bool(v and v.dvr_start),
+                         "matches": 0, "confirmed": 0, "rejected": 0, "pending": 0, "clothing": 0,
+                         "first": None, "last": None, "first_s": None, "last_s": None, "job_ids": []}
+        return cams[vid]
+
+    for job in jobs:
+        if (job.params or {}).get("mode") == "discover":
+            discover["jobs"] += 1
+            discover["faces"] += len(list(session.exec(select(Detection.id).where(Detection.job_id == job.id))))
+            discover["persons"] += job.persons or 0
+            continue
+        labels = {p["id"]: p["label"] for p in (job.params or {}).get("persons") or []}
+        multi = len(labels) > 1
+        tracks = list(session.exec(select(Track).where(Track.job_id == job.id)))
+        match_tracks = {t.id for t in tracks if t.is_match}
+        for t in tracks:
+            if t.kind == "body":
+                if t.evidence == "vestuário":  # aparição só pela roupa (evidência complementar)
+                    review["clothing"] += 1
+                    cam(t.video_id)["clothing"] += 1
+            elif t.is_match:
+                review["tracks"] += 1
+                review[f"tracks_{t.review_status.value}"] += 1
+        rows = session.exec(select(Detection.video_id, Detection.review_status, Detection.timestamp_s,
+                                   Detection.track_id, Detection.is_match, Detection.kind, Detection.person_id)
+                           .where(Detection.job_id == job.id))
+        for vid, status, ts, tid, is_match, kind, pid in rows:
+            c = cam(vid)
+            if job.id not in c["job_ids"]:
+                c["job_ids"].append(job.id)
+            if kind == "body":
+                continue
+            if not (is_match or (tid is not None and tid in match_tracks)):
+                continue
+            st = status.value if hasattr(status, "value") else str(status)
+            review["matches"] += 1
+            review[st] += 1
+            c["matches"] += 1
+            c[st] += 1
+            if st == "pending":
+                pending_by_job[job.id] = pending_by_job.get(job.id, 0) + 1
+            if multi and pid in labels:
+                pp = persons.setdefault(labels[pid], {"label": labels[pid], "matches": 0, "confirmed": 0})
+                pp["matches"] += 1
+                pp["confirmed"] += st == "confirmed"
+            c["first_s"] = ts if c["first_s"] is None else min(c["first_s"], ts)
+            c["last_s"] = ts if c["last_s"] is None else max(c["last_s"], ts)
+            v = videos.get(vid)
+            rt = real_time(v.dvr_start, v.dvr_rate, v.clock_offset_s, ts) if v and v.dvr_start else None
+            if rt is None:
+                unsynced += 1
+                continue
+            key = rt.strftime("%Y-%m-%d %H")
+            hours[key] = hours.get(key, 0) + 1
+            iso = rt.isoformat(timespec="seconds")
+            c["first"] = iso if c["first"] is None or iso < c["first"] else c["first"]
+            c["last"] = iso if c["last"] is None or iso > c["last"] else c["last"]
+
+    status_counts: dict[str, int] = {}
+    for j in all_jobs:
+        status_counts[j.status.value] = status_counts.get(j.status.value, 0) + 1
+    recent = session.exec(select(AuditEvent).where(AuditEvent.case_id == case_id)
+                          .order_by(AuditEvent.id.desc()).limit(10))
+    return {
+        "jobs_considered": [j.id for j in jobs],
+        "material": {"videos": len(videos), "duration_s": round(sum(v.duration_s for v in videos.values()), 1),
+                     "videos_synced": sum(1 for v in videos.values() if v.dvr_start),
+                     "references": len(refs), "references_valid": sum(1 for r in refs if r.valid),
+                     "persons": n_persons, "size_bytes": disk.case_size(session, case_id)},
+        "jobs": {"total": len(all_jobs), "by_status": status_counts},
+        "review": review,
+        "per_camera": sorted(cams.values(), key=lambda c: (-c["matches"], c["video_id"])),
+        "per_hour": [{"hour": k, "matches": n} for k, n in sorted(hours.items())],
+        "unsynced_matches": unsynced,
+        "per_person": sorted(persons.values(), key=lambda p: -p["matches"]),
+        "pending_by_job": [{"job_id": k, "pending": n} for k, n in sorted(pending_by_job.items(), key=lambda x: -x[1])],
+        "discover": discover,
+        "recent": [{"id": e.id, "timestamp": e.timestamp.isoformat(), "actor": e.actor, "action": e.action}
+                   for e in recent],
+    }
 
 
 @router.get("/jobs/{job_id}/tracks", response_model=list[Track])

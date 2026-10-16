@@ -1,4 +1,5 @@
 import type {
+  CaseDashboard,
   Activity, CasePerson, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
@@ -196,6 +197,8 @@ export const api = {
     request<SimilarResult>("GET", `/api/case-persons/${id}/search?scope=${scope}${threshold != null ? `&threshold=${threshold}` : ""}`),
   searchReference: (id: number, scope: "all" | "case", threshold?: number) =>
     request<SimilarResult>("GET", `/api/references/${id}/search?scope=${scope}${threshold != null ? `&threshold=${threshold}` : ""}`),
+  caseDashboard: (caseId: number, jobIds: number[]) =>
+    request<CaseDashboard>("GET", `/api/cases/${caseId}/dashboard${jobIds.length ? `?job_ids=${jobIds.join(",")}` : ""}`),
   route: (caseId: number, jobIds: number[], only: "matches" | "confirmed") =>
     request<CaseRoute>("GET", `/api/cases/${caseId}/route?only=${only}${jobIds.length ? `&job_ids=${jobIds.join(",")}` : ""}`),
   activity: () => request<Activity>("GET", "/api/activity"),
