@@ -2,7 +2,8 @@ import {
   ActionIcon, Anchor, Badge, Breadcrumbs, Button, Group, Modal, Stack, Tabs, Text, TextInput, Textarea, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconActivity, IconHistory, IconLayoutDashboard, IconMovie, IconPencil, IconPhoto, IconRoute, IconTrash, IconUsers,
+  IconActivity, IconHistory, IconLayoutDashboard, IconMovie, IconPencil, IconPhoto, IconPhotoCheck, IconRoute, IconTrash,
+  IconUsers,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -16,6 +17,7 @@ import JobsPanel from "../components/JobsPanel";
 import MembersPanel from "../components/MembersPanel";
 import RouteTimeline from "../components/RouteTimeline";
 import ReferencesPanel from "../components/ReferencesPanel";
+import ValidatedFramesPanel from "../components/ValidatedFramesPanel";
 import VideosPanel from "../components/VideosPanel";
 import { notifyError, notifyOk } from "../notify";
 import type { AuditEvent, Case, CaseMember, CasePerson, Job, Location, ReferenceImage, Video } from "../types";
@@ -144,6 +146,7 @@ export default function CaseView() {
           <Tabs.Tab value="jobs" leftSection={<IconActivity size={16} />}>
             <Group gap={6}>Análises <Badge size="sm" variant="light">{jobs.length}</Badge></Group>
           </Tabs.Tab>
+          <Tabs.Tab value="results" leftSection={<IconPhotoCheck size={16} />}>Resultados</Tabs.Tab>
           <Tabs.Tab value="route" leftSection={<IconRoute size={16} />}>Percurso/Multi View</Tabs.Tab>
           <Tabs.Tab value="members" leftSection={<IconUsers size={16} />}>
             Equipa <Badge size="xs" variant="light">{members.length}</Badge>
@@ -162,6 +165,9 @@ export default function CaseView() {
         <Tabs.Panel value="jobs" pt="md">
           <JobsPanel caseId={caseId} jobs={jobs} videos={videos} locations={locations} references={references} persons={persons}
             onChange={reloadJobs} />
+        </Tabs.Panel>
+        <Tabs.Panel value="results" pt="md">
+          <ValidatedFramesPanel caseId={caseId} />
         </Tabs.Panel>
         <Tabs.Panel value="route" pt="md">
           <RouteTimeline caseId={caseId} jobs={jobs} videos={videos} locations={locations} />

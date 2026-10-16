@@ -1,6 +1,6 @@
 import type {
   CaseDashboard,
-  Activity, CasePerson, Location, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
+  Activity, CasePerson, Location, ValidatedItem, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
 
@@ -205,7 +205,9 @@ export const api = {
   activity: () => request<Activity>("GET", "/api/activity"),
   validatedSummary: (caseId: number) =>
     request<{ detections: number; frames: number }>("GET", `/api/cases/${caseId}/frames/validated`),
-  validatedFramesUrl: (scope: "jobs" | "cases", id: number) => `/api/${scope}/${id}/frames/validated.zip`,
+  validatedFramesUrl: (scope: "jobs" | "cases", id: number, detectionIds?: number[]) =>
+    `/api/${scope}/${id}/frames/validated.zip${detectionIds?.length ? `?detection_ids=${detectionIds.join(",")}` : ""}`,
+  validatedItems: (caseId: number) => request<ValidatedItem[]>("GET", `/api/cases/${caseId}/frames/validated/items`),
   case: (id: number) => request<Case>("GET", `/api/cases/${id}`),
   createCase: (body: { name: string; description: string }) =>
     request<Case>("POST", "/api/cases", body),

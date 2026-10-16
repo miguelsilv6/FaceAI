@@ -505,3 +505,27 @@ export interface CaseDashboard {
   discover: { jobs: number; faces: number; persons: number };
   recent: { id: number; timestamp: string; actor: string; action: string }[];
 }
+
+/** Deteção confirmada (frame validado), como aparece no separador "Resultados" do caso. */
+export interface ValidatedItem {
+  detection_id: number;
+  job_id: number;
+  job_mode: string;
+  video_id: number;
+  video_filename: string;
+  location_id: number | null;
+  location_name: string;
+  camera_name: string;
+  camera_label: string;
+  frame_index: number;
+  timestamp_s: number;
+  real_time: string | null;
+  kind: string;
+  evidence: string;
+  person_id: number | null;
+  person_label: string;
+  similarity: number;
+  reviewed_by: string;
+  reviewed_at: string | null;
+  review_note: string;
+}

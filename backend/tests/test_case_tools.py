@@ -129,6 +129,22 @@ def test_validated_frames_zip(client, tmp_path):
     assert rc.status_code == 200
     assert sorted(n for n in zipfile.ZipFile(io.BytesIO(rc.content)).namelist() if n.endswith(".png")) == sorted(pngs)
 
+    # Separador "Resultados": lista das deteções confirmadas e ZIP só das selecionadas
+    items = client.get(f"/api/cases/{case['id']}/frames/validated/items").json()
+    assert sorted(i["detection_id"] for i in items) == sorted(d["id"] for d in chosen)
+    assert all(i["location_name"] == "Geral" and i["camera_name"] == "cctv.mp4" and i["reviewed_by"] == "admin.teste"
+               for i in items)
+    assert all(i["person_label"].startswith("Pessoa #") for i in items)  # modo descoberta
+    pick = chosen[2]["id"]  # deteção do frame 50, sozinha nesse frame
+    rs = client.get(f"/api/cases/{case['id']}/frames/validated.zip", params={"detection_ids": f"{pick},999999"})
+    zs = zipfile.ZipFile(io.BytesIO(rs.content))
+    rows = list(csv.DictReader(io.StringIO(zs.read("manifesto.csv").decode("utf-8-sig"))))
+    assert [int(r["deteccao"]) for r in rows] == [pick] and len([n for n in zs.namelist() if n.endswith(".png")]) == 1
+    assert client.get(f"/api/cases/{case['id']}/frames/validated.zip",
+                      params={"detection_ids": str(dets[3]["id"])}).status_code == 404  # rejeitada: fora
+    assert client.get(f"/api/cases/{case['id']}/frames/validated.zip",
+                      params={"detection_ids": "x"}).status_code == 422
+
 
 def _fake_usage(monkeypatch, total_gb: float, free_gb: float):
     from collections import namedtuple

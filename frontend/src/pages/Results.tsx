@@ -22,6 +22,7 @@ import JobStatusBadge from "../components/JobStatusBadge";
 import Timeline from "../components/Timeline";
 import { notifyError, notifyOk } from "../notify";
 import { personColor } from "../personColors";
+import { VIDEO_KEYS_HINT, useHtmlVideoKeys } from "../useVideoKeys";
 import type {
   CasePerson, Detection, Job, Location, Person, ReferenceImage, ReviewStatus, Segment, Track, Video, VideoProbe,
 } from "../types";
@@ -74,6 +75,7 @@ export default function Results() {
   const navigate = useNavigate();
   const [currentTime, setCurrentTime] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
+  useHtmlVideoKeys(videoRef);
 
   const loadResults = useCallback(() => {
     Promise.all([api.detections(jobId), api.segments(jobId), api.tracks(jobId), api.persons(jobId)])
@@ -542,6 +544,7 @@ export default function Results() {
                   detections={discover ? videoDets.filter(inPerson) : videoDets.filter(isEffectiveMatch)}
                   realTime={video.dvr_start ? (sec) => realTime(video, sec) : undefined}
                   currentTime={currentTime} onSeek={seek} />
+                {!converting && <Text size="xs" c="dimmed" ta="right">{VIDEO_KEYS_HINT}</Text>}
               </>
             )}
           </Stack>
@@ -677,7 +680,7 @@ export default function Results() {
           visiblePersons.length === 0 ? (
             <Text c="dimmed">{running ? "As pessoas são agrupadas no fim da análise…" : "Não foram encontradas faces."}</Text>
           ) : (
-            <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
+            <SimpleGrid cols={{ base: 1, xs: 2, sm: 3, md: 4, xl: 5 }}>
               {visiblePersons.map((p) => (
                 <PersonCard key={p.person_id} person={p} selected={personFilter === p.person_id}
                   others={persons.filter((o) => o.person_id !== p.person_id)}

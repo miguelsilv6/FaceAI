@@ -88,25 +88,25 @@ export default function PersonCard({ person, selected, others, firstRealTime, on
             </Menu>
           </Group>
         </Group>
-        <Group gap={4} grow>
-          <Button size="compact-xs" variant={selected ? "filled" : "subtle"} onClick={() => onSelect(person)}>
-            {selected ? "Selecionada" : "Aparições"}
+        <Stack gap={4}>
+          <Button size="xs" fullWidth variant={selected ? "filled" : "light"} onClick={() => onSelect(person)}>
+            {selected ? "Selecionada" : "Ver aparições"}
           </Button>
           <Tooltip label="Usar a melhor face como amostra para procurar esta pessoa (modo com amostra)">
-            <Button size="compact-xs" variant="subtle" leftSection={<IconUserPlus size={14} />}
+            <Button size="xs" fullWidth variant="default" leftSection={<IconUserPlus size={14} />}
               disabled={person.best_detection_id == null} onClick={() => onUseAsReference(person)}>
-              Amostra
+              Usar como amostra
             </Button>
           </Tooltip>
           {onFindSimilar && (
             <Tooltip label="Procurar esta pessoa noutras análises">
-              <Button size="compact-xs" variant="subtle" leftSection={<IconUsersGroup size={14} />}
+              <Button size="xs" fullWidth variant="default" leftSection={<IconUsersGroup size={14} />}
                 onClick={() => onFindSimilar(person)}>
-                Outras
+                Procurar noutras análises
               </Button>
             </Tooltip>
           )}
-        </Group>
+        </Stack>
       </Stack>
     </Card>
   );
