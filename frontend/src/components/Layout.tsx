@@ -9,6 +9,7 @@ import { api } from "../api";
 import { useAuth } from "../auth";
 import ActivityBar from "./ActivityBar";
 import ErrorBoundary from "./ErrorBoundary";
+import Signature from "./Signature";
 import type { SystemInfo } from "../types";
 
 export default function Layout() {
@@ -66,9 +67,10 @@ export default function Layout() {
           </Group>
         </Group>
       </AppShell.Header>
-      <AppShell.Main>
+      <AppShell.Main style={{ display: "flex", flexDirection: "column" }}>
         <ActivityBar />
-        <ErrorBoundary key={location.pathname}><Outlet /></ErrorBoundary>
+        <div style={{ flex: 1 }}><ErrorBoundary key={location.pathname}><Outlet /></ErrorBoundary></div>
+        <Signature />
       </AppShell.Main>
     </AppShell>
   );
