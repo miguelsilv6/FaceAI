@@ -1,10 +1,11 @@
 import { Alert, Badge, Button, Group, Modal, Stack, Text } from "@mantine/core";
 import { IconAlertTriangle } from "@tabler/icons-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { api, formatTime, realTime } from "../api";
 import { notifyError } from "../notify";
-import { cameraLabel } from "../places";
+import { cameraLabel, cameraName } from "../places";
+import { VIDEO_KEYS_HINT, useHtmlVideoKeys } from "../useVideoKeys";
 import type { Location, Video } from "../types";
 
 /** Leitor de um vídeo importado, com o tempo do vídeo e a hora real do DVR (se acertada). Só visualização. */
@@ -13,6 +14,8 @@ export default function VideoPlayerModal({ video, onClose, onChange, locations =
 }) {
   const [t, setT] = useState(0);
   const [error, setError] = useState(false);
+  const ref = useRef<HTMLVideoElement>(null);
+  useHtmlVideoKeys(ref, !!video);
   if (!video) return null;
   const preparing = video.playback_status === "pending" || video.playback_status === "running";
   const createCopy = async () => {
@@ -25,7 +28,7 @@ export default function VideoPlayerModal({ video, onClose, onChange, locations =
     }
   };
   return (
-    <Modal opened onClose={onClose} size="xl" title={`#${video.id} ${cameraLabel(video, locations)}${cameraLabel(video, locations) === video.filename ? "" : ` (${video.filename})`}`}>
+    <Modal opened onClose={onClose} size="xl" title={`#${video.id} ${cameraLabel(video, locations)}${cameraName(video) === video.filename ? "" : ` (${video.filename})`}`}>
       <Stack gap="xs">
         {preparing ? (
           <Alert color="blue">
@@ -33,7 +36,7 @@ export default function VideoPlayerModal({ video, onClose, onChange, locations =
               ? `${Math.round(video.playback_progress * 100)}%` : "em fila"}). A análise usa sempre o original.
           </Alert>
         ) : (
-          <video key={`${video.id}-${video.playback_status}-${video.playback_format}`} src={api.videoUrl(video)}
+          <video ref={ref} key={`${video.id}-${video.playback_status}-${video.playback_format}`} src={api.videoUrl(video)}
             controls autoPlay preload="metadata" aria-label={`Leitor de ${video.filename}`}
             onTimeUpdate={(e) => setT(e.currentTarget.currentTime)} onError={() => setError(true)}
             onLoadedData={() => setError(false)}
@@ -48,7 +51,10 @@ export default function VideoPlayerModal({ video, onClose, onChange, locations =
           </Alert>
         )}
         <Group justify="space-between" wrap="wrap">
-          <Text size="sm" ff="monospace">vídeo {formatTime(t)} / {formatTime(video.duration_s)}</Text>
+          <Group gap="xs">
+            <Text size="sm" ff="monospace">vídeo {formatTime(t)} / {formatTime(video.duration_s)}</Text>
+            {!preparing && <Text size="xs" c="dimmed">{VIDEO_KEYS_HINT}</Text>}
+          </Group>
           {video.dvr_start ? (
             <Group gap={6}>
               <Badge variant="light" color={video.time_source === "ocr" ? "teal" : "blue"}>hora real</Badge>

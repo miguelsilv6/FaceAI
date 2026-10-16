@@ -9,6 +9,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../api";
 import { cameraLabel, cameraName, groupByLocation } from "../places";
+import { VIDEO_KEYS_HINT, useVideoKeys } from "../useVideoKeys";
 import type { Location, RouteSegment, Video } from "../types";
 
 /** Hora "de parede" do DVR em segundos (sem fuso, tratada como UTC só para fazer contas). */
@@ -132,6 +133,10 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
     }
   }, [wall, playing, speed, cams]);
 
+  // Teclado: ← / → recuam/avançam 10 s no relógio comum; Espaço reproduz/pausa
+  useVideoKeys({ anchor: holder, enabled: cams.length > 0,
+    seek: (d) => setWall((w) => Math.min(t1, Math.max(t0, w + d))), toggle: () => setPlaying((p) => !p) });
+
   if (!cams.length) {
     return <Text c="dimmed" size="sm">Nenhum vídeo com hora real acertada: acerte o relógio no separador Locais e vídeos.</Text>;
   }
@@ -204,7 +209,7 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
           </Group>
         )}
         <Group gap="xs" wrap="wrap">
-          <Tooltip label="Recuar 10 s">
+          <Tooltip label="Recuar 10 s (←)">
             <ActionIcon variant="default" size="lg" aria-label="Recuar 10 segundos" onClick={() => jump(-10)}>
               <IconRewindBackward10 size={18} />
             </ActionIcon>
@@ -212,7 +217,7 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
           <ActionIcon size="lg" aria-label={playing ? "Pausa" : "Reproduzir"} onClick={() => setPlaying((p) => !p)}>
             {playing ? <IconPlayerPause size={18} /> : <IconPlayerPlay size={18} />}
           </ActionIcon>
-          <Tooltip label="Avançar 10 s">
+          <Tooltip label="Avançar 10 s (→)">
             <ActionIcon variant="default" size="lg" aria-label="Avançar 10 segundos" onClick={() => jump(10)}>
               <IconRewindForward10 size={18} />
             </ActionIcon>
@@ -224,6 +229,7 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
             data={["0.5", "1", "2", "4", "8"].map((x) => ({ value: x, label: `${x}×` }))} />
           <Button size="xs" variant="light" leftSection={<IconPlayerSkipForward size={14} />} disabled={!nextSeg}
             onClick={() => nextSeg && setWall(wallSeconds(nextSeg.real_start!) - 2)}>Próxima aparição</Button>
+          {!float && <Text size="xs" c="dimmed">{VIDEO_KEYS_HINT}</Text>}
         </Group>
         <Slider min={t0} max={t1} step={0.1} value={wall} label={(x) => fmt(x)} aria-label="Hora real"
           onChange={(x) => { setPlaying(false); setWall(x); }}
