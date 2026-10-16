@@ -20,7 +20,7 @@ def test_dashboard_counts(client, tmp_path):
     with img.open("rb") as fh:
         client.post(f"/api/cases/{case['id']}/references", files=[("files", ("ref.jpg", fh, "image/jpeg"))])
     entrada = _video(client, case["id"], tmp_path, "entrada.mp4", [(1.0, 2.0, RED), (4.0, 5.0, RED)])
-    rua = _video(client, case["id"], tmp_path, "rua.mp4", [(1.0, 2.0, RED)])
+    _video(client, case["id"], tmp_path, "rua.mp4", [(1.0, 2.0, RED)])
     client.put(f"/api/videos/{entrada['id']}/clock", json={"video_s": 0, "dvr_time": "2026-10-01T10:59:58"})
     job = client.post(f"/api/cases/{case['id']}/jobs",
                       json={"params": {"sample_fps": 2, "threshold": 0.05, "motion_filter": False, "tracking": True,
