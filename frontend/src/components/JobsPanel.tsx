@@ -1,14 +1,15 @@
 import {
-  Accordion, ActionIcon, Alert, Badge, Button, Card, Group, MultiSelect, NumberInput, Progress, SegmentedControl, Select, SimpleGrid, Stack,
+  Accordion, ActionIcon, Alert, Badge, Button, Card, Checkbox, Chip, Group, Input, NumberInput, Progress, SegmentedControl, Select, SimpleGrid, Stack,
   Menu, Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconDownload, IconInfoCircle, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
+import { IconDownload, IconInfoCircle, IconMapPin, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api, formatDate, formatEta } from "../api";
 import { notifyError, notifyOk } from "../notify";
-import type { CasePerson, Job, JobMode, JobParams, ReferenceImage, SystemInfo, Video } from "../types";
+import { cameraName } from "../places";
+import type { CasePerson, Job, JobMode, JobParams, Location, ReferenceImage, SystemInfo, Video } from "../types";
 import DeleteJobModal from "./DeleteJobModal";
 import JobStatusBadge from "./JobStatusBadge";
 import ReferencePicker, { allChoices, choicesToRefIds, type RefChoice } from "./ReferencePicker";
@@ -17,12 +18,13 @@ interface Props {
   caseId: number;
   jobs: Job[];
   videos: Video[];
+  locations: Location[];
   references: ReferenceImage[];
   persons: CasePerson[];
   onChange: () => void;
 }
 
-export default function JobsPanel({ caseId, jobs, videos, references, persons, onChange }: Props) {
+export default function JobsPanel({ caseId, jobs, videos, locations, references, persons, onChange }: Props) {
   const navigate = useNavigate();
   const downloadValidated = async () => {
     try {
@@ -39,7 +41,9 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
   };
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [params, setParams] = useState<JobParams | null>(null);
-  const [videoIds, setVideoIds] = useState<string[]>([]);
+  // Locais escolhidos (todas as câmaras de cada um) e câmaras retiradas individualmente
+  const [locIds, setLocIds] = useState<string[]>([]);
+  const [excluded, setExcluded] = useState<number[]>([]);
   const [choices, setChoices] = useState<RefChoice[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [toDelete, setToDelete] = useState<Job | null>(null);
@@ -52,7 +56,17 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
       setParams({ ...s.defaults, threshold });
     }).catch(notifyError);
   }, []);
-  useEffect(() => setVideoIds(videos.map((v) => String(v.id))), [videos]);
+  const withVideos = useMemo(() => locations.filter((l) => videos.some((v) => v.location_id === l.id)), [locations, videos]);
+  const locKey = withVideos.map((l) => l.id).join(",");
+  useEffect(() => {
+    setLocIds(withVideos.map((l) => String(l.id)));
+    setExcluded([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [locKey]);
+  const chosenVideos = useMemo(() => videos.filter((v) => locIds.includes(String(v.location_id))
+    && !excluded.includes(v.id)), [videos, locIds, excluded]);
+  const videoIds = chosenVideos.map((v) => v.id);
+  const nLocs = new Set(chosenVideos.map((v) => v.location_id)).size;
   useEffect(() => setChoices(allChoices(validRefs, persons)), [validRefs, persons]);
   const refIds = useMemo(() => choicesToRefIds(choices, validRefs), [choices, validRefs]);
   // Sem nenhuma amostra válida, o modo por omissão é a descoberta de todas as faces.
@@ -76,7 +90,9 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
     if (!params) return;
     setSubmitting(true);
     try {
-      const job = await api.createJob(caseId, params, videoIds.map(Number), discover ? [] : refIds);
+      // Sem câmaras retiradas, a análise é pedida por locais (fica registada assim); senão, câmara a câmara.
+      const job = await api.createJob(caseId, params, videoIds, discover ? [] : refIds,
+        excluded.length ? undefined : locIds.map(Number));
       navigate(`/jobs/${job.id}`);
     } catch (e) {
       notifyError(e, "Não foi possível iniciar a análise");
@@ -107,8 +123,54 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
               </Alert>
             )}
             <SimpleGrid cols={{ base: 1, md: discover ? 1 : 2 }}>
-              <MultiSelect label="Vídeos" data={videos.map((v) => ({ value: String(v.id), label: `#${v.id} ${v.filename}` }))}
-                value={videoIds} onChange={setVideoIds} placeholder="Selecione os vídeos" />
+              <Input.Wrapper label="Locais" description={
+                `${discover ? "Todas as faces" : personsCount(choices)} × ${nLocs} ${nLocs === 1 ? "local" : "locais"} (${videoIds.length} câmara${videoIds.length === 1 ? "" : "s"})`}>
+                <Stack gap={6} mt={6}>
+                  {withVideos.length === 0 ? (
+                    <Text size="sm" c="dimmed">Sem vídeos: importe-os no separador "Locais e vídeos".</Text>
+                  ) : (
+                    <Chip.Group multiple value={locIds} onChange={setLocIds}>
+                      <Group gap={6}>
+                        {withVideos.map((l) => {
+                          const n = videos.filter((v) => v.location_id === l.id).length;
+                          return (
+                            <Chip key={l.id} value={String(l.id)} size="sm" icon={<IconMapPin size={12} />}>
+                              {l.name} · {n} câmara{n === 1 ? "" : "s"}
+                            </Chip>
+                          );
+                        })}
+                      </Group>
+                    </Chip.Group>
+                  )}
+                  {locIds.length > 0 && (
+                    <Accordion variant="default" chevronPosition="left">
+                      <Accordion.Item value="cams">
+                        <Accordion.Control py={0}>
+                          <Text size="xs">Ajustar câmaras{excluded.length ? ` (${excluded.length} retirada${excluded.length === 1 ? "" : "s"})` : ""}</Text>
+                        </Accordion.Control>
+                        <Accordion.Panel>
+                          <Stack gap={6}>
+                            {withVideos.filter((l) => locIds.includes(String(l.id))).map((l) => (
+                              <div key={l.id}>
+                                <Text size="xs" fw={600}>{l.name}</Text>
+                                <Group gap="md">
+                                  {videos.filter((v) => v.location_id === l.id).map((v) => (
+                                    <Checkbox key={v.id} size="xs" label={cameraName(v)} checked={!excluded.includes(v.id)}
+                                      onChange={(e) => {
+                                        const on = e.currentTarget.checked;
+                                        setExcluded((x) => (on ? x.filter((i) => i !== v.id) : [...x, v.id]));
+                                      }} />
+                                  ))}
+                                </Group>
+                              </div>
+                            ))}
+                          </Stack>
+                        </Accordion.Panel>
+                      </Accordion.Item>
+                    </Accordion>
+                  )}
+                </Stack>
+              </Input.Wrapper>
               {!discover && (
                 <ReferencePicker refs={validRefs} persons={persons} value={choices} onChange={setChoices}
                   description={personsSummary(validRefs.filter((r) => refIds.includes(r.id)), persons)}
@@ -228,7 +290,7 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
             <Table highlightOnHover>
               <Table.Thead>
                 <Table.Tr><Table.Th>#</Table.Th><Table.Th>Estado</Table.Th><Table.Th>Progresso</Table.Th>
-                  <Table.Th>Modelo / detetor</Table.Th><Table.Th>Vestuário</Table.Th><Table.Th>Resultado</Table.Th><Table.Th>Criada</Table.Th>
+                  <Table.Th>Locais</Table.Th><Table.Th>Modelo / detetor</Table.Th><Table.Th>Vestuário</Table.Th><Table.Th>Resultado</Table.Th><Table.Th>Criada</Table.Th>
                   <Table.Th>Analista</Table.Th><Table.Th /></Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -246,6 +308,10 @@ export default function JobsPanel({ caseId, jobs, videos, references, persons, o
                       {j.status === "running" && (
                         <Text size="xs" c="dimmed" mt={2}>{Math.round(j.progress * 100)}% · {formatEta(j.eta_s)}</Text>
                       )}
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" maw={220} truncate title={jobLocations(j, locations)}>{jobLocations(j, locations) || "—"}</Text>
+                      <Text size="xs" c="dimmed">{j.video_ids.length} câmara{j.video_ids.length === 1 ? "" : "s"}</Text>
                     </Table.Td>
                     <Table.Td>{j.params.model} / {j.params.detector}</Table.Td>
                     <Table.Td>
@@ -329,4 +395,19 @@ function personsSummary(refs: ReferenceImage[], persons: CasePerson[]): string |
   }
   if (groups.size < 2) return undefined;
   return `${groups.size} pessoas na mesma passagem: ${[...groups].map(([l, n]) => `${l} (${n})`).join(" · ")}`;
+}
+
+/** "2 pessoas" / "1 pessoa + 2 fotos" a partir das escolhas de amostras. */
+function personsCount(choices: RefChoice[]): string {
+  const p = choices.filter((c) => c.startsWith("p:")).length;
+  const r = choices.length - p;
+  const parts = [p ? `${p} pessoa${p === 1 ? "" : "s"}` : "", r ? `${r} foto${r === 1 ? "" : "s"}` : ""].filter(Boolean);
+  return parts.join(" + ") || "0 pessoas";
+}
+
+/** Locais de uma análise (nome atual; análises antigas sem registo de locais → vazio). */
+function jobLocations(j: Job, locations: Location[]): string {
+  return (j.params.locations ?? [])
+    .map((l) => locations.find((x) => x.id === l.id)?.name ?? l.name)
+    .filter(Boolean).join(", ");
 }

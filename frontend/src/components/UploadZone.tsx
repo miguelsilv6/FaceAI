@@ -10,18 +10,19 @@ interface Props {
   title: string;
   hint: string;
   icon: ReactNode;
+  compact?: boolean;
 }
 
-export default function UploadZone({ accept, onDrop, progress, title, hint, icon }: Props) {
+export default function UploadZone({ accept, onDrop, progress, title, hint, icon, compact }: Props) {
   return (
     <Stack gap={4}>
       <Dropzone onDrop={onDrop} accept={accept} loading={progress !== null} maxSize={Infinity} multiple>
-        <Group justify="center" gap="lg" mih={110} style={{ pointerEvents: "none" }}>
+        <Group justify="center" gap="lg" mih={compact ? 56 : 110} style={{ pointerEvents: "none" }}>
           <Dropzone.Accept><IconUpload size={40} /></Dropzone.Accept>
           <Dropzone.Idle>{icon}</Dropzone.Idle>
           <div>
-            <Text size="lg" fw={600}>{title}</Text>
-            <Text size="sm" c="dimmed">{hint}</Text>
+            <Text size={compact ? "sm" : "lg"} fw={600}>{title}</Text>
+            <Text size={compact ? "xs" : "sm"} c="dimmed">{hint}</Text>
           </div>
         </Group>
       </Dropzone>

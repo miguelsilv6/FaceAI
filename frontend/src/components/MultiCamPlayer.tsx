@@ -8,7 +8,8 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { api } from "../api";
-import type { RouteSegment, Video } from "../types";
+import { cameraLabel, cameraName, groupByLocation } from "../places";
+import type { Location, RouteSegment, Video } from "../types";
 
 /** Hora "de parede" do DVR em segundos (sem fuso, tratada como UTC só para fazer contas). */
 export function wallSeconds(iso: string): number {
@@ -29,10 +30,13 @@ export interface SeekRequest {
  * Várias câmaras lado a lado, sincronizadas pela hora real do DVR: um relógio comum comanda todos os vídeos.
  * Só visualização: a análise e as evidências usam sempre os ficheiros originais.
  */
-export default function MultiCamPlayer({ videos, segments, seek }: {
-  videos: Video[]; segments: RouteSegment[]; seek: SeekRequest | null;
+export default function MultiCamPlayer({ videos, segments, seek, locations = [] }: {
+  videos: Video[]; segments: RouteSegment[]; seek: SeekRequest | null; locations?: Location[];
 }) {
-  const cams = useMemo(() => videos.filter((v) => v.dvr_start && v.duration_s > 0), [videos]);
+  // Câmaras com hora acertada, pela ordem dos locais
+  const camGroups = useMemo(() => groupByLocation(videos.filter((v) => v.dvr_start && v.duration_s > 0), locations)
+    .filter((g) => g.videos.length), [videos, locations]);
+  const cams = useMemo(() => camGroups.flatMap((g) => g.videos), [camGroups]);
   const [shown, setShown] = useState<string[]>([]);
   const [wall, setWall] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -129,7 +133,7 @@ export default function MultiCamPlayer({ videos, segments, seek }: {
   }, [wall, playing, speed, cams]);
 
   if (!cams.length) {
-    return <Text c="dimmed" size="sm">Nenhum vídeo com hora real acertada: acerte o relógio no separador Vídeos.</Text>;
+    return <Text c="dimmed" size="sm">Nenhum vídeo com hora real acertada: acerte o relógio no separador Locais e vídeos.</Text>;
   }
 
   const visible = cams.filter((v) => shown.includes(String(v.id)) && (focus == null || focus === v.id));
@@ -183,8 +187,18 @@ export default function MultiCamPlayer({ videos, segments, seek }: {
               </Button>
             </Button.Group>
             <Chip.Group multiple value={shown} onChange={setShown}>
-              <Group gap={4}>
-                {cams.map((v) => <Chip key={v.id} size="xs" value={String(v.id)}>{v.filename}</Chip>)}
+              <Group gap="sm">
+                {camGroups.map((g) => (
+                  <Group key={g.location?.id ?? 0} gap={4} wrap="wrap">
+                    {g.location && camGroups.length > 1 && (
+                      <Tooltip label={`Mostrar só as câmaras de ${g.location.name}`}>
+                        <Button size="compact-xs" variant="light" color="indigo"
+                          onClick={() => setShown(g.videos.map((v) => String(v.id)))}>Só {g.location.name}</Button>
+                      </Tooltip>
+                    )}
+                    {g.videos.map((v) => <Chip key={v.id} size="xs" value={String(v.id)}>{cameraName(v)}</Chip>)}
+                  </Group>
+                ))}
               </Group>
             </Chip.Group>
           </Group>
@@ -231,11 +245,11 @@ export default function MultiCamPlayer({ videos, segments, seek }: {
                 borderRadius: 6,
               }}>
                 <Group justify="space-between" gap={4} wrap="nowrap" mb={4}>
-                  <Text size="xs" fw={600} truncate="end" title={v.filename}>{v.filename}</Text>
+                  <Text size="xs" fw={600} truncate="end" title={v.filename}>{cameraLabel(v, locations)}</Text>
                   <Group gap={4} wrap="nowrap">
                     {active.map((s, i) => <Badge key={i} size="xs" color="red">{s.person_label}</Badge>)}
                     <Tooltip label={focus === v.id ? "Ver todas" : "Ampliar esta câmara"}>
-                      <ActionIcon size="sm" variant="subtle" aria-label={focus === v.id ? "Ver todas as câmaras" : `Ampliar ${v.filename}`}
+                      <ActionIcon size="sm" variant="subtle" aria-label={focus === v.id ? "Ver todas as câmaras" : `Ampliar ${cameraLabel(v, locations)}`}
                         onClick={() => setFocus((f) => (f === v.id ? null : v.id))}>
                         {focus === v.id ? <IconArrowsMinimize size={14} /> : <IconArrowsMaximize size={14} />}
                       </ActionIcon>

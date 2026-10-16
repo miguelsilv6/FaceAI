@@ -6,13 +6,15 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApiError, api, formatTime, realTime } from "../api";
 import { notifyError, notifyOk } from "../notify";
-import type { ClockCalibration, OcrTest, Video } from "../types";
+import { cameraLabel } from "../places";
+import type { ClockCalibration, Location, OcrTest, Video } from "../types";
 
 interface Props {
   video: Video;
   opened: boolean;
   onClose: () => void;
   onSaved: (v: Video) => void;
+  locations?: Location[];
 }
 
 type Roi = [number, number, number, number];
@@ -27,7 +29,7 @@ const DATE_ORDERS = [
  * Acerto da hora real de um vídeo: OCR da data/hora impressa na imagem (zona automática ou marcada com o rato),
  * acerto manual a partir de um frame, e desvio do relógio do DVR.
  */
-export default function ClockModal({ video, opened, onClose, onSaved }: Props) {
+export default function ClockModal({ video, opened, onClose, onSaved, locations = [] }: Props) {
   const [t, setT] = useState(0);
   const [roi, setRoi] = useState<Roi | null>((video.time_calibration as ClockCalibration)?.roi as Roi ?? null);
   const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
@@ -120,7 +122,7 @@ export default function ClockModal({ video, opened, onClose, onSaved }: Props) {
 
   const pct = (v: number) => `${v * 100}%`;
   return (
-    <Modal opened={opened} onClose={onClose} size="xl" title={`Hora real — ${video.filename}`}>
+    <Modal opened={opened} onClose={onClose} size="xl" title={`Hora real — ${cameraLabel(video, locations)}`}>
       <Stack>
         {video.dvr_start ? (
           <Alert color="green" icon={<IconClock size={18} />}>

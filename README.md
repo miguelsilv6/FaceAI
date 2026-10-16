@@ -148,7 +148,14 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 
 1. **Novo caso:** indica o nome ou referência do processo. Ficas como responsável do caso e podes dar acesso a colegas no separador *Equipa*. O nome e a descrição podem ser editados depois (✏️ ao lado do nome do caso). Os valores anteriores ficam na auditoria.
 2. **Referências/Pessoas:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
-3. **Vídeos:** arrasta os ficheiros de CCTV. O envio é **em blocos e retomável**: se a ligação cair, volta a largar o mesmo ficheiro e o upload continua de onde parou, mesmo depois de recarregar a página. Os metadados são extraídos automaticamente. Se o browser não conseguir reproduzir o vídeo e houver `ffmpeg`, é criada uma **cópia H.264 só para visualização**. A análise usa sempre o original. Os casos típicos são H.265/HEVC, `.dav`, `.avi`/MPEG-4, H.264 a 10 bits ou 4:2:2/4:4:4, que dão a mensagem "nenhum vídeo com formato e tipo MIME suportado".
+3. **Locais e vídeos:** o caso organiza-se em **locais** (ex.: "Estação", "Rua Direita n.º 10"), cada um com os vídeos das suas **câmaras** (os vários ângulos de CCTV desse local).
+   - **Novo local** cria um local; o nome pode ser mudado depois (✏️). Um local só pode ser eliminado quando estiver vazio.
+   - Cada local tem a sua zona de importação: os vídeos largados aí ficam nesse local.
+   - Cada vídeo tem um **nome de câmara** editável na tabela (por omissão, o nome do ficheiro). Em toda a aplicação (resultados, percurso, painel, relatórios, CSV/JSON e ZIP de frames) o vídeo é identificado como **"Local · Câmara"**, e o nome do ficheiro original continua visível.
+   - O menu ⋯ de cada vídeo permite **movê-lo para outro local** ou eliminá-lo. As mudanças ficam na auditoria (`location.*`, `video.updated`).
+   - Os casos de versões anteriores ganham, no arranque, um local **"Geral"** com todos os vídeos existentes. Os vídeos importados sem local (API antiga) também vão para o "Geral".
+
+   Importação: arrasta os ficheiros de CCTV. O envio é **em blocos e retomável**: se a ligação cair, volta a largar o mesmo ficheiro e o upload continua de onde parou, mesmo depois de recarregar a página. Os metadados são extraídos automaticamente. Se o browser não conseguir reproduzir o vídeo e houver `ffmpeg`, é criada uma **cópia H.264 só para visualização**. A análise usa sempre o original. Os casos típicos são H.265/HEVC, `.dav`, `.avi`/MPEG-4, H.264 a 10 bits ou 4:2:2/4:4:4, que dão a mensagem "nenhum vídeo com formato e tipo MIME suportado".
    - A decisão usa o `ffprobe` (codec e formato de cor), e não só a extensão.
    - As conversões correm numa fila, uma de cada vez. A coluna **Reprodução no browser** mostra o estado e o progresso: em fila, a converter, pronta ou falhou.
    - As conversões interrompidas por um reinício são retomadas no arranque. Os vídeos importados por versões anteriores são avaliados nessa altura.
@@ -160,7 +167,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 
      O aviso mostra o diagnóstico: erro do browser, contentor e codec reais do original, e codecs suportados pelo browser.
    - O `ffprobe` também deteta as exportações de DVR com extensão `.mp4` que são, na verdade, H.264 "cru".
-4. **Análises:** escolhe o modo (**procurar uma pessoa** com amostra, ou **descobrir todas as faces** sem amostra), os vídeos, as referências, o modelo, os fps e o limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo, com o **tempo restante estimado** e a hora prevista de fim. A estimativa usa o ritmo do último minuto, porque frames sem movimento ou sem faces são muito mais rápidos do que frames com várias faces.
+4. **Análises:** escolhe o modo (**procurar pessoa(s)** com amostra, ou **descobrir todas as faces** sem amostra), as **pessoas** e os **locais** a analisar. Uma só análise procura, por exemplo, as Pessoas A e B nos Locais X, Y e Z (resumo "2 pessoas × 3 locais (7 câmaras)"). Por omissão entram todos os locais; em "Ajustar câmaras" podem retirar-se câmaras individuais. Os locais abrangidos ficam registados na análise (`params.locations`, com o nome na altura) e no relatório. Nos resultados, o vídeo escolhe-se numa lista agrupada por local e há um filtro por local ao lado do filtro de pessoa. Escolhe também o modelo, os fps e o limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo, com o **tempo restante estimado** e a hora prevista de fim. A estimativa usa o ritmo do último minuto, porque frames sem movimento ou sem faces são muito mais rápidos do que frames com várias faces.
 5. **Resultados:**
    - player com linha temporal e tabela de segmentos, e botões ◀ ▶ para passar ao vídeo anterior ou seguinte;
    - **vista por tracks**: um cartão por pessoa ou trajetória, com revisão do track inteiro;
@@ -199,12 +206,13 @@ O botão **Procurar noutras análises** (👥), num track ou numa pessoa, compar
 ### Painel do caso
 O separador **Painel**, o primeiro de cada caso, resume o caso num relance. Por omissão considera todas as análises concluídas; também se pode escolher só algumas.
 - **Indicadores:**
-  - vídeos (duração, quantos não têm hora real, espaço ocupado);
+  - locais e câmaras (duração, quantos vídeos não têm hora real, espaço ocupado);
   - análises concluídas e em curso;
   - correspondências e tracks;
   - percentagem da revisão feita.
 - **Progresso da revisão:** confirmadas, rejeitadas e por rever. O botão **Rever pendentes** abre a análise com mais deteções por rever.
-- **Por câmara:** correspondências de cada câmara divididas pelo estado da revisão, com o intervalo de hora real. Clicar abre a análise nesse vídeo.
+- **Por local:** correspondências de cada local (soma das suas câmaras), pelo estado da revisão.
+- **Por câmara:** correspondências de cada câmara ("Local · Câmara") divididas pelo estado da revisão, com o intervalo de hora real. Clicar abre a análise nesse vídeo.
 - **Por hora real:** histograma das correspondências por hora. As dos vídeos sem relógio acertado são indicadas à parte.
 - **Por pessoa:** só aparece quando a análise procura várias pessoas.
 - **Atividade recente:** os últimos eventos da auditoria.
@@ -222,9 +230,10 @@ Para identificar a mesma pessoa em vários casos, em **Referências/Pessoas** ab
 ### Percurso multi-câmara
 O separador **Percurso/Multi View** do caso junta as aparições das análises escolhidas e ordena-as pela **hora real do DVR**.
 - Por omissão escolhe todas as análises "procurar" concluídas, para juntar câmaras analisadas à parte.
-- Mostra uma linha por câmara (mesmo as que não têm aparições), com blocos coloridos por pessoa (tracejados se a aparição vier só do vestuário), e a lista cronológica, exportável em CSV.
+- Mostra uma linha por câmara (mesmo as que não têm aparições), **agrupadas por local**, com blocos coloridos por pessoa (tracejados se a aparição vier só do vestuário), e a lista cronológica, exportável em CSV (colunas `local`, `camara` e `ficheiro`).
+- O campo **Local** limita o percurso e o leitor a um só local.
 - Os vídeos sem hora acertada ficam fora do eixo e são assinalados.
-- **Leitor multi-câmara:** os vídeos das câmaras com hora acertada aparecem lado a lado e são comandados por um relógio comum, na hora real do DVR. Inclui play/pausa, ±10 s, velocidade de 0,5× a 8×, "Próxima aparição", escolha das câmaras visíveis e ampliação de uma câmara.
+- **Leitor multi-câmara:** os vídeos das câmaras com hora acertada aparecem lado a lado e são comandados por um relógio comum, na hora real do DVR. Inclui play/pausa, ±10 s, velocidade de 0,5× a 8×, "Próxima aparição", escolha das câmaras visíveis (agrupadas por local, com "Só <local>") e ampliação de uma câmara.
   - A câmara onde a pessoa aparece nesse instante fica com contorno vermelho e o nome da pessoa.
   - Clicar num bloco do percurso leva todas as câmaras para esse instante. "Resultados", na lista, abre a análise.
   - Funciona mesmo antes de haver análises. É só para visualização: as evidências usam sempre os originais.
@@ -302,7 +311,7 @@ O nome do ficheiro identifica o caso, a análise, o vídeo, o frame, o tempo e a
 
 ### Hora real do CCTV
 
-Por omissão, os tempos são relativos ao início do ficheiro (`00:01:23.400`). Em **Vídeos → Acertar hora** há três formas de os converter em hora real:
+Por omissão, os tempos são relativos ao início do ficheiro (`00:01:23.400`). Em **Locais e vídeos → Acertar hora** há três formas de os converter em hora real:
 
 1. **OCR da data/hora gravada na imagem.** É feito **automaticamente na importação** de cada vídeo, em segundo plano e com prioridade baixa. A hora só é aplicada se as leituras forem coerentes, e fica marcada como "OCR automático" para confirmar. Se não houver leitura válida, o vídeo fica "OCR sem resultado" e acerta-se à mão. Nunca é substituída uma hora já acertada. Também se pode repetir pelo botão do relógio: a zona da data/hora é detetada automaticamente, ou marcada arrastando o rato sobre o frame. O OCR usa o RapidOCR (PP-OCR em ONNX Runtime, com os modelos incluídos no pacote, sem downloads) e lê ~12 frames distribuídos pelo vídeo. A seguir faz-se um **ajuste robusto**:
    - as leituras erradas são descartadas;

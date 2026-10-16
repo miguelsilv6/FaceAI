@@ -1,6 +1,6 @@
 import type {
   CaseDashboard,
-  Activity, CasePerson, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
+  Activity, CasePerson, Location, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
 
@@ -85,8 +85,9 @@ function storage(op: "get" | "set" | "remove", key: string, value?: string): str
  * recarregar a página), o upload continua de onde ficou.
  */
 async function uploadChunked<T>(caseId: number, kind: "video" | "reference", file: File,
-  onBytes: (sent: number) => void): Promise<T> {
-  const key = `faceai.upload.${caseId}.${kind}.${file.name}.${file.size}.${file.lastModified}`;
+  onBytes: (sent: number) => void, locationId?: number | null): Promise<T> {
+  const loc = locationId != null ? `.l${locationId}` : "";
+  const key = `faceai.upload.${caseId}.${kind}${loc}.${file.name}.${file.size}.${file.lastModified}`;
   let status: UploadStatus | null = null;
   const saved = storage("get", key);
   if (saved) {
@@ -105,7 +106,7 @@ async function uploadChunked<T>(caseId: number, kind: "video" | "reference", fil
   }
   if (!status) {
     status = await request<UploadStatus>("POST", `/api/cases/${caseId}/uploads`,
-      { kind, filename: file.name, size_bytes: file.size });
+      { kind, filename: file.name, size_bytes: file.size, location_id: locationId ?? null });
     storage("set", key, status.id);
   }
   let offset = status.received_bytes;
@@ -137,12 +138,12 @@ async function uploadChunked<T>(caseId: number, kind: "video" | "reference", fil
 }
 
 async function uploadMany<T>(caseId: number, kind: "video" | "reference", files: File[],
-  onProgress?: (fraction: number) => void): Promise<T[]> {
+  onProgress?: (fraction: number) => void, locationId?: number | null): Promise<T[]> {
   const total = files.reduce((n, f) => n + f.size, 0) || 1;
   let done = 0;
   const results: T[] = [];
   for (const f of files) {
-    results.push(await uploadChunked<T>(caseId, kind, f, (sent) => onProgress?.((done + sent) / total)));
+    results.push(await uploadChunked<T>(caseId, kind, f, (sent) => onProgress?.((done + sent) / total), locationId));
     done += f.size;
   }
   return results;
@@ -223,8 +224,15 @@ export const api = {
   referenceImageUrl: (id: number, face = false) => `/api/references/${id}/image${face ? "?face=true" : ""}`,
 
   videos: (caseId: number) => request<Video[]>("GET", `/api/cases/${caseId}/videos`),
-  uploadVideos: (caseId: number, files: File[], onProgress?: (f: number) => void) =>
-    uploadMany<Video>(caseId, "video", files, onProgress),
+  uploadVideos: (caseId: number, files: File[], onProgress?: (f: number) => void, locationId?: number | null) =>
+    uploadMany<Video>(caseId, "video", files, onProgress, locationId),
+  updateVideo: (id: number, body: { location_id?: number; camera_name?: string }) =>
+    request<Video>("PATCH", `/api/videos/${id}`, body),
+  locations: (caseId: number) => request<Location[]>("GET", `/api/cases/${caseId}/locations`),
+  createLocation: (caseId: number, name: string) =>
+    request<Location>("POST", `/api/cases/${caseId}/locations`, { name }),
+  renameLocation: (id: number, name: string) => request<Location>("PATCH", `/api/locations/${id}`, { name }),
+  deleteLocation: (id: number) => request<void>("DELETE", `/api/locations/${id}`),
   /** O parâmetro muda quando a cópia de reprodução muda, para o browser não reutilizar a versão anterior em cache. */
   videoUrl: (v: Pick<Video, "id" | "playback_status" | "playback_format">) =>
     `/api/videos/${v.id}/stream?v=${v.playback_status === "ready" ? `copy-${v.playback_format || "mp4"}` : "original"}`,
@@ -244,10 +252,12 @@ export const api = {
 
   jobs: (caseId: number) => request<Job[]>("GET", `/api/cases/${caseId}/jobs`),
   job: (id: number) => request<Job>("GET", `/api/jobs/${id}`),
-  createJob: (caseId: number, params: Partial<JobParams>, videoIds: number[], referenceIds: number[]) =>
+  /** Com locationIds, a análise abrange todas as câmaras desses locais (os videoIds são ignorados). */
+  createJob: (caseId: number, params: Partial<JobParams>, videoIds: number[], referenceIds: number[],
+    locationIds?: number[]) =>
     request<Job>("POST", `/api/cases/${caseId}/jobs`, {
       params,
-      video_ids: videoIds,
+      ...(locationIds ? { location_ids: locationIds } : { video_ids: videoIds }),
       reference_ids: referenceIds,
     }),
   cancelJob: (id: number) => request<Job>("POST", `/api/jobs/${id}/cancel`),

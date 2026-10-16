@@ -24,9 +24,21 @@ export interface ReferenceImage {
   source_detection_id: number | null;
 }
 
+export interface Location {
+  id: number;
+  case_id: number;
+  name: string;
+  created_by: string;
+  created_at: string;
+  video_ids: number[];
+  duration_s: number;
+}
+
 export interface Video {
   id: number;
   case_id: number;
+  location_id: number | null;
+  camera_name: string;
   filename: string;
   size_bytes: number;
   duration_s: number;
@@ -99,6 +111,7 @@ export interface SearchedPerson {
 export interface JobParams {
   mode: JobMode;
   persons?: SearchedPerson[]; // modo procurar: pessoas (grupos de referências)
+  locations?: { id: number | null; name: string; video_ids: number[] }[]; // locais abrangidos (nome na altura)
   model: string | null;
   detector: string | null;
   sample_fps: number;
@@ -406,6 +419,10 @@ export interface SimilarTrack {
   person_id: number | null;
   video_id: number;
   video_filename: string;
+  location_id: number | null;
+  location_name: string;
+  camera_name: string;
+  camera_label: string;
   start_s: number;
   end_s: number;
   real_start: string | null;
@@ -435,6 +452,10 @@ export interface RouteSegment {
   person_label: string;
   video_id: number;
   video_filename: string;
+  location_id: number | null;
+  location_name: string;
+  camera_name: string;
+  camera_label: string;
   start_s: number;
   end_s: number;
   real_start: string | null;
@@ -448,7 +469,9 @@ export interface CaseRoute {
   segments: RouteSegment[];
   unsynced: RouteSegment[];
   jobs: number[];
-  videos: { id: number; filename: string; synced: boolean; appearances: number }[];
+  videos: { id: number; filename: string; location_id: number | null; location_name: string; camera_name: string;
+    camera_label: string; synced: boolean; appearances: number }[];
+  locations: { id: number; name: string }[];
 }
 
 export interface CasePerson {
@@ -464,12 +487,15 @@ export interface CasePerson {
 
 export interface CaseDashboard {
   jobs_considered: number[];
-  material: { videos: number; duration_s: number; videos_synced: number; references: number; references_valid: number;
+  material: { locations: number; videos: number; duration_s: number; videos_synced: number; references: number; references_valid: number;
     persons: number; size_bytes: number };
   jobs: { total: number; by_status: Partial<Record<JobStatus, number>> };
   review: { matches: number; confirmed: number; rejected: number; pending: number; clothing: number; tracks: number;
     tracks_confirmed: number; tracks_rejected: number; tracks_pending: number };
-  per_camera: { video_id: number; filename: string; synced: boolean; matches: number; confirmed: number; rejected: number;
+  per_location: { location_id: number; name: string; cameras: number; matches: number; confirmed: number;
+    rejected: number; pending: number; clothing: number }[];
+  per_camera: { video_id: number; filename: string; location_id: number | null; location_name: string;
+    camera_name: string; camera_label: string; synced: boolean; matches: number; confirmed: number; rejected: number;
     pending: number; clothing: number; first: string | null; last: string | null; first_s: number | null;
     last_s: number | null; job_ids: number[] }[];
   per_hour: { hour: string; matches: number }[];
