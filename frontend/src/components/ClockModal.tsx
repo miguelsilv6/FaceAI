@@ -1,5 +1,5 @@
 import {
-  Alert, Badge, Box, Button, Group, Modal, NumberInput, Select, Slider, Stack, Table, Tabs, Text, TextInput,
+  Alert, Badge, Box, Button, Group, Modal, NumberInput, ScrollArea, Select, Slider, Stack, Table, Tabs, Text, TextInput,
 } from "@mantine/core";
 import { IconAlertTriangle, IconClock, IconScan, IconWand } from "@tabler/icons-react";
 import { useEffect, useRef, useState } from "react";
@@ -92,24 +92,30 @@ export default function ClockModal({ video, opened, onClose, onSaved }: Props) {
   });
   const calibrate = () => run("ocr", async () => {
     const v = await api.clockOcr(video.id, { roi, samples, date_order: dateOrder, clock_offset_s: offset, note });
-    setCalibration(v.time_calibration as ClockCalibration);
-    notifyOk(`Hora acertada por OCR: início ${realTime(v, 0)}`);
+    const cal = v.time_calibration as ClockCalibration;
+    setCalibration(cal);
+    notifyOk(`Hora acertada por OCR: início ${realTime(v, 0)} · ${cal.inliers ?? "?"}/${cal.samples?.length ?? "?"} leituras `
+      + `consistentes · erro máx. ${cal.max_residual_s ?? "?"} s`);
     onSaved(v);
+    onClose();
   });
   const saveManual = () => run("manual", async () => {
     const dvr = manual.trim().replace(" ", "T");
     const v = await api.clockManual(video.id, { video_s: t, dvr_time: dvr, clock_offset_s: offset, note });
     notifyOk(`Hora acertada manualmente: início ${realTime(v, 0)}`);
     onSaved(v);
+    onClose();
   });
   const saveOffset = () => run("offset", async () => {
     onSaved(await api.clockOffset(video.id, offset, note));
     notifyOk("Desvio atualizado.");
+    onClose();
   });
   const reset = () => run("reset", async () => {
     onSaved(await api.clockReset(video.id));
     setCalibration(null);
     notifyOk("Hora real removida.");
+    onClose();
   });
 
   const pct = (v: number) => `${v * 100}%`;
@@ -195,8 +201,10 @@ export default function ClockModal({ video, opened, onClose, onSaved }: Props) {
                         ? ` · taxa ${calibration.rate.toFixed(4)} (fps nominal ≠ tempo real)` : ""}
                     </Text>
                   )}
-                  <Table.ScrollContainer minWidth={500} mah={220}>
-                    <Table fz="xs" striped>
+                  {/* Scroll vertical (o ScrollContainer só faz scroll na horizontal e cortava as linhas). */}
+                  <ScrollArea.Autosize mah={360} type="auto" offsetScrollbars>
+                  <Table.ScrollContainer minWidth={500}>
+                    <Table fz="xs" striped stickyHeader>
                       <Table.Thead>
                         <Table.Tr><Table.Th>Vídeo</Table.Th><Table.Th>Texto lido</Table.Th><Table.Th>Data/hora</Table.Th>
                           <Table.Th /></Table.Tr>
@@ -220,6 +228,7 @@ export default function ClockModal({ video, opened, onClose, onSaved }: Props) {
                       </Table.Tbody>
                     </Table>
                   </Table.ScrollContainer>
+                  </ScrollArea.Autosize>
                 </>
               )}
             </Stack>

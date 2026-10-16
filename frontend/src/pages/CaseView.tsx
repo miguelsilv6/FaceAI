@@ -148,7 +148,7 @@ export default function CaseView() {
           <ReferencesPanel caseId={caseId} references={references} persons={persons} onChange={reload} />
         </Tabs.Panel>
         <Tabs.Panel value="videos" pt="md">
-          <VideosPanel caseId={caseId} videos={videos} onChange={reloadVideos} />
+          <VideosPanel caseId={caseId} videos={videos} jobs={jobs} canManage={canManage} onChange={reloadVideos} />
         </Tabs.Panel>
         <Tabs.Panel value="jobs" pt="md">
           <JobsPanel caseId={caseId} jobs={jobs} videos={videos} references={references} persons={persons}

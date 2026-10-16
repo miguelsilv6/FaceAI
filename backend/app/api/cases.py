@@ -34,6 +34,7 @@ from ..schemas import (
     CaseUpdate,
     MemberAdd,
     ReferenceUpdate,
+    VideoDelete,
 )
 from ..services import disk
 from ..services.audit import log_event
@@ -506,6 +507,44 @@ def stream_video(video_id: int, session: SessionDep) -> FileResponse:
 
 # O mesmo URL serve o original ou a cópia de reprodução, que pode mudar: o browser tem de revalidar.
 _NO_CACHE = {"Cache-Control": "no-cache"}
+
+
+@router.delete("/videos/{video_id}", status_code=204)
+def delete_video(video_id: int, body: VideoDelete, session: SessionDep, user: CurrentUser) -> None:
+    """Elimina um vídeo importado (original e cópia de reprodução).
+
+    Para não deixar resultados sem o vídeo de origem, um vídeo usado em análises só pode ser eliminado depois de
+    eliminadas essas análises. A auditoria é append-only: é acrescentado um "video.deleted" com o resumo e o motivo.
+    """
+    video = session.get(Video, video_id)
+    if video is None:
+        raise HTTPException(404, "Vídeo não encontrado.")
+    _require_manager(session, user, video.case_id)
+    if body.confirm_video_id != video_id:
+        raise HTTPException(422, "Confirmação inválida: indique o número do vídeo a eliminar.")
+    used = [j.id for j in session.exec(select(Job).where(Job.case_id == video.case_id).order_by(Job.id))
+            if video_id in (j.video_ids or [])]
+    if used:
+        raise HTTPException(409, "Este vídeo é usado nas análises " + ", ".join(f"#{i}" for i in used)
+                            + ". Elimine-as primeiro (os resultados dependem do vídeo original).")
+    cancel_copies([video_id])
+    files = [Path(p) for p in (video.stored_path, video.playback_path) if p]
+    summary = {"video_id": video_id, "reason": body.reason.strip(),
+               **video.model_dump(mode="json", exclude={"stored_path", "playback_path", "time_calibration"})}
+    case_id = video.case_id
+    session.delete(video)
+    session.commit()
+    removed = 0
+    for f in files:
+        try:
+            if f.is_file():
+                removed += f.stat().st_size
+                f.unlink()
+        except OSError:
+            pass
+    summary["files_removed_bytes"] = removed
+    disk.forget(case_id)
+    log_event(session, "video.deleted", case_id=case_id, actor=user.username, details=summary)
 
 
 @router.post("/videos/{video_id}/playback", response_model=Video)
