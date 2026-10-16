@@ -127,14 +127,6 @@ export default function Results() {
     }, 2000);
     return () => clearInterval(t);
   }, [converting, caseId, jobVideoIds]);
-  const videoIndex = videos.findIndex((v) => v.id === videoId);
-  const goToVideo = (delta: number) => {
-    const next = videos[videoIndex + delta];
-    if (next) {
-      setVideoId(next.id);
-      setCurrentTime(0);
-    }
-  };
   // Cópia de reprodução de todos os vídeos do caso: se o browser não reproduz um, os outros do mesmo DVR também não.
   const createPlaybackCopy = async (format?: "mp4" | "webm") => {
     if (!video || !job) return;
@@ -185,6 +177,32 @@ export default function Results() {
   // Uma deteção conta como correspondência se estiver abaixo do limiar ou pertencer a um track com correspondência.
   const isEffectiveMatch = (d: Detection) => d.is_match || (d.track_id != null && !!trackById.get(d.track_id)?.is_match);
   const videoDets = useMemo(() => detections.filter((d) => d.video_id === videoId), [detections, videoId]);
+  // Correspondências por vídeo (o mesmo critério dos contadores do cabeçalho; no modo descoberta, todas as faces)
+  // — para o filtro "só vídeos com deteções".
+  const countByVideo = new Map<number, number>();
+  for (const d of detections) {
+    if (discover || isEffectiveMatch(d)) countByVideo.set(d.video_id, (countByVideo.get(d.video_id) ?? 0) + 1);
+  }
+  for (const t of bodyTracks) {
+    if (t.evidence === "vestuário") countByVideo.set(t.video_id, (countByVideo.get(t.video_id) ?? 0) + 1);
+  }
+  const [onlyWithDets, setOnlyWithDets] = useState(false);
+  const withDets = videos.filter((v) => (countByVideo.get(v.id) ?? 0) > 0);
+  const navVideos = onlyWithDets && withDets.length ? withDets : videos;
+  const navKey = navVideos.map((v) => v.id).join(",");
+  useEffect(() => {
+    // O vídeo atual saiu da lista filtrada: passa para o primeiro com deteções.
+    if (onlyWithDets && navVideos.length && !navVideos.some((v) => v.id === videoId)) setVideoId(navVideos[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onlyWithDets, navKey]);
+  const videoIndex = navVideos.findIndex((v) => v.id === videoId);
+  const goToVideo = (delta: number) => {
+    const next = navVideos[videoIndex + delta];
+    if (next) {
+      setVideoId(next.id);
+      setCurrentTime(0);
+    }
+  };
   const visible = useMemo(() => {
     const list = videoDets.filter((d) => (trackFilter == null || d.track_id === trackFilter) && (discover
       ? inPerson(d)
@@ -423,16 +441,22 @@ export default function Results() {
                   <ActionIcon variant="default" size="lg" aria-label="Vídeo anterior" disabled={videoIndex <= 0}
                     onClick={() => goToVideo(-1)}><IconChevronLeft size={18} /></ActionIcon>
                 </Tooltip>
-                <Select label={`Vídeo (${videoIndex + 1} de ${videos.length})`} style={{ flex: 1 }}
+                <Select label={`Vídeo (${videoIndex + 1} de ${navVideos.length})`} style={{ flex: 1 }}
                   value={videoId ? String(videoId) : null} allowDeselect={false}
-                  data={videos.map((v) => ({ value: String(v.id), label: `#${v.id} ${v.filename}` }))}
+                  data={navVideos.map((v) => ({ value: String(v.id),
+                    label: `#${v.id} ${v.filename} · ${countByVideo.get(v.id) ?? 0} ${discover ? "faces" : "deteções"}` }))}
                   onChange={(v) => v && setVideoId(Number(v))} />
                 <Tooltip label="Vídeo seguinte">
                   <ActionIcon variant="default" size="lg" aria-label="Vídeo seguinte"
-                    disabled={videoIndex < 0 || videoIndex >= videos.length - 1}
+                    disabled={videoIndex < 0 || videoIndex >= navVideos.length - 1}
                     onClick={() => goToVideo(1)}><IconChevronRight size={18} /></ActionIcon>
                 </Tooltip>
               </Group>
+            )}
+            {videos.length > 1 && !running && (
+              <Switch size="xs" checked={onlyWithDets} onChange={(e) => setOnlyWithDets(e.currentTarget.checked)}
+                disabled={!withDets.length}
+                label={`Só vídeos com ${discover ? "faces" : "deteções"} (${withDets.length} de ${videos.length})`} />
             )}
             {video && (
               <>

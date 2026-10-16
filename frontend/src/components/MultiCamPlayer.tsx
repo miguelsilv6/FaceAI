@@ -171,11 +171,23 @@ export default function MultiCamPlayer({ videos, segments, seek }: {
           )}
         </Group>
         {cams.length > 1 && !float && (
-          <Chip.Group multiple value={shown} onChange={setShown}>
-            <Group gap={4}>
-              {cams.map((v) => <Chip key={v.id} size="xs" value={String(v.id)}>{v.filename}</Chip>)}
-            </Group>
-          </Chip.Group>
+          <Group gap={6} wrap="wrap" align="center">
+            <Button.Group>
+              <Button size="compact-xs" variant="default" onClick={() => setShown(cams.map((v) => String(v.id)))}>
+                Todas
+              </Button>
+              <Button size="compact-xs" variant="default" onClick={() => setShown([])}>Nenhuma</Button>
+              <Button size="compact-xs" variant="default"
+                onClick={() => setShown(cams.map((v) => String(v.id)).filter((id) => !shown.includes(id)))}>
+                Inverter
+              </Button>
+            </Button.Group>
+            <Chip.Group multiple value={shown} onChange={setShown}>
+              <Group gap={4}>
+                {cams.map((v) => <Chip key={v.id} size="xs" value={String(v.id)}>{v.filename}</Chip>)}
+              </Group>
+            </Chip.Group>
+          </Group>
         )}
         <Group gap="xs" wrap="wrap">
           <Tooltip label="Recuar 10 s">
@@ -206,6 +218,7 @@ export default function MultiCamPlayer({ videos, segments, seek }: {
           <Text size="xs" ff="monospace" c="dimmed">{fmt(t0)}</Text>
           <Text size="xs" ff="monospace" c="dimmed">{fmt(t1)}</Text>
         </Group>
+        {!visible.length && <Text size="sm" c="dimmed">Nenhuma câmara selecionada.</Text>}
         <SimpleGrid cols={float ? cols : { base: 1, sm: Math.min(2, cols), lg: cols }} spacing="xs">
           {visible.map((v) => {
             const t = videoTimeAt(v, wall);
