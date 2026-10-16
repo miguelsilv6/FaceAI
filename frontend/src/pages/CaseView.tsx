@@ -2,13 +2,14 @@ import {
   ActionIcon, Anchor, Badge, Breadcrumbs, Button, Group, Modal, Stack, Tabs, Text, TextInput, Textarea, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconActivity, IconHistory, IconMovie, IconPencil, IconPhoto, IconRoute, IconTrash, IconUsers,
+  IconActivity, IconHistory, IconLayoutDashboard, IconMovie, IconPencil, IconPhoto, IconRoute, IconTrash, IconUsers,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { api, formatDate } from "../api";
 import AuditPanel from "../components/AuditPanel";
+import CaseDashboard from "../components/CaseDashboard";
 import { useAuth } from "../auth";
 import DeleteCaseModal from "../components/DeleteCaseModal";
 import JobsPanel from "../components/JobsPanel";
@@ -29,7 +30,7 @@ export default function CaseView() {
   const [members, setMembers] = useState<CaseMember[]>([]);
   const [persons, setPersons] = useState<CasePerson[]>([]);
   const { user, isAdmin } = useAuth();
-  const [tab, setTab] = useState<string | null>("references");
+  const [tab, setTab] = useState<string | null>("dashboard");
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
@@ -129,6 +130,7 @@ export default function CaseView() {
       </Modal>
       <Tabs value={tab} onChange={setTab} keepMounted={false}>
         <Tabs.List>
+          <Tabs.Tab value="dashboard" leftSection={<IconLayoutDashboard size={16} />}>Painel</Tabs.Tab>
           <Tabs.Tab value="references" leftSection={<IconPhoto size={16} />}>
             <Group gap={6}>Referências/Pessoas <Badge size="sm" variant="light">{references.length}</Badge></Group>
           </Tabs.Tab>
@@ -144,6 +146,9 @@ export default function CaseView() {
           </Tabs.Tab>
           <Tabs.Tab value="audit" leftSection={<IconHistory size={16} />}>Auditoria</Tabs.Tab>
         </Tabs.List>
+        <Tabs.Panel value="dashboard" pt="md">
+          <CaseDashboard caseId={caseId} jobs={jobs} onOpenTab={setTab} />
+        </Tabs.Panel>
         <Tabs.Panel value="references" pt="md">
           <ReferencesPanel caseId={caseId} references={references} persons={persons} onChange={reload} />
         </Tabs.Panel>

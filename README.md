@@ -196,6 +196,21 @@ O botão **Procurar noutras análises** (👥), num track ou numa pessoa, compar
 - Cada pesquisa fica na auditoria.
 - As análises no modo "procurar" feitas antes desta versão não têm índice e aparecem contadas à parte.
 
+### Painel do caso
+O separador **Painel**, o primeiro de cada caso, resume o caso num relance. Por omissão considera todas as análises concluídas; também se pode escolher só algumas.
+- **Indicadores:**
+  - vídeos (duração, quantos não têm hora real, espaço ocupado);
+  - análises concluídas e em curso;
+  - correspondências e tracks;
+  - percentagem da revisão feita.
+- **Progresso da revisão:** confirmadas, rejeitadas e por rever. O botão **Rever pendentes** abre a análise com mais deteções por rever.
+- **Por câmara:** correspondências de cada câmara divididas pelo estado da revisão, com o intervalo de hora real. Clicar abre a análise nesse vídeo.
+- **Por hora real:** histograma das correspondências por hora. As dos vídeos sem relógio acertado são indicadas à parte.
+- **Por pessoa:** só aparece quando a análise procura várias pessoas.
+- **Atividade recente:** os últimos eventos da auditoria.
+
+A contagem segue o mesmo critério do relatório: uma deteção conta como correspondência se estiver abaixo do limiar ou num track com correspondência. As aparições só pelo vestuário e o modo descoberta contam à parte.
+
 ### Pesquisa por foto noutros casos
 Para identificar a mesma pessoa em vários casos, em **Referências/Pessoas** abre o menu da pessoa (ou de uma foto solta) e escolhe **Procurar noutros casos**.
 - As fotos da pessoa são comparadas com os *tracks* de **todas as análises já feitas** nos casos a que o utilizador tem acesso. Os vídeos não são reprocessados.

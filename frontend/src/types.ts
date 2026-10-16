@@ -461,3 +461,21 @@ export interface CasePerson {
   reference_ids: number[];
   valid_references: number;
 }
+
+export interface CaseDashboard {
+  jobs_considered: number[];
+  material: { videos: number; duration_s: number; videos_synced: number; references: number; references_valid: number;
+    persons: number; size_bytes: number };
+  jobs: { total: number; by_status: Partial<Record<JobStatus, number>> };
+  review: { matches: number; confirmed: number; rejected: number; pending: number; clothing: number; tracks: number;
+    tracks_confirmed: number; tracks_rejected: number; tracks_pending: number };
+  per_camera: { video_id: number; filename: string; synced: boolean; matches: number; confirmed: number; rejected: number;
+    pending: number; clothing: number; first: string | null; last: string | null; first_s: number | null;
+    last_s: number | null; job_ids: number[] }[];
+  per_hour: { hour: string; matches: number }[];
+  unsynced_matches: number;
+  per_person: { label: string; matches: number; confirmed: number }[];
+  pending_by_job: { job_id: number; pending: number }[];
+  discover: { jobs: number; faces: number; persons: number };
+  recent: { id: number; timestamp: string; actor: string; action: string }[];
+}
