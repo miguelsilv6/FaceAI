@@ -5,7 +5,7 @@ import {
   IconActivity, IconHistory, IconLayoutDashboard, IconMovie, IconPencil, IconPhoto, IconRoute, IconTrash, IconUsers,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { api, formatDate } from "../api";
 import AuditPanel from "../components/AuditPanel";
@@ -31,7 +31,8 @@ export default function CaseView() {
   const [members, setMembers] = useState<CaseMember[]>([]);
   const [persons, setPersons] = useState<CasePerson[]>([]);
   const { user, isAdmin } = useAuth();
-  const [tab, setTab] = useState<string | null>("dashboard");
+  const [search] = useSearchParams();
+  const [tab, setTab] = useState<string | null>(search.get("tab") ?? "dashboard");
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
@@ -156,7 +157,7 @@ export default function CaseView() {
           <ReferencesPanel caseId={caseId} references={references} persons={persons} onChange={reload} />
         </Tabs.Panel>
         <Tabs.Panel value="videos" pt="md">
-          <VideosPanel caseId={caseId} videos={videos} locations={locations} jobs={jobs} canManage={canManage} onChange={reloadVideos} />
+          <VideosPanel caseId={caseId} videos={videos} locations={locations} onChange={reloadVideos} />
         </Tabs.Panel>
         <Tabs.Panel value="jobs" pt="md">
           <JobsPanel caseId={caseId} jobs={jobs} videos={videos} locations={locations} references={references} persons={persons}
