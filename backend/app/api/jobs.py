@@ -35,6 +35,7 @@ from ..services.clock import real_time
 from ..services.face_engine import default_threshold, get_engine
 from ..services.imageio import read_image, write_jpeg
 from ..services.jobs import job_dir, runner
+from ..services.locations import locations_by_id, video_place
 from ..services.persons import person_segments, summarize_persons
 from ..services.references import person_groups
 from ..services.video_processor import format_timestamp
@@ -85,12 +86,25 @@ def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorD
             raise HTTPException(422, f"Detetor de pessoas desconhecido: {params.person_detector}")
         params.reid_threshold = params.reid_threshold or DEFAULT_REID_THRESHOLD
 
-    videos = list(session.exec(select(Video).where(Video.case_id == case_id)))
-    video_ids = [v.id for v in videos if body.video_ids is None or v.id in body.video_ids]
+    videos = list(session.exec(select(Video).where(Video.case_id == case_id).order_by(Video.id)))
+    locs = locations_by_id(session, case_id)
+    if body.location_ids is not None and any(i not in locs for i in body.location_ids):
+        raise HTTPException(422, "Local inexistente neste caso.")
+    if body.video_ids is None and body.location_ids is None:
+        video_ids = [v.id for v in videos]
+    else:  # união: os vídeos indicados e todas as câmaras dos locais indicados
+        wanted, wanted_locs = set(body.video_ids or []), set(body.location_ids or [])
+        video_ids = [v.id for v in videos if v.id in wanted or v.location_id in wanted_locs]
     if not video_ids:
-        raise HTTPException(422, "Selecione pelo menos um vídeo do caso.")
+        raise HTTPException(422, "Selecione pelo menos um vídeo (câmara) do caso.")
     ref_ids: list[int] = []
     job_params = params.model_dump()
+    # Locais abrangidos (nome no momento da análise, para o relatório e a reprodutibilidade)
+    chosen_videos = [v for v in videos if v.id in video_ids]
+    job_params["locations"] = [
+        {"id": lid, "name": locs[lid].name if lid in locs else "",
+         "video_ids": [v.id for v in chosen_videos if v.location_id == lid]}
+        for lid in dict.fromkeys(v.location_id for v in chosen_videos)]
     if not discover:
         refs = list(session.exec(select(ReferenceImage).where(ReferenceImage.case_id == case_id)
                                  .order_by(ReferenceImage.id)))
@@ -109,7 +123,8 @@ def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorD
     session.commit()
     session.refresh(job)
     log_event(session, "job.created", case_id=case_id, actor=actor,
-              details={"job_id": job.id, "params": job.params, "video_ids": video_ids, "reference_ids": ref_ids})
+              details={"job_id": job.id, "params": job.params, "video_ids": video_ids, "reference_ids": ref_ids,
+                       "location_ids": body.location_ids})
     runner.submit(job.id)
     return job
 
@@ -265,6 +280,7 @@ def case_route(case_id: int, session: SessionDep, job_ids: str | None = None, pe
         for vid in job.video_ids or []:
             if vid not in videos:
                 videos[vid] = session.get(Video, vid)
+    locs = locations_by_id(session, case_id)
     appearances: dict[int, int] = {}
     synced, unsynced = [], []
     for job in jobs:
@@ -287,7 +303,10 @@ def case_route(case_id: int, session: SessionDep, job_ids: str | None = None, pe
             end = real_time(v.dvr_start, v.dvr_rate, v.clock_offset_s, seg["end_s"]) if v else None
             item = {"job_id": job.id, "job_mode": job.params.get("mode", "match"), "person_id": pid,
                     "person_label": label or (job.params.get("persons") or [{}])[0].get("label") or "Pessoa",
-                    "video_id": vid, "video_filename": v.filename if v else "", "start_s": seg["start_s"],
+                    "video_id": vid, "video_filename": v.filename if v else "",
+                    **(video_place(v, locs) if v else {"location_id": None, "location_name": "",
+                                                       "camera_name": "", "camera_label": ""}),
+                    "start_s": seg["start_s"],
                     "end_s": seg["end_s"], "real_start": start.isoformat() if start else None,
                     "real_end": end.isoformat() if end else None, "evidence": seg.get("evidence", "face"),
                     "best_detection_id": seg.get("best_detection_id"),
@@ -297,9 +316,10 @@ def case_route(case_id: int, session: SessionDep, job_ids: str | None = None, pe
     synced.sort(key=lambda x: (x["real_start"], x["video_id"]))
     unsynced.sort(key=lambda x: (x["video_id"], x["start_s"]))
     return {"segments": synced, "unsynced": unsynced, "jobs": [j.id for j in jobs],
-            "videos": [{"id": v.id, "filename": v.filename, "synced": bool(v.dvr_start),
+            "videos": [{"id": v.id, "filename": v.filename, **video_place(v, locs), "synced": bool(v.dvr_start),
                         "appearances": appearances.get(v.id, 0)}
-                       for v in videos.values() if v is not None]}
+                       for v in videos.values() if v is not None],
+            "locations": [{"id": loc.id, "name": loc.name} for loc in locs.values()]}
 
 
 @router.get("/cases/{case_id}/dashboard")
@@ -321,6 +341,7 @@ def case_dashboard(case_id: int, session: SessionDep, job_ids: str | None = None
     videos = {v.id: v for v in session.exec(select(Video).where(Video.case_id == case_id).order_by(Video.id))}
     refs = list(session.exec(select(ReferenceImage).where(ReferenceImage.case_id == case_id)))
     n_persons = len(list(session.exec(select(CasePerson.id).where(CasePerson.case_id == case_id))))
+    locs = locations_by_id(session, case_id)
 
     review = {"matches": 0, "confirmed": 0, "rejected": 0, "pending": 0, "clothing": 0,
               "tracks": 0, "tracks_confirmed": 0, "tracks_rejected": 0, "tracks_pending": 0}
@@ -334,7 +355,10 @@ def case_dashboard(case_id: int, session: SessionDep, job_ids: str | None = None
     def cam(vid: int) -> dict:
         if vid not in cams:
             v = videos.get(vid)
-            cams[vid] = {"video_id": vid, "filename": v.filename if v else f"#{vid}", "synced": bool(v and v.dvr_start),
+            place = video_place(v, locs) if v else {"location_id": None, "location_name": "", "camera_name": f"#{vid}",
+                                                    "camera_label": f"#{vid}"}
+            cams[vid] = {"video_id": vid, "filename": v.filename if v else f"#{vid}", **place,
+                         "synced": bool(v and v.dvr_start),
                          "matches": 0, "confirmed": 0, "rejected": 0, "pending": 0, "clothing": 0,
                          "first": None, "last": None, "first_s": None, "last_s": None, "job_ids": []}
         return cams[vid]
@@ -392,6 +416,19 @@ def case_dashboard(case_id: int, session: SessionDep, job_ids: str | None = None
             c["first"] = iso if c["first"] is None or iso < c["first"] else c["first"]
             c["last"] = iso if c["last"] is None or iso > c["last"] else c["last"]
 
+    # Por local: soma das câmaras de cada local (inclui os locais sem correspondências)
+    per_location: dict[int | None, dict] = {
+        loc.id: {"location_id": loc.id, "name": loc.name, "cameras": 0, "matches": 0, "confirmed": 0,
+                 "rejected": 0, "pending": 0, "clothing": 0} for loc in locs.values()}
+    for v in videos.values():
+        if v.location_id in per_location:
+            per_location[v.location_id]["cameras"] += 1
+    for c in cams.values():
+        pl = per_location.get(c["location_id"])
+        if pl is not None:
+            for k in ("matches", "confirmed", "rejected", "pending", "clothing"):
+                pl[k] += c[k]
+
     status_counts: dict[str, int] = {}
     for j in all_jobs:
         status_counts[j.status.value] = status_counts.get(j.status.value, 0) + 1
@@ -399,13 +436,15 @@ def case_dashboard(case_id: int, session: SessionDep, job_ids: str | None = None
                           .order_by(AuditEvent.id.desc()).limit(10))
     return {
         "jobs_considered": [j.id for j in jobs],
-        "material": {"videos": len(videos), "duration_s": round(sum(v.duration_s for v in videos.values()), 1),
+        "material": {"locations": len(locs), "videos": len(videos),
+                     "duration_s": round(sum(v.duration_s for v in videos.values()), 1),
                      "videos_synced": sum(1 for v in videos.values() if v.dvr_start),
                      "references": len(refs), "references_valid": sum(1 for r in refs if r.valid),
                      "persons": n_persons, "size_bytes": disk.case_size(session, case_id)},
         "jobs": {"total": len(all_jobs), "by_status": status_counts},
         "review": review,
         "per_camera": sorted(cams.values(), key=lambda c: (-c["matches"], c["video_id"])),
+        "per_location": sorted(per_location.values(), key=lambda x: (-x["matches"], x["location_id"])),
         "per_hour": [{"hour": k, "matches": n} for k, n in sorted(hours.items())],
         "unsynced_matches": unsynced,
         "per_person": sorted(persons.values(), key=lambda p: -p["matches"]),

@@ -116,6 +116,8 @@ const ACTIONS: Record<string, string> = {
   "job.created": "análise criada", "job.completed": "análise concluída", "detection.reviewed": "deteção revista",
   "track.reviewed": "track revisto", "video.uploaded": "vídeo importado", "video.clock_set": "hora real acertada",
   "reference.uploaded": "foto importada", "person.photo_search": "pesquisa por foto", "video.deleted": "vídeo eliminado",
+  "video.updated": "câmara alterada", "location.created": "local criado", "location.updated": "local renomeado",
+  "location.deleted": "local eliminado",
   "job.deleted": "análise eliminada", "report.generated": "relatório gerado", "job.started": "análise iniciada",
   "job.failed": "análise falhou", "job.cancelled": "análise cancelada", "video.playback_copy_requested": "cópia de reprodução pedida",
   "video.playback_copy_ready": "cópia de reprodução pronta", "video.clock_ocr_failed": "OCR da hora sem resultado",
@@ -143,6 +145,7 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
   const pct = r.matches ? Math.round((reviewed / r.matches) * 100) : 0;
   const running = (data.jobs.by_status.running ?? 0) + (data.jobs.by_status.queued ?? 0);
   const maxCam = Math.max(1, ...data.per_camera.map((c) => c.matches));
+  const maxLoc = Math.max(1, ...data.per_location.map((l) => l.matches));
   const maxPerson = Math.max(1, ...data.per_person.map((p) => p.matches));
   const personOrder = [...data.per_person].map((p) => p.label).sort();
   const m = data.material;
@@ -163,7 +166,7 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
       </Group>
 
       <SimpleGrid cols={{ base: 2, md: 4 }}>
-        <Kpi label="Vídeos" value={String(m.videos)}
+        <Kpi label="Locais / câmaras" value={`${m.locations} / ${m.videos}`}
           sub={`${formatDuration(m.duration_s)} · ${m.videos - m.videos_synced} sem hora real · ${formatBytes(m.size_bytes)}`} />
         <Kpi label="Análises concluídas" value={String(data.jobs.by_status.completed ?? 0)}
           sub={`${running} em curso · ${data.jobs.by_status.failed ?? 0} falhada(s)`} />
@@ -198,6 +201,33 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
             )}
           </Card>
 
+          {data.per_location.length > 0 && (
+            <Card withBorder>
+              <Group justify="space-between" mb="xs">
+                <Title order={5}>Por local</Title>
+                <Anchor size="xs" component="button" onClick={() => onOpenTab("videos")}>Locais e vídeos</Anchor>
+              </Group>
+              <Table verticalSpacing={6}>
+                <Table.Tbody>
+                  {data.per_location.map((l) => (
+                    <Table.Tr key={l.location_id}>
+                      <Table.Td w="30%">
+                        <Text size="sm" fw={600} truncate="end" title={l.name}>{l.name}</Text>
+                        <Text size="xs" c="dimmed">{l.cameras} câmara{l.cameras === 1 ? "" : "s"}</Text>
+                      </Table.Td>
+                      <Table.Td>{l.matches ? <StackedBar counts={l} max={maxLoc} />
+                        : <Text size="xs" c="dimmed">sem correspondências</Text>}</Table.Td>
+                      <Table.Td w={64} ta="right">
+                        <Text size="sm" fw={600}>{l.matches}</Text>
+                        {l.clothing > 0 && <Text size="xs" c="dimmed">+{l.clothing} roupa</Text>}
+                      </Table.Td>
+                    </Table.Tr>
+                  ))}
+                </Table.Tbody>
+              </Table>
+            </Card>
+          )}
+
           <SimpleGrid cols={{ base: 1, lg: 2 }}>
             <Card withBorder>
               <Group justify="space-between" mb="xs">
@@ -211,7 +241,7 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
                       <Table.Tr key={c.video_id} style={{ cursor: c.job_ids.length ? "pointer" : undefined }}
                         onClick={() => c.job_ids.length && navigate(`/jobs/${c.job_ids[0]}?video=${c.video_id}&t=${c.first_s ?? 0}`)}>
                         <Table.Td w="38%">
-                          <Text size="sm" truncate="end" title={c.filename}>{c.filename}</Text>
+                          <Text size="sm" truncate="end" title={c.filename}>{c.camera_label || c.filename}</Text>
                           <Text size="xs" c="dimmed" ff="monospace">
                             {c.first ? `${c.first.slice(11, 19)} → ${c.last?.slice(11, 19)}`
                               : c.first_s != null ? `vídeo ${formatTime(c.first_s)} → ${formatTime(c.last_s ?? 0)}` : "—"}
@@ -241,7 +271,7 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
               {data.unsynced_matches > 0 && (
                 <Text size="xs" c="dimmed" mt="xs">
                   {data.unsynced_matches} correspondência(s) em vídeos sem hora real não aparecem aqui
-                  {" "}(acerte o relógio no separador Vídeos).
+                  {" "}(acerte o relógio no separador Locais e vídeos).
                 </Text>
               )}
             </Card>

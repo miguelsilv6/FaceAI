@@ -22,6 +22,7 @@ from ..models import (
     CasePerson,
     Detection,
     Job,
+    Location,
     ReferenceImage,
     Track,
     Upload,
@@ -156,6 +157,9 @@ def _case_of(session: Session, params: dict) -> int | None:
     if "case_person_id" in params:
         cp = session.get(CasePerson, int(params["case_person_id"]))
         return cp.case_id if cp else -1
+    if "location_id" in params:
+        loc = session.get(Location, int(params["location_id"]))
+        return loc.case_id if loc else -1
     if "upload_id" in params:
         u = session.get(Upload, str(params["upload_id"]))
         return u.case_id if u else -1

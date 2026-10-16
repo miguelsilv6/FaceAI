@@ -4,11 +4,12 @@ import { useEffect, useState } from "react";
 
 import { api, formatBytes } from "../api";
 import { notifyError, notifyOk } from "../notify";
-import type { Job, Video } from "../types";
+import { cameraLabel } from "../places";
+import type { Job, Location, Video } from "../types";
 
 /** Confirmação da eliminação de um vídeo: bloqueada se houver análises que o usem; motivo vai para a auditoria. */
-export default function DeleteVideoModal({ video, jobs, onClose, onDeleted }: {
-  video: Video | null; jobs: Job[]; onClose: () => void; onDeleted: () => void;
+export default function DeleteVideoModal({ video, jobs, onClose, onDeleted, locations = [] }: {
+  video: Video | null; jobs: Job[]; onClose: () => void; onDeleted: () => void; locations?: Location[];
 }) {
   const [typed, setTyped] = useState("");
   const [reason, setReason] = useState("");
@@ -35,7 +36,7 @@ export default function DeleteVideoModal({ video, jobs, onClose, onDeleted }: {
   return (
     <Modal opened onClose={onClose} title={`Eliminar o vídeo #${video.id}?`} size="lg">
       <Stack>
-        <Text size="sm"><b>{video.filename}</b> · {formatBytes(video.size_bytes)}</Text>
+        <Text size="sm"><b>{cameraLabel(video, locations)}</b> · {video.filename} · {formatBytes(video.size_bytes)}</Text>
         {usedBy.length ? (
           <Alert color="orange" icon={<IconAlertTriangle size={18} />}>
             Este vídeo é usado nas análises {usedBy.map((j) => `#${j.id}`).join(", ")}. Os resultados dependem do vídeo

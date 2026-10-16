@@ -26,7 +26,7 @@ from ..models import ReferenceImage, Upload, Video, utcnow
 from ..schemas import UploadCreate
 from ..services import disk
 from ..services.audit import log_event
-from .cases import IMAGE_EXT, VIDEO_EXT, register_reference, register_video
+from .cases import IMAGE_EXT, VIDEO_EXT, location_of_case, register_reference, register_video
 from .deps import ActorDep, SessionDep, authorize_objects, get_case_or_404
 
 # Todas as rotas exigem sessão; os objetos do caminho têm de pertencer a um caso acessível (ver deps).
@@ -91,19 +91,23 @@ def create_upload(case_id: int, body: UploadCreate, session: SessionDep, actor: 
         raise HTTPException(415, f"Extensão não suportada: '{ext or filename}'.")
     if body.kind == "reference" and body.size_bytes > MAX_REFERENCE_BYTES:
         raise HTTPException(413, "Imagem de referência demasiado grande.")
+    location_id = None
+    if body.kind == "video" and body.location_id is not None:
+        location_id = location_of_case(session, case_id, body.location_id).id
     disk.check_space(body.size_bytes)
     tmp_dir = settings.data_dir / "uploads"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     upload_id = uuid.uuid4().hex
     tmp = tmp_dir / f"{upload_id}.part"
     tmp.touch()
-    u = Upload(id=upload_id, case_id=case_id, kind=body.kind, filename=filename, size_bytes=body.size_bytes,
+    u = Upload(id=upload_id, case_id=case_id, kind=body.kind, location_id=location_id, filename=filename,
+               size_bytes=body.size_bytes,
                temp_path=str(tmp), created_by=actor)
     session.add(u)
     session.commit()
     log_event(session, "upload.started", case_id=case_id, actor=actor,
               details={"upload_id": upload_id, "kind": body.kind, "filename": filename,
-                       "size_bytes": body.size_bytes})
+                       "size_bytes": body.size_bytes, "location_id": location_id})
     return _status(u)
 
 
@@ -176,7 +180,8 @@ def complete_upload(upload_id: str, session: SessionDep, actor: ActorDep):
     _locks.pop(upload_id, None)
     try:
         if u.kind == "video":
-            result = register_video(session, u.case_id, dest, u.filename, size, actor or u.created_by)
+            result = register_video(session, u.case_id, dest, u.filename, size, actor or u.created_by,
+                                    u.location_id)
         else:
             result = register_reference(session, u.case_id, dest, u.filename, size, actor or u.created_by)
     except HTTPException:

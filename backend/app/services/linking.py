@@ -20,6 +20,7 @@ from ..models import Case, Job, JobStatus, ReferenceImage, Track, Video
 from .clock import format_real, real_time
 from .face_engine import FaceEngine
 from .jobs import job_dir
+from .locations import locations_by_id, video_place
 from .matcher import l2_normalize
 from .references import reference_embeddings
 
@@ -198,6 +199,7 @@ def _results(s: Session, hits: list[tuple[float, Job, int]], limit: int,
     results = []
     cases: dict[int, Case | None] = {}
     videos: dict[int, Video | None] = {}
+    locs: dict[int, dict] = {}
     for dist, job, tid in hits[:limit]:
         t = s.get(Track, tid)
         if t is None or t.job_id != job.id:
@@ -206,12 +208,16 @@ def _results(s: Session, hits: list[tuple[float, Job, int]], limit: int,
             cases[job.case_id] = s.get(Case, job.case_id)
         if t.video_id not in videos:
             videos[t.video_id] = s.get(Video, t.video_id)
+        if job.case_id not in locs:
+            locs[job.case_id] = locations_by_id(s, job.case_id)
         v, c = videos[t.video_id], cases[job.case_id]
         rt = real_time(v.dvr_start, v.dvr_rate, v.clock_offset_s, t.start_s) if v else None
         results.append({
             "case_id": job.case_id, "case_name": c.name if c else "", "job_id": job.id,
             "job_mode": (job.params or {}).get("mode", "match"), "track_id": t.id, "person_id": t.person_id,
-            "video_id": t.video_id, "video_filename": v.filename if v else "", "start_s": t.start_s,
+            "video_id": t.video_id, "video_filename": v.filename if v else "",
+            **(video_place(v, locs[job.case_id]) if v else {}),
+            "start_s": t.start_s,
             "end_s": t.end_s, "real_start": format_real(rt) or None, "distance": round(dist, 4),
             "similarity": round(1.0 - dist, 4), "best_detection_id": t.best_detection_id,
             "review_status": t.review_status, "is_match": t.is_match,

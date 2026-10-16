@@ -29,6 +29,7 @@ from ..models import Detection, Job, ReviewStatus, Video
 from .clock import format_real, real_time
 from .frames import extract_frame
 from .jobs import job_dir
+from .locations import locations_by_id, video_place
 from .video_processor import format_timestamp
 
 
@@ -62,6 +63,7 @@ class ValidatedSet:
     """Deteções confirmadas, já carregadas da base de dados (o ZIP é gerado depois de o pedido a libertar)."""
 
     items: list[tuple[Detection, Job, Video]] = field(default_factory=list)
+    places: dict[int, dict] = field(default_factory=dict)  # vídeo → local e câmara
 
     @property
     def detection_ids(self) -> list[int]:
@@ -83,8 +85,12 @@ def collect(s: Session, jobs: list[Job]) -> ValidatedSet:
         if video is not None:
             s.expunge(det)
             out.items.append((det, by_id[det.job_id], video))
+    locs: dict[int, dict] = {}
     for v in videos.values():
         if v is not None:
+            if v.case_id not in locs:
+                locs[v.case_id] = locations_by_id(s, v.case_id)
+            out.places[v.id] = video_place(v, locs[v.case_id])
             s.expunge(v)
     for j in jobs:
         s.expunge(j)
@@ -111,8 +117,9 @@ class _Sink(io.RawIOBase):
 
 
 MANIFEST_FIELDS = [
-    "ficheiro", "sha256", "analise", "deteccao", "tipo", "track", "video_id", "video", "frame", "tempo_video",
-    "hora_real", "semelhanca", "distancia", "revisto_por", "revisto_em", "nota", "extracao", "erro_recorte",
+    "ficheiro", "sha256", "analise", "deteccao", "tipo", "track", "video_id", "video", "local", "camara", "frame",
+    "tempo_video", "hora_real", "semelhanca", "distancia", "revisto_por", "revisto_em", "nota", "extracao",
+    "erro_recorte",
 ]
 
 
@@ -146,6 +153,8 @@ def stream_zip(validated: ValidatedSet, *, scope: str, actor: str) -> Iterator[b
             writer.writerow({
                 "ficheiro": name, "sha256": sha, "analise": job.id, "deteccao": det.id, "tipo": det.kind,
                 "track": det.track_id or "", "video_id": video.id, "video": video.filename,
+                "local": validated.places.get(video.id, {}).get("location_name", ""),
+                "camara": validated.places.get(video.id, {}).get("camera_name", video.filename),
                 "frame": det.frame_index, "tempo_video": format_timestamp(det.timestamp_s),
                 "hora_real": format_real(rt), "semelhanca": round(det.similarity, 4),
                 "distancia": round(det.distance, 4), "revisto_por": det.reviewed_by,

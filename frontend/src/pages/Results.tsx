@@ -23,8 +23,9 @@ import Timeline from "../components/Timeline";
 import { notifyError, notifyOk } from "../notify";
 import { personColor } from "../personColors";
 import type {
-  CasePerson, Detection, Job, Person, ReferenceImage, ReviewStatus, Segment, Track, Video, VideoProbe,
+  CasePerson, Detection, Job, Location, Person, ReferenceImage, ReviewStatus, Segment, Track, Video, VideoProbe,
 } from "../types";
+import { cameraLabel, cameraName, groupByLocation } from "../places";
 
 const EXPORTS = [
   ["pdf", "Relatório PDF"],
@@ -41,6 +42,8 @@ export default function Results() {
   const startAt = useRef({ video: Number(searchParams.get("video")) || null, t: Number(searchParams.get("t")) || 0 });
   const [job, setJob] = useState<Job | null>(null);
   const [videos, setVideos] = useState<Video[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [locFilter, setLocFilter] = useState<string>("all");
   const [detections, setDetections] = useState<Detection[]>([]);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [tracks, setTracks] = useState<Track[]>([]);
@@ -89,8 +92,10 @@ export default function Results() {
     api.job(jobId).then((j) => {
       setJob(j);
       if (j.params.mode === "discover") setView("persons");
-      api.videos(j.case_id).then((vs) => {
-        const used = vs.filter((v) => j.video_ids.includes(v.id));
+      Promise.all([api.videos(j.case_id), api.locations(j.case_id)]).then(([vs, ls]) => {
+        // Pela ordem dos locais (câmaras de cada local juntas)
+        const used = groupByLocation(vs.filter((v) => j.video_ids.includes(v.id)), ls).flatMap((g) => g.videos);
+        setLocations(ls);
         setVideos(used);
         const wanted = used.find((v) => v.id === startAt.current.video)?.id;
         setVideoId((cur) => cur ?? wanted ?? used[0]?.id ?? null);
@@ -123,7 +128,10 @@ export default function Results() {
     if (!converting || caseId == null) return;
     const ids = new Set(jobVideoIds.split(",").map(Number));
     const t = setInterval(() => {
-      api.videos(caseId).then((vs) => setVideos(vs.filter((v) => ids.has(v.id)))).catch(() => undefined);
+      api.videos(caseId).then((vs) => {
+        const byId = new Map(vs.filter((v) => ids.has(v.id)).map((v) => [v.id, v]));
+        setVideos((cur) => cur.map((v) => byId.get(v.id) ?? v)); // mantém a ordem por local
+      }).catch(() => undefined);
     }, 2000);
     return () => clearInterval(t);
   }, [converting, caseId, jobVideoIds]);
@@ -187,12 +195,14 @@ export default function Results() {
     if (t.evidence === "vestuário") countByVideo.set(t.video_id, (countByVideo.get(t.video_id) ?? 0) + 1);
   }
   const [onlyWithDets, setOnlyWithDets] = useState(false);
-  const withDets = videos.filter((v) => (countByVideo.get(v.id) ?? 0) > 0);
-  const navVideos = onlyWithDets && withDets.length ? withDets : videos;
+  const usedLocations = locations.filter((l) => videos.some((v) => v.location_id === l.id));
+  const locVideos = locFilter === "all" ? videos : videos.filter((v) => String(v.location_id) === locFilter);
+  const withDets = locVideos.filter((v) => (countByVideo.get(v.id) ?? 0) > 0);
+  const navVideos = onlyWithDets && withDets.length ? withDets : locVideos;
   const navKey = navVideos.map((v) => v.id).join(",");
   useEffect(() => {
     // O vídeo atual saiu da lista filtrada: passa para o primeiro com deteções.
-    if (onlyWithDets && navVideos.length && !navVideos.some((v) => v.id === videoId)) setVideoId(navVideos[0].id);
+    if (navVideos.length && !navVideos.some((v) => v.id === videoId)) setVideoId(navVideos[0].id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onlyWithDets, navKey]);
   const videoIndex = navVideos.findIndex((v) => v.id === videoId);
@@ -443,8 +453,11 @@ export default function Results() {
                 </Tooltip>
                 <Select label={`Vídeo (${videoIndex + 1} de ${navVideos.length})`} style={{ flex: 1 }}
                   value={videoId ? String(videoId) : null} allowDeselect={false}
-                  data={navVideos.map((v) => ({ value: String(v.id),
-                    label: `#${v.id} ${v.filename} · ${countByVideo.get(v.id) ?? 0} ${discover ? "faces" : "deteções"}` }))}
+                  data={groupByLocation(navVideos, locations).filter((g) => g.videos.length).map((g) => ({
+                    group: g.location ? g.location.name : "Sem local",
+                    items: g.videos.map((v) => ({ value: String(v.id),
+                      label: `${g.location ? `${g.location.name} · ` : ""}${cameraName(v)} · ${countByVideo.get(v.id) ?? 0} ${discover ? "faces" : "deteções"}` })),
+                  }))}
                   onChange={(v) => v && setVideoId(Number(v))} />
                 <Tooltip label="Vídeo seguinte">
                   <ActionIcon variant="default" size="lg" aria-label="Vídeo seguinte"
@@ -453,10 +466,25 @@ export default function Results() {
                 </Tooltip>
               </Group>
             )}
+            {usedLocations.length > 1 && (
+              <Chip.Group multiple={false} value={locFilter} onChange={(v) => setLocFilter(v as string)}>
+                <Group gap={4}>
+                  <Chip size="xs" value="all">Todos os locais</Chip>
+                  {usedLocations.map((l) => {
+                    const n = videos.filter((v) => v.location_id === l.id)
+                      .reduce((acc, v) => acc + (countByVideo.get(v.id) ?? 0), 0);
+                    return <Chip key={l.id} size="xs" value={String(l.id)} color="indigo">{l.name} ({n})</Chip>;
+                  })}
+                </Group>
+              </Chip.Group>
+            )}
             {videos.length > 1 && !running && (
               <Switch size="xs" checked={onlyWithDets} onChange={(e) => setOnlyWithDets(e.currentTarget.checked)}
                 disabled={!withDets.length}
-                label={`Só vídeos com ${discover ? "faces" : "deteções"} (${withDets.length} de ${videos.length})`} />
+                label={`Só vídeos com ${discover ? "faces" : "deteções"} (${withDets.length} de ${locVideos.length})`} />
+            )}
+            {video && videos.length <= 1 && (
+              <Text size="sm" fw={600}>{cameraLabel(video, locations)}</Text>
             )}
             {video && (
               <>
@@ -638,6 +666,7 @@ export default function Results() {
               <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
                 {sortedBodyTracks.map((t) => (
                   <BodyTrackCard key={t.id} track={t} video={videoById.get(t.video_id)}
+                    cameraLabel={cameraLabel(videoById.get(t.video_id), locations)}
                     realStart={realTime(videoById.get(t.video_id), t.start_s)} onSeek={seekBody}
                     onReview={reviewTrack} onOpenFrame={openFrame} />
                 ))}
@@ -720,7 +749,7 @@ export default function Results() {
               {(() => {
                 const fv = videoById.get(frameDet.video_id);
                 const rt = realTime(fv, frameDet.timestamp_s);
-                return <Text size="xs" c="dimmed">{fv?.filename}{rt ? ` · hora real ${rt}` : ""}</Text>;
+                return <Text size="xs" c="dimmed">{cameraLabel(fv, locations)}{fv && cameraName(fv) !== fv.filename ? ` (${fv.filename})` : ""}{rt ? ` · hora real ${rt}` : ""}</Text>;
               })()}
             </Group>
             {frameVariant === "enhanced" ? <EnhancePanel detectionId={frameDet.id} /> : (

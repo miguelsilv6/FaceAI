@@ -7,6 +7,7 @@ import type { ReviewStatus, Track, Video } from "../types";
 interface Props {
   track: Track;
   video?: Video;
+  cameraLabel?: string; // "Local · Câmara"
   realStart?: string;
   onSeek: (track: Track) => void;
   onReview: (track: Track, status: ReviewStatus) => void;
@@ -30,7 +31,7 @@ const REVIEW: Record<ReviewStatus, [string, string]> = {
 };
 
 /** Track de corpo: amostra (corpo de uma face com correspondência) ou aparição só pelo vestuário. */
-export default function BodyTrackCard({ track, video, realStart, onSeek, onReview, onOpenFrame }: Props) {
+export default function BodyTrackCard({ track, video, cameraLabel, realStart, onSeek, onReview, onOpenFrame }: Props) {
   const sample = track.evidence === "face+vestuário";
   const [label, color] = REVIEW[track.review_status];
   const colors = track.colors ?? {};
@@ -63,7 +64,7 @@ export default function BodyTrackCard({ track, video, realStart, onSeek, onRevie
             </Tooltip>
           ))}
         </Group>
-        <Text size="xs" c="dimmed" truncate title={video?.filename}>{video ? `#${video.id} ${video.filename}` : ""}</Text>
+        <Text size="xs" c="dimmed" truncate title={video?.filename}>{video ? cameraLabel || `#${video.id} ${video.filename}` : ""}</Text>
         <Text size="xs" ff="monospace">
           {realStart ? `${realStart} · ` : ""}{formatTime(track.start_s)} → {formatTime(track.end_s)}
         </Text>

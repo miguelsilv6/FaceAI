@@ -111,7 +111,7 @@ export default function SimilarModal({ query, defaultThreshold, onClose }: {
                               Análise #{r.job_id} · track #{r.track_id}{r.person_id ? ` · pessoa #${r.person_id}` : ""}
                             </Anchor>
                           </Table.Td>
-                          <Table.Td><Text size="xs">{r.video_filename}</Text></Table.Td>
+                          <Table.Td><Text size="xs" title={r.video_filename}>{r.camera_label || r.video_filename}</Text></Table.Td>
                           <Table.Td>
                             {r.real_start && <Text size="xs" ff="monospace" fw={600}>{r.real_start}</Text>}
                             <Text size="xs" ff="monospace" c="dimmed">{formatTime(r.start_s)}–{formatTime(r.end_s)}</Text>

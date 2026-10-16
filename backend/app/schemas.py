@@ -50,6 +50,15 @@ class CaseUpdate(BaseModel):
     description: str | None = None
 
 
+class LocationCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+
+
+class VideoUpdate(BaseModel):
+    location_id: int | None = Field(None, description="Mover o vídeo para outro local do mesmo caso")
+    camera_name: str | None = Field(None, max_length=120, description="Nome da câmara (vazio = nome do ficheiro)")
+
+
 class VideoDelete(BaseModel):
     confirm_video_id: int = Field(description="Número do vídeo, repetido como confirmação do pedido")
     reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")
@@ -109,6 +118,8 @@ class JobParams(BaseModel):
 class JobCreate(BaseModel):
     params: JobParams = Field(default_factory=JobParams)
     video_ids: list[int] | None = None
+    # Locais a analisar: entram todos os vídeos (câmaras) desses locais, além dos video_ids explícitos.
+    location_ids: list[int] | None = None
     reference_ids: list[int] | None = None
 
 
@@ -129,6 +140,7 @@ class UploadCreate(BaseModel):
     kind: str = Field(pattern="^(video|reference)$")
     filename: str = Field(min_length=1, max_length=255)
     size_bytes: int = Field(gt=0)
+    location_id: int | None = None  # vídeo: local de destino (por omissão, "Geral")
 
 
 class ClockManual(BaseModel):

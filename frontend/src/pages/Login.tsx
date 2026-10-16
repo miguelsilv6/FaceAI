@@ -6,6 +6,7 @@ import { IconAlertTriangle, IconLock, IconScan, IconShieldLock } from "@tabler/i
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { authApi } from "../api";
+import Signature from "../components/Signature";
 import type { AuthState, MfaSetup } from "../types";
 
 interface Props {
@@ -18,7 +19,7 @@ interface Props {
 
 function Frame({ title, icon, children }: { title: string; icon?: ReactNode; children: ReactNode }) {
   return (
-    <Center mih="100vh" p="md">
+    <Center mih="100vh" p="md" style={{ flexDirection: "column" }}>
       <Paper withBorder shadow="sm" p="xl" w="100%" maw={440}>
         <Stack>
           <Group gap="xs">
@@ -28,6 +29,7 @@ function Frame({ title, icon, children }: { title: string; icon?: ReactNode; chi
           {children}
         </Stack>
       </Paper>
+      <Signature />
     </Center>
   );
 }

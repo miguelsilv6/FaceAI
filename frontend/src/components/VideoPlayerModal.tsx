@@ -4,11 +4,12 @@ import { useState } from "react";
 
 import { api, formatTime, realTime } from "../api";
 import { notifyError } from "../notify";
-import type { Video } from "../types";
+import { cameraLabel } from "../places";
+import type { Location, Video } from "../types";
 
 /** Leitor de um vídeo importado, com o tempo do vídeo e a hora real do DVR (se acertada). Só visualização. */
-export default function VideoPlayerModal({ video, onClose, onChange }: {
-  video: Video | null; onClose: () => void; onChange: () => void;
+export default function VideoPlayerModal({ video, onClose, onChange, locations = [] }: {
+  video: Video | null; onClose: () => void; onChange: () => void; locations?: Location[];
 }) {
   const [t, setT] = useState(0);
   const [error, setError] = useState(false);
@@ -24,7 +25,7 @@ export default function VideoPlayerModal({ video, onClose, onChange }: {
     }
   };
   return (
-    <Modal opened onClose={onClose} size="xl" title={`#${video.id} ${video.filename}`}>
+    <Modal opened onClose={onClose} size="xl" title={`#${video.id} ${cameraLabel(video, locations)}${cameraLabel(video, locations) === video.filename ? "" : ` (${video.filename})`}`}>
       <Stack gap="xs">
         {preparing ? (
           <Alert color="blue">

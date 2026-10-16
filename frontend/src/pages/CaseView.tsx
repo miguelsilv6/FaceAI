@@ -18,13 +18,14 @@ import RouteTimeline from "../components/RouteTimeline";
 import ReferencesPanel from "../components/ReferencesPanel";
 import VideosPanel from "../components/VideosPanel";
 import { notifyError, notifyOk } from "../notify";
-import type { AuditEvent, Case, CaseMember, CasePerson, Job, ReferenceImage, Video } from "../types";
+import type { AuditEvent, Case, CaseMember, CasePerson, Job, Location, ReferenceImage, Video } from "../types";
 
 export default function CaseView() {
   const caseId = Number(useParams().caseId);
   const [kase, setCase] = useState<Case | null>(null);
   const [references, setReferences] = useState<ReferenceImage[]>([]);
   const [videos, setVideos] = useState<Video[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [jobs, setJobs] = useState<Job[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [members, setMembers] = useState<CaseMember[]>([]);
@@ -40,9 +41,10 @@ export default function CaseView() {
 
   const reload = useCallback(() => {
     Promise.all([api.case(caseId), api.references(caseId), api.videos(caseId), api.jobs(caseId), api.audit(caseId),
-      api.casePersons(caseId)])
-      .then(([c, r, v, j, a, p]) => {
+      api.casePersons(caseId), api.locations(caseId)])
+      .then(([c, r, v, j, a, p, l]) => {
         setPersons(p);
+        setLocations(l);
         setCase(c);
         setReferences(r);
         setVideos(v);
@@ -52,7 +54,8 @@ export default function CaseView() {
       .catch(notifyError);
   }, [caseId]);
   const reloadVideos = useCallback(() => {
-    api.videos(caseId).then(setVideos).catch(() => undefined);
+    Promise.all([api.videos(caseId), api.locations(caseId)])
+      .then(([v, l]) => { setVideos(v); setLocations(l); }).catch(() => undefined);
   }, [caseId]);
   const reloadJobs = useCallback(() => {
     api.jobs(caseId).then(setJobs).catch(() => undefined);
@@ -135,7 +138,7 @@ export default function CaseView() {
             <Group gap={6}>Referências/Pessoas <Badge size="sm" variant="light">{references.length}</Badge></Group>
           </Tabs.Tab>
           <Tabs.Tab value="videos" leftSection={<IconMovie size={16} />}>
-            <Group gap={6}>Vídeos <Badge size="sm" variant="light">{videos.length}</Badge></Group>
+            <Group gap={6}>Locais e vídeos <Badge size="sm" variant="light">{locations.length} · {videos.length}</Badge></Group>
           </Tabs.Tab>
           <Tabs.Tab value="jobs" leftSection={<IconActivity size={16} />}>
             <Group gap={6}>Análises <Badge size="sm" variant="light">{jobs.length}</Badge></Group>
@@ -153,14 +156,14 @@ export default function CaseView() {
           <ReferencesPanel caseId={caseId} references={references} persons={persons} onChange={reload} />
         </Tabs.Panel>
         <Tabs.Panel value="videos" pt="md">
-          <VideosPanel caseId={caseId} videos={videos} jobs={jobs} canManage={canManage} onChange={reloadVideos} />
+          <VideosPanel caseId={caseId} videos={videos} locations={locations} jobs={jobs} canManage={canManage} onChange={reloadVideos} />
         </Tabs.Panel>
         <Tabs.Panel value="jobs" pt="md">
-          <JobsPanel caseId={caseId} jobs={jobs} videos={videos} references={references} persons={persons}
+          <JobsPanel caseId={caseId} jobs={jobs} videos={videos} locations={locations} references={references} persons={persons}
             onChange={reloadJobs} />
         </Tabs.Panel>
         <Tabs.Panel value="route" pt="md">
-          <RouteTimeline caseId={caseId} jobs={jobs} videos={videos} />
+          <RouteTimeline caseId={caseId} jobs={jobs} videos={videos} locations={locations} />
         </Tabs.Panel>
         <Tabs.Panel value="members" pt="md">
           <MembersPanel caseId={caseId} members={members} canManage={canManage} onChange={() => {

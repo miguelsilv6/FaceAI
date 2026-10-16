@@ -19,6 +19,7 @@ from ..models import (
     Detection,
     Job,
     JobStatus,
+    Location,
     ReferenceImage,
     Track,
     Upload,
@@ -32,14 +33,17 @@ from ..schemas import (
     CasePersonCreate,
     CasePersonUpdate,
     CaseUpdate,
+    LocationCreate,
     MemberAdd,
     ReferenceUpdate,
     VideoDelete,
+    VideoUpdate,
 )
 from ..services import disk
 from ..services.audit import log_event
 from ..services.clock_auto import request_auto_clock
 from ..services.face_engine import get_engine
+from ..services.locations import default_location
 from ..services.references import validate_reference
 from ..services.transcode import (
     FORMATS,
@@ -104,21 +108,38 @@ def register_reference(session, case_id: int, path: Path, filename: str, size: i
     return ref
 
 
-def register_video(session, case_id: int, path: Path, filename: str, size: int, actor: str) -> Video:
+def location_of_case(session, case_id: int, location_id: int | None, actor: str = "") -> Location:
+    """Local de destino de um vídeo: o indicado (tem de ser do caso) ou, sem indicação, o "Geral" do caso."""
+    if location_id is None:
+        loc = default_location(session, case_id, actor)
+        session.commit()
+        return loc
+    loc = session.get(Location, location_id)
+    if loc is None or loc.case_id != case_id:
+        raise HTTPException(422, "Local inexistente neste caso.")
+    return loc
+
+
+def register_video(session, case_id: int, path: Path, filename: str, size: int, actor: str,
+                   location_id: int | None = None) -> Video:
     """Regista um vídeo já gravado em disco (metadados via OpenCV) e pede a cópia de reprodução, se útil."""
     try:
+        loc = location_of_case(session, case_id, location_id, actor)
         info = probe(path)
-    except ValueError as exc:
+    except (ValueError, HTTPException) as exc:
         path.unlink(missing_ok=True)
+        if isinstance(exc, HTTPException):
+            raise
         raise HTTPException(422, f"{filename}: {exc}") from exc
-    video = Video(case_id=case_id, filename=filename, stored_path=str(path), size_bytes=size,
+    video = Video(case_id=case_id, location_id=loc.id, filename=filename, stored_path=str(path), size_bytes=size,
                   duration_s=round(info.duration_s, 3), fps=round(info.fps, 3), frame_count=info.frame_count,
                   width=info.width, height=info.height, codec=info.codec)
     session.add(video)
     session.commit()
     session.refresh(video)
     log_event(session, "video.uploaded", case_id=case_id, actor=actor,
-              details=video.model_dump(mode="json", exclude={"stored_path", "playback_path"}))
+              details={**video.model_dump(mode="json", exclude={"stored_path", "playback_path"}),
+                       "location_name": loc.name})
     request_playback_copy(session, video)
     request_auto_clock(session, video)
     return video
@@ -218,7 +239,9 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
     summary["members"] = [m.user_id for m in members]
     persons = list(session.exec(select(CasePerson).where(CasePerson.case_id == case_id)))
     summary["persons"] = [p.name for p in persons]
-    for rows in (detections, tracks, jobs, uploads, refs, persons, videos, members):
+    locations = list(session.exec(select(Location).where(Location.case_id == case_id)))
+    summary["locations"] = [loc.name for loc in locations]
+    for rows in (detections, tracks, jobs, uploads, refs, persons, videos, locations, members):
         for row in rows:
             session.delete(row)
         session.flush()
@@ -477,14 +500,112 @@ def delete_reference(ref_id: int, session: SessionDep, actor: ActorDep) -> None:
 
 # ---------------------------------------------------------------- vídeos
 @router.post("/cases/{case_id}/videos", response_model=list[Video], status_code=201)
-def upload_videos(case_id: int, files: list[UploadFile], session: SessionDep, actor: ActorDep) -> list[Video]:
+def upload_videos(case_id: int, files: list[UploadFile], session: SessionDep, actor: ActorDep,
+                  location_id: int | None = None) -> list[Video]:
     get_case_or_404(session, case_id)
+    location_of_case(session, case_id, location_id, actor)  # valida antes de gravar os ficheiros
     vid_dir = settings.case_dir(case_id) / "videos"
     created: list[Video] = []
     for upload in files:
         path, size = _store_upload(upload, vid_dir, VIDEO_EXT)
-        created.append(register_video(session, case_id, path, Path(upload.filename or "").name, size, actor))
+        created.append(register_video(session, case_id, path, Path(upload.filename or "").name, size, actor,
+                                      location_id))
     return created
+
+
+@router.patch("/videos/{video_id}", response_model=Video)
+def update_video(video_id: int, body: VideoUpdate, session: SessionDep, actor: ActorDep) -> Video:
+    """Move o vídeo para outro local do caso e/ou muda o nome da câmara (fica na auditoria)."""
+    video = session.get(Video, video_id)
+    if video is None:
+        raise HTTPException(404, "Vídeo não encontrado.")
+    changes: dict = {}
+    if body.location_id is not None and body.location_id != video.location_id:
+        new = location_of_case(session, video.case_id, body.location_id)
+        old = session.get(Location, video.location_id) if video.location_id else None
+        changes["location"] = [{"id": video.location_id, "name": old.name if old else ""},
+                               {"id": new.id, "name": new.name}]
+        video.location_id = new.id
+    if body.camera_name is not None:
+        name = " ".join(body.camera_name.split())
+        if name != video.camera_name:
+            changes["camera_name"] = [video.camera_name, name]
+            video.camera_name = name
+    if changes:
+        session.add(video)
+        session.commit()
+        session.refresh(video)
+        log_event(session, "video.updated", case_id=video.case_id, actor=actor,
+                  details={"video_id": video.id, "filename": video.filename, "changes": changes})
+    return video
+
+
+# ---------------------------------------------------------------- locais
+def _location_out(session, loc: Location) -> dict:
+    videos = session.exec(select(Video).where(Video.location_id == loc.id).order_by(Video.id)).all()
+    return {"id": loc.id, "case_id": loc.case_id, "name": loc.name, "created_by": loc.created_by,
+            "created_at": loc.created_at, "video_ids": [v.id for v in videos],
+            "duration_s": round(sum(v.duration_s for v in videos), 3)}
+
+
+def _check_location_name(session, case_id: int, name: str, exclude: int | None = None) -> str:
+    name = " ".join(name.split())
+    if not name:
+        raise HTTPException(422, "Indique o nome do local.")
+    for other in session.exec(select(Location).where(Location.case_id == case_id)):
+        if other.id != exclude and other.name.casefold() == name.casefold():
+            raise HTTPException(409, f"Já existe o local \"{other.name}\" neste caso.")
+    return name
+
+
+@router.get("/cases/{case_id}/locations")
+def list_locations(case_id: int, session: SessionDep) -> list[dict]:
+    get_case_or_404(session, case_id)
+    return [_location_out(session, loc) for loc in
+            session.exec(select(Location).where(Location.case_id == case_id).order_by(Location.id))]
+
+
+@router.post("/cases/{case_id}/locations", status_code=201)
+def create_location(case_id: int, body: LocationCreate, session: SessionDep, actor: ActorDep) -> dict:
+    get_case_or_404(session, case_id)
+    loc = Location(case_id=case_id, name=_check_location_name(session, case_id, body.name), created_by=actor)
+    session.add(loc)
+    session.commit()
+    session.refresh(loc)
+    log_event(session, "location.created", case_id=case_id, actor=actor,
+              details={"location_id": loc.id, "name": loc.name})
+    return _location_out(session, loc)
+
+
+@router.patch("/locations/{location_id}")
+def update_location(location_id: int, body: LocationCreate, session: SessionDep, actor: ActorDep) -> dict:
+    loc = session.get(Location, location_id)
+    if loc is None:
+        raise HTTPException(404, "Local não encontrado.")
+    name = _check_location_name(session, loc.case_id, body.name, exclude=loc.id)
+    if name != loc.name:
+        old, loc.name = loc.name, name
+        session.add(loc)
+        session.commit()
+        log_event(session, "location.updated", case_id=loc.case_id, actor=actor,
+                  details={"location_id": loc.id, "changes": {"name": [old, name]}})
+    return _location_out(session, loc)
+
+
+@router.delete("/locations/{location_id}", status_code=204)
+def delete_location(location_id: int, session: SessionDep, actor: ActorDep) -> None:
+    """Elimina um local vazio (os vídeos nunca são apagados por esta via)."""
+    loc = session.get(Location, location_id)
+    if loc is None:
+        raise HTTPException(404, "Local não encontrado.")
+    if session.exec(select(Video).where(Video.location_id == loc.id)).first():
+        raise HTTPException(409, "O local tem vídeos. Mova-os para outro local ou elimine-os primeiro.")
+    if session.exec(select(Upload).where(Upload.location_id == loc.id, Upload.completed_at == None)).first():  # noqa: E711
+        raise HTTPException(409, "Há vídeos a ser importados para este local.")
+    session.delete(loc)
+    session.commit()
+    log_event(session, "location.deleted", case_id=loc.case_id, actor=actor,
+              details={"location_id": location_id, "name": loc.name})
 
 
 @router.get("/cases/{case_id}/videos", response_model=list[Video])

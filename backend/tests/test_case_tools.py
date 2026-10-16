@@ -117,6 +117,7 @@ def test_validated_frames_zip(client, tmp_path):
     for row in rows:  # SHA-256 do manifesto corresponde ao ficheiro no ZIP
         assert hashlib.sha256(zf.read(row["ficheiro"])).hexdigest() == row["sha256"]
         assert row["revisto_por"] == "admin.teste" and row["video"] == "cctv.mp4" and row["nota"] == "ok"
+        assert row["local"] == "Geral" and row["camara"] == "cctv.mp4"
     assert "Deteções: 3 · frames: 2 · falhas: 0" in zf.read("LEIAME.txt").decode()
     events = [e for e in client.get(f"/api/cases/{case['id']}/audit").json()
               if e["action"] == "frames.validated_exported"]
