@@ -1,13 +1,15 @@
-import { Badge, Button, Card, Group, Loader, Stack, Table, Text, Tooltip } from "@mantine/core";
-import { IconClock, IconMovie, IconRefresh } from "@tabler/icons-react";
+import { ActionIcon, Badge, Button, Card, Group, Loader, Stack, Table, Text, Tooltip } from "@mantine/core";
+import { IconClock, IconMovie, IconPlayerPlay, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 
 import { api, formatBytes, formatTime, realTime } from "../api";
 import { notifyError, notifyOk } from "../notify";
-import type { Video } from "../types";
+import type { Job, Video } from "../types";
 import ClockModal from "./ClockModal";
+import DeleteVideoModal from "./DeleteVideoModal";
 import PlaybackBadge from "./PlaybackBadge";
 import UploadZone from "./UploadZone";
+import VideoPlayerModal from "./VideoPlayerModal";
 
 const VIDEO_ACCEPT = {
   "video/*": [".mp4", ".avi", ".mkv", ".mov", ".m4v", ".wmv", ".mpg", ".mpeg", ".ts", ".webm", ".flv", ".3gp"],
@@ -17,12 +19,16 @@ const VIDEO_ACCEPT = {
 interface Props {
   caseId: number;
   videos: Video[];
+  jobs: Job[];
+  canManage: boolean;
   onChange: () => void;
 }
 
-export default function VideosPanel({ caseId, videos, onChange }: Props) {
+export default function VideosPanel({ caseId, videos, jobs, canManage, onChange }: Props) {
   const [progress, setProgress] = useState<number | null>(null);
   const [clockVideo, setClockVideo] = useState<Video | null>(null);
+  const [playId, setPlayId] = useState<number | null>(null);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
 
   // Atualiza o estado das conversões para o browser enquanto houver alguma na fila ou a decorrer.
   // (e enquanto a hora estiver a ser lida por OCR na importação).
@@ -90,12 +96,22 @@ export default function VideosPanel({ caseId, videos, onChange }: Props) {
             <Table>
               <Table.Thead>
                 <Table.Tr><Table.Th>#</Table.Th><Table.Th>Ficheiro</Table.Th><Table.Th>Tamanho</Table.Th>
-                  <Table.Th>Duração</Table.Th><Table.Th>FPS</Table.Th><Table.Th>Resolução</Table.Th><Table.Th>Codec</Table.Th><Table.Th>Reprodução no browser</Table.Th><Table.Th>Hora real</Table.Th></Table.Tr>
+                  <Table.Th>Duração</Table.Th><Table.Th>FPS</Table.Th><Table.Th>Resolução</Table.Th><Table.Th>Codec</Table.Th><Table.Th>Reprodução no browser</Table.Th><Table.Th>Hora real</Table.Th><Table.Th /></Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {videos.map((v) => (
                   <Table.Tr key={v.id}>
-                    <Table.Td>{v.id}</Table.Td><Table.Td>{v.filename}</Table.Td><Table.Td>{formatBytes(v.size_bytes)}</Table.Td>
+                    <Table.Td>{v.id}</Table.Td>
+                    <Table.Td>
+                      <Group gap={4} wrap="nowrap">
+                        <Tooltip label="Ver o vídeo">
+                          <ActionIcon variant="light" size="sm" aria-label={`Ver ${v.filename}`} onClick={() => setPlayId(v.id)}>
+                            <IconPlayerPlay size={14} />
+                          </ActionIcon>
+                        </Tooltip>
+                        <Text size="sm">{v.filename}</Text>
+                      </Group>
+                    </Table.Td><Table.Td>{formatBytes(v.size_bytes)}</Table.Td>
                     <Table.Td>{formatTime(v.duration_s)}</Table.Td><Table.Td>{v.fps.toFixed(2)}</Table.Td>
                     <Table.Td>{v.width}×{v.height}</Table.Td><Table.Td>{v.codec || "—"}</Table.Td>
                     <Table.Td><PlaybackBadge video={v} onCreate={createCopy} /></Table.Td>
@@ -126,6 +142,15 @@ export default function VideosPanel({ caseId, videos, onChange }: Props) {
                       <Button size="compact-xs" variant="subtle" leftSection={<IconClock size={14} />} mt={4}
                         onClick={() => setClockVideo(v)}>Acertar hora</Button>
                     </Table.Td>
+                    <Table.Td w={40}>
+                      {canManage && (
+                        <Tooltip label="Eliminar vídeo">
+                          <ActionIcon variant="subtle" color="red" aria-label={`Eliminar ${v.filename}`} onClick={() => setDeleteId(v.id)}>
+                            <IconTrash size={16} />
+                          </ActionIcon>
+                        </Tooltip>
+                      )}
+                    </Table.Td>
                   </Table.Tr>
                 ))}
               </Table.Tbody>
@@ -133,6 +158,10 @@ export default function VideosPanel({ caseId, videos, onChange }: Props) {
           </Table.ScrollContainer>
         )}
       </Card>
+      <VideoPlayerModal key={playId ?? 0} video={videos.find((v) => v.id === playId) ?? null} onClose={() => setPlayId(null)}
+        onChange={onChange} />
+      <DeleteVideoModal video={videos.find((v) => v.id === deleteId) ?? null} jobs={jobs}
+        onClose={() => setDeleteId(null)} onDeleted={() => { setDeleteId(null); onChange(); }} />
       {clockVideo && (
         <ClockModal key={clockVideo.id} video={clockVideo} opened onClose={() => setClockVideo(null)}
           onSaved={(v) => { setClockVideo(v); onChange(); }} />
