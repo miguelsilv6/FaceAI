@@ -3,7 +3,7 @@ import {
 } from "@mantine/core";
 import {
   IconArrowsMaximize, IconArrowsMinimize, IconPlayerPause, IconPlayerPlay, IconPlayerSkipForward, IconRewindBackward10,
-  IconRewindForward10, IconArrowUp, IconX,
+  IconRewindForward10,
 } from "@tabler/icons-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -47,31 +47,7 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
   const els = useRef(new Map<number, HTMLVideoElement>());
   const wallRef = useRef(0);
   wallRef.current = wall;
-  // Leitor flutuante: quando o leitor sai do ecrã por cima (scroll para baixo), fica fixo no topo.
   const holder = useRef<HTMLDivElement>(null);
-  const [floating, setFloating] = useState(false);
-  const [dismissed, setDismissed] = useState(false);
-  const [holderH, setHolderH] = useState<number>();
-  const floatingRef = useRef(false);
-  useEffect(() => {
-    const check = () => {
-      const el = holder.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      if (!floatingRef.current) setHolderH(el.offsetHeight);
-      const above = r.bottom < 120; // passou para cima do cabeçalho e da faixa de tarefas
-      if (!above) setDismissed(false);
-      floatingRef.current = above;
-      setFloating(above);
-    };
-    check();
-    window.addEventListener("scroll", check, { passive: true });
-    window.addEventListener("resize", check);
-    return () => {
-      window.removeEventListener("scroll", check);
-      window.removeEventListener("resize", check);
-    };
-  }, []);
 
   const t0 = cams.length ? Math.min(...cams.map((v) => wallOf(v, 0))) : 0;
   const t1 = cams.length ? Math.max(...cams.map((v) => wallOf(v, v.duration_s))) : 1;
@@ -147,39 +123,17 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
   const nextSeg = segments.find((s) => s.real_start && wallSeconds(s.real_start) - 2 > wall + 0.5
     && shown.includes(String(s.video_id)));
   const jump = (d: number) => setWall((w) => Math.min(t1, Math.max(t0, w + d)));
-  const float = floating && !dismissed;
-  const cols = focus != null ? 1 : visible.length <= 1 ? 1 : float ? Math.min(3, visible.length)
-    : visible.length <= 4 ? 2 : 3;
+  const cols = focus != null ? 1 : visible.length <= 1 ? 1 : visible.length <= 4 ? 2 : 3;
 
   return (
-    <div ref={holder} style={{ height: floating ? holderH : undefined }}>
-    <Card withBorder shadow={float ? "xl" : undefined} aria-label="Leitor multi-câmara"
-      style={float ? {
-        position: "fixed", top: "calc(var(--app-shell-header-height, 60px) + 6px)", right: 16, zIndex: 180,
-        width: "min(760px, calc(100vw - 32px))", maxHeight: "calc(100vh - 90px)", overflowY: "auto",
-      } : undefined}>
-      <Stack gap={float ? 6 : "sm"}>
+    <div ref={holder}>
+    <Card withBorder aria-label="Leitor multi-câmara">
+      <Stack gap="sm">
         <Group justify="space-between" wrap="wrap">
-          <Text fw={600} size={float ? "sm" : undefined}>Câmaras sincronizadas pela hora real</Text>
-          {float ? (
-            <Group gap={4}>
-              <Tooltip label="Voltar ao leitor">
-                <ActionIcon size="sm" variant="subtle" aria-label="Voltar ao leitor"
-                  onClick={() => holder.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-                  <IconArrowUp size={14} />
-                </ActionIcon>
-              </Tooltip>
-              <Tooltip label="Fechar leitor flutuante">
-                <ActionIcon size="sm" variant="subtle" aria-label="Fechar leitor flutuante" onClick={() => setDismissed(true)}>
-                  <IconX size={14} />
-                </ActionIcon>
-              </Tooltip>
-            </Group>
-          ) : (
-            <Text size="xs" c="dimmed">Só visualização: a análise e as evidências usam sempre os ficheiros originais.</Text>
-          )}
+          <Text fw={600}>Câmaras sincronizadas pela hora real</Text>
+          <Text size="xs" c="dimmed">Só visualização: a análise e as evidências usam sempre os ficheiros originais.</Text>
         </Group>
-        {cams.length > 1 && !float && (
+        {cams.length > 1 && (
           <Group gap={6} wrap="wrap" align="center">
             <Button.Group>
               <Button size="compact-xs" variant="default" onClick={() => setShown(cams.map((v) => String(v.id)))}>
@@ -229,7 +183,7 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
             data={["0.5", "1", "2", "4", "8"].map((x) => ({ value: x, label: `${x}×` }))} />
           <Button size="xs" variant="light" leftSection={<IconPlayerSkipForward size={14} />} disabled={!nextSeg}
             onClick={() => nextSeg && setWall(wallSeconds(nextSeg.real_start!) - 2)}>Próxima aparição</Button>
-          {!float && <Text size="xs" c="dimmed">{VIDEO_KEYS_HINT}</Text>}
+          <Text size="xs" c="dimmed">{VIDEO_KEYS_HINT}</Text>
         </Group>
         <Slider min={t0} max={t1} step={0.1} value={wall} label={(x) => fmt(x)} aria-label="Hora real"
           onChange={(x) => { setPlaying(false); setWall(x); }}
@@ -239,7 +193,7 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
           <Text size="xs" ff="monospace" c="dimmed">{fmt(t1)}</Text>
         </Group>
         {!visible.length && <Text size="sm" c="dimmed">Nenhuma câmara selecionada.</Text>}
-        <SimpleGrid cols={float ? cols : { base: 1, sm: Math.min(2, cols), lg: cols }} spacing="xs">
+        <SimpleGrid cols={{ base: 1, sm: Math.min(2, cols), lg: cols }} spacing="xs">
           {visible.map((v) => {
             const t = videoTimeAt(v, wall);
             const inside = t >= 0 && t <= v.duration_s;
@@ -262,8 +216,7 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
                     </Tooltip>
                   </Group>
                 </Group>
-                <Box style={{ position: "relative", background: "#000", borderRadius: 4, aspectRatio: `${v.width || 16} / ${v.height || 9}`,
-                  maxHeight: float ? 170 : undefined }}>
+                <Box style={{ position: "relative", background: "#000", borderRadius: 4, aspectRatio: `${v.width || 16} / ${v.height || 9}` }}>
                   {preparing ? (
                     <Text c="gray.4" size="xs" p="sm">A preparar a cópia de reprodução deste vídeo…</Text>
                   ) : (

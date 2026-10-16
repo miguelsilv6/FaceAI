@@ -875,18 +875,66 @@ def case_validated_summary(case_id: int, session: SessionDep) -> dict:
     return {"detections": len(items), "frames": len({(j.id, v.id, d.frame_index) for d, j, v in items})}
 
 
-@router.get("/cases/{case_id}/frames/validated.zip")
-def case_validated_frames(case_id: int, session: SessionDep, actor: ActorDep) -> StreamingResponse:
-    """ZIP com os frames originais das deteções confirmadas de todas as análises do caso."""
+def _validated_label(job: Job, pid: int | None) -> str:
+    """Pessoa de uma deteção confirmada: o nome procurado ou, no modo descoberta, "Pessoa #n"."""
+    params = job.params or {}
+    if params.get("mode") == "discover":
+        return f"Pessoa #{pid}" if pid else ""
+    persons = params.get("persons") or []
+    if len(persons) == 1:
+        return persons[0].get("label") or ""
+    return next((p["label"] for p in persons if p["id"] == pid), "")
+
+
+@router.get("/cases/{case_id}/frames/validated/items")
+def case_validated_items(case_id: int, session: SessionDep) -> list[dict]:
+    """Deteções confirmadas do caso (as que vão para o ZIP de frames validados), com local, câmara e hora."""
     get_case_or_404(session, case_id)
     jobs = list(session.exec(select(Job).where(Job.case_id == case_id).order_by(Job.id)))
-    return validated_zip_response(session, jobs, case_id=case_id, actor=actor, scope=f"caso {case_id}",
-                                  filename=f"faceai_caso{case_id}_frames_validados")
+    validated = validated_frames.collect(session, jobs)
+    track_ids = {d.track_id for d, _, _ in validated.items if d.track_id is not None}
+    tracks = {t.id: t for t in session.exec(select(Track).where(Track.id.in_(track_ids or {-1})))}
+    out = []
+    for det, job, video in validated.items:
+        t = tracks.get(det.track_id) if det.track_id is not None else None
+        pid = det.person_id or (t.person_id if t is not None else None)
+        rt = real_time(video.dvr_start, video.dvr_rate, video.clock_offset_s, det.timestamp_s)
+        out.append({
+            "detection_id": det.id, "job_id": job.id, "job_mode": (job.params or {}).get("mode", "match"),
+            "video_id": video.id, "video_filename": video.filename, **validated.places.get(video.id, {}),
+            "frame_index": det.frame_index, "timestamp_s": det.timestamp_s,
+            "real_time": rt.isoformat(timespec="milliseconds") if rt else None,
+            "kind": det.kind or "face", "evidence": t.evidence if t is not None and t.kind == "body" else "face",
+            "person_id": pid, "person_label": _validated_label(job, pid), "similarity": det.similarity,
+            "reviewed_by": det.reviewed_by, "reviewed_at": det.reviewed_at.isoformat() if det.reviewed_at else None,
+            "review_note": det.review_note,
+        })
+    out.sort(key=lambda x: (x["real_time"] is None, x["real_time"] or "", x["video_id"], x["timestamp_s"]))
+    return out
+
+
+@router.get("/cases/{case_id}/frames/validated.zip")
+def case_validated_frames(case_id: int, session: SessionDep, actor: ActorDep,
+                          detection_ids: str | None = None) -> StreamingResponse:
+    """ZIP com os frames originais das deteções confirmadas de todas as análises do caso (ou só das indicadas)."""
+    get_case_or_404(session, case_id)
+    only = None
+    if detection_ids:
+        try:
+            only = {int(x) for x in detection_ids.split(",") if x.strip()}
+        except ValueError as exc:
+            raise HTTPException(422, "detection_ids inválido.") from exc
+    jobs = list(session.exec(select(Job).where(Job.case_id == case_id).order_by(Job.id)))
+    return validated_zip_response(session, jobs, case_id=case_id, actor=actor,
+                                  scope=f"caso {case_id}" + (" (seleção)" if only else ""),
+                                  filename=f"faceai_caso{case_id}_frames_validados", only=only)
 
 
 def validated_zip_response(session, jobs: list[Job], *, case_id: int, actor: str, scope: str,
-                           filename: str) -> StreamingResponse:
+                           filename: str, only: set[int] | None = None) -> StreamingResponse:
     validated = validated_frames.collect(session, jobs)
+    if only is not None:  # seleção: só deteções confirmadas deste caso (ids alheios são ignorados)
+        validated.items = [it for it in validated.items if it[0].id in only]
     if not validated.items:
         raise HTTPException(404, "Não há deteções confirmadas: valide primeiro as deteções que quer exportar.")
     log_event(session, "frames.validated_exported", case_id=case_id, actor=actor,

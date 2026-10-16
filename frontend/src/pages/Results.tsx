@@ -680,7 +680,7 @@ export default function Results() {
           visiblePersons.length === 0 ? (
             <Text c="dimmed">{running ? "As pessoas são agrupadas no fim da análise…" : "Não foram encontradas faces."}</Text>
           ) : (
-            <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
+            <SimpleGrid cols={{ base: 1, xs: 2, sm: 3, md: 4, xl: 5 }}>
               {visiblePersons.map((p) => (
                 <PersonCard key={p.person_id} person={p} selected={personFilter === p.person_id}
                   others={persons.filter((o) => o.person_id !== p.person_id)}
