@@ -21,6 +21,7 @@ from ..models import (
     JobStatus,
     Location,
     ReferenceImage,
+    SavedFrame,
     Track,
     Upload,
     User,
@@ -241,7 +242,9 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
     summary["persons"] = [p.name for p in persons]
     locations = list(session.exec(select(Location).where(Location.case_id == case_id)))
     summary["locations"] = [loc.name for loc in locations]
-    for rows in (detections, tracks, jobs, uploads, refs, persons, videos, locations, members):
+    saved = list(session.exec(select(SavedFrame).where(SavedFrame.case_id == case_id)))
+    summary["saved_frames"] = len(saved)
+    for rows in (detections, tracks, saved, jobs, uploads, refs, persons, videos, locations, members):
         for row in rows:
             session.delete(row)
         session.flush()

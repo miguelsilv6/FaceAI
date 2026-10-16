@@ -508,7 +508,9 @@ export interface CaseDashboard {
 
 /** Deteção confirmada (frame validado), como aparece no separador "Resultados" do caso. */
 export interface ValidatedItem {
-  detection_id: number;
+  type: "detection" | "saved_frame";
+  detection_id: number | null; // deteção confirmada
+  saved_frame_id: number | null; // frame guardado no leitor
   job_id: number;
   job_mode: string;
   video_id: number;
@@ -524,7 +526,7 @@ export interface ValidatedItem {
   evidence: string;
   person_id: number | null;
   person_label: string;
-  similarity: number;
+  similarity: number | null;
   reviewed_by: string;
   reviewed_at: string | null;
   review_note: string;

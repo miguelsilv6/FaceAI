@@ -3,7 +3,6 @@ import {
 } from "@mantine/core";
 import {
   IconActivity, IconHistory, IconLayoutDashboard, IconMovie, IconPencil, IconPhoto, IconPhotoCheck, IconRoute, IconTrash,
-  IconUsers,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -14,7 +13,6 @@ import CaseDashboard from "../components/CaseDashboard";
 import { useAuth } from "../auth";
 import DeleteCaseModal from "../components/DeleteCaseModal";
 import JobsPanel from "../components/JobsPanel";
-import MembersPanel from "../components/MembersPanel";
 import RouteTimeline from "../components/RouteTimeline";
 import ReferencesPanel from "../components/ReferencesPanel";
 import ValidatedFramesPanel from "../components/ValidatedFramesPanel";
@@ -148,9 +146,6 @@ export default function CaseView() {
           </Tabs.Tab>
           <Tabs.Tab value="results" leftSection={<IconPhotoCheck size={16} />}>Resultados</Tabs.Tab>
           <Tabs.Tab value="route" leftSection={<IconRoute size={16} />}>Percurso/Multi View</Tabs.Tab>
-          <Tabs.Tab value="members" leftSection={<IconUsers size={16} />}>
-            Equipa <Badge size="xs" variant="light">{members.length}</Badge>
-          </Tabs.Tab>
           <Tabs.Tab value="audit" leftSection={<IconHistory size={16} />}>Auditoria</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="dashboard" pt="md">
@@ -171,12 +166,6 @@ export default function CaseView() {
         </Tabs.Panel>
         <Tabs.Panel value="route" pt="md">
           <RouteTimeline caseId={caseId} jobs={jobs} videos={videos} locations={locations} />
-        </Tabs.Panel>
-        <Tabs.Panel value="members" pt="md">
-          <MembersPanel caseId={caseId} members={members} canManage={canManage} onChange={() => {
-            reloadMembers();
-            if (!isAdmin) api.case(caseId).catch(() => navigate("/"));
-          }} />
         </Tabs.Panel>
         <Tabs.Panel value="audit" pt="md">
           <AuditPanel events={audit} />

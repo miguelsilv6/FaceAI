@@ -134,7 +134,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 - **Papéis:**
   - **Administrador:** gere utilizadores (menu do utilizador → *Utilizadores*), vê todos os casos e a auditoria do sistema (logins, falhas, bloqueios, contas);
   - **Analista:** só vê os casos que criou ou que lhe foram atribuídos.
-- **Equipa do caso (need-to-know)**, no separador *Equipa*:
+- **Equipa do caso (need-to-know)** (o separador *Equipa* está desativado nesta fase; o controlo de acesso por caso mantém-se e a gestão faz-se pela API `/api/cases/{id}/members`):
   - quem cria o caso fica **responsável**;
   - o responsável, ou um administrador, dá acesso a outros utilizadores como **membro** ou responsável;
   - só o responsável e o administrador editam ou eliminam o caso; uma análise pode ser eliminada também por quem a criou;
@@ -146,7 +146,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 
 ## Utilização
 
-1. **Novo caso:** indica o nome ou referência do processo. Ficas como responsável do caso e podes dar acesso a colegas no separador *Equipa*. O nome e a descrição podem ser editados depois (✏️ ao lado do nome do caso). Os valores anteriores ficam na auditoria.
+1. **Novo caso:** indica o nome ou referência do processo. Ficas como responsável do caso. O nome e a descrição podem ser editados depois (✏️ ao lado do nome do caso). Os valores anteriores ficam na auditoria.
 2. **Referências/Pessoas:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
 3. **Locais e vídeos:** o caso organiza-se em **locais**: os estabelecimentos ou zonas de interesse para o caso (ex.: "Café Central", "Estação de Campanhã"), cada um com os seus **vídeos** (um por ângulo de CCTV desse local).
    - O separador mostra um cartão por local (n.º de vídeos, duração, quantos têm hora real acertada). **Novo local** cria um local e abre a sua página.
@@ -177,7 +177,8 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 6. **Eliminar um caso** (🗑 na lista de casos ou ao lado do nome do caso): pede o motivo e a confirmação, escrevendo o número do caso. Recusa se houver análises a decorrer. Cancela as conversões em curso e apaga do servidor os **vídeos originais e as cópias de reprodução**, as referências, as análises (deteções, recortes, frames) e os uploads por concluir. A auditoria mantém o histórico e regista um `case.deleted` com o motivo e a lista dos ficheiros apagados. Exporta antes os relatórios de que precises.
 7. **Eliminar uma análise** (🗑 na lista de análises ou "Eliminar" nos resultados): pede o motivo e a confirmação, escrevendo o número da análise. Apaga as deteções, os tracks, as revisões e os ficheiros gerados. Os vídeos e as referências do caso mantêm-se. A auditoria é *append-only*: guarda o histórico da análise e regista a eliminação (quem, quando, motivo, parâmetros e totais). Não é possível eliminar uma análise a decorrer; é preciso cancelá-la primeiro.
 8. **Exportar:** relatório PDF ou HTML, com estatísticas, parâmetros, tracks e qualidade; CSV; JSON; ou ZIP.
-   - **Separador *Resultados* do caso:** mostra todos os frames validados (deteções confirmadas) de todas as análises, com o local, o vídeo, a hora real, a pessoa e quem confirmou. Filtra-se por local, pessoa e análise, escolhem-se os frames e **Descarregar selecionados** gera o ZIP só com esses. Cada cartão tem também o PNG original e "Abrir na análise".
+   - **Guardar frame:** no leitor dos resultados de uma análise, **Guardar frame** guarda o frame original (PNG, sem marcações, com SHA-256) no instante atual. Fica como imagem validada no separador *Resultados* do caso (e na auditoria: `frame.saved`).
+   - **Separador *Resultados* do caso:** mostra todas as imagens validadas de todas as análises: deteções confirmadas e frames guardados no leitor, com o local, o vídeo, a hora real, a pessoa e quem confirmou/guardou. Clicar numa imagem abre-a em tamanho grande (com marcação ou original; ← → para navegar). Filtra-se por local, tipo, pessoa e análise, escolhem-se as imagens e **Descarregar selecionados** gera o ZIP só com essas. Cada cartão tem também o PNG original e "Abrir na análise"; um frame guardado pode ser retirado (fica na auditoria).
    - **Frames originais validados (ZIP):** no menu *Exportar* dos resultados, no separador *Resultados* (seleção) ou para o caso inteiro no separador *Análises*. Inclui o frame completo do vídeo original, sem anotações, de cada deteção **confirmada** (a revisão de um track aplica-se às suas deteções):
      - os frames com várias deteções aparecem uma só vez;
      - `manifesto.csv` com uma linha por deteção (análise, vídeo, frame, tempo e hora real, semelhança, revisor, método de extração e **SHA-256** do PNG);

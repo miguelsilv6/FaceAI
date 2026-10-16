@@ -3,7 +3,8 @@ import {
   SimpleGrid, Slider, Stack, Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconAlertTriangle, IconChevronLeft, IconChevronRight, IconDownload, IconInfoCircle, IconPhoto, IconPlayerStop, IconTrash,
+  IconAlertTriangle, IconChevronLeft, IconChevronRight, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhoto,
+  IconPlayerStop, IconTrash,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -76,6 +77,7 @@ export default function Results() {
   const [currentTime, setCurrentTime] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   useHtmlVideoKeys(videoRef);
+  const [savingFrame, setSavingFrame] = useState(false);
 
   const loadResults = useCallback(() => {
     Promise.all([api.detections(jobId), api.segments(jobId), api.tracks(jobId), api.persons(jobId)])
@@ -255,6 +257,20 @@ export default function Results() {
   };
   const videoById = useMemo(() => new Map(videos.map((v) => [v.id, v])), [videos]);
 
+  // Guarda o frame do vídeo original no instante atual do leitor (vai para os Resultados do caso).
+  const saveFrame = async () => {
+    const el = videoRef.current;
+    if (!job || !video || !el) return;
+    setSavingFrame(true);
+    try {
+      const sf = await api.saveFrame(job.id, video.id, el.currentTime);
+      notifyOk(`Frame ${sf.frame_index} (${formatTime(sf.timestamp_s)}) guardado no separador Resultados do caso.`);
+    } catch (e) {
+      notifyError(e, "Não foi possível guardar o frame");
+    } finally {
+      setSavingFrame(false);
+    }
+  };
   const seek = (t: number) => {
     const el = videoRef.current;
     if (el) {
@@ -544,7 +560,15 @@ export default function Results() {
                   detections={discover ? videoDets.filter(inPerson) : videoDets.filter(isEffectiveMatch)}
                   realTime={video.dvr_start ? (sec) => realTime(video, sec) : undefined}
                   currentTime={currentTime} onSeek={seek} />
-                {!converting && <Text size="xs" c="dimmed" ta="right">{VIDEO_KEYS_HINT}</Text>}
+                {!converting && (
+                  <Group justify="space-between" wrap="wrap" gap="xs">
+                    <Tooltip label="Guarda o frame original (sem marcações) neste instante; fica no separador Resultados do caso como imagem validada">
+                      <Button size="xs" variant="light" leftSection={<IconDeviceFloppy size={14} />} loading={savingFrame}
+                        onClick={saveFrame}>Guardar frame</Button>
+                    </Tooltip>
+                    <Text size="xs" c="dimmed">{VIDEO_KEYS_HINT}</Text>
+                  </Group>
+                )}
               </>
             )}
           </Stack>

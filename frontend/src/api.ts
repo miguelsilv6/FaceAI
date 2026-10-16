@@ -204,9 +204,16 @@ export const api = {
     request<CaseRoute>("GET", `/api/cases/${caseId}/route?only=${only}${jobIds.length ? `&job_ids=${jobIds.join(",")}` : ""}`),
   activity: () => request<Activity>("GET", "/api/activity"),
   validatedSummary: (caseId: number) =>
-    request<{ detections: number; frames: number }>("GET", `/api/cases/${caseId}/frames/validated`),
-  validatedFramesUrl: (scope: "jobs" | "cases", id: number, detectionIds?: number[]) =>
-    `/api/${scope}/${id}/frames/validated.zip${detectionIds?.length ? `?detection_ids=${detectionIds.join(",")}` : ""}`,
+    request<{ detections: number; frames: number; saved_frames: number }>("GET", `/api/cases/${caseId}/frames/validated`),
+  /** Com sel, só os itens indicados (deteções confirmadas e frames guardados). */
+  validatedFramesUrl: (scope: "jobs" | "cases", id: number, sel?: { detections: number[]; frames: number[] }) =>
+    `/api/${scope}/${id}/frames/validated.zip`
+    + (sel ? `?detection_ids=${sel.detections.join(",")}&frame_ids=${sel.frames.join(",")}` : ""),
+  saveFrame: (jobId: number, videoId: number, t: number, note = "") =>
+    request<{ id: number; frame_index: number; timestamp_s: number }>("POST", `/api/jobs/${jobId}/saved-frames`,
+      { video_id: videoId, t, note }),
+  savedFrameUrl: (id: number, download = false) => `/api/saved-frames/${id}/image${download ? "?download=1" : ""}`,
+  deleteSavedFrame: (id: number) => request<void>("DELETE", `/api/saved-frames/${id}`),
   validatedItems: (caseId: number) => request<ValidatedItem[]>("GET", `/api/cases/${caseId}/frames/validated/items`),
   case: (id: number) => request<Case>("GET", `/api/cases/${id}`),
   createCase: (body: { name: string; description: string }) =>

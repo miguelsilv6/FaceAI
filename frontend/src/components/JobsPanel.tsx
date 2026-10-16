@@ -29,11 +29,12 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
   const downloadValidated = async () => {
     try {
       const sum = await api.validatedSummary(caseId);
-      if (!sum.detections) {
-        notifyError(new Error("Ainda não há deteções confirmadas neste caso. Valide-as nos resultados das análises."));
+      if (!sum.detections && !sum.saved_frames) {
+        notifyError(new Error("Ainda não há deteções confirmadas nem frames guardados neste caso."));
         return;
       }
-      notifyOk(`A preparar ${sum.frames} frame(s) de ${sum.detections} deteção(ões) confirmada(s)…`, "Download");
+      notifyOk(`A preparar ${sum.frames} frame(s) de ${sum.detections} deteção(ões) confirmada(s)`
+        + `${sum.saved_frames ? ` e ${sum.saved_frames} frame(s) guardado(s)` : ""}…`, "Download");
       window.location.href = api.validatedFramesUrl("cases", caseId);
     } catch (e) {
       notifyError(e);
