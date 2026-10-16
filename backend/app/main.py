@@ -28,6 +28,7 @@ from .services.audit import request_ip
 from .services.clock_auto import resume_pending_auto_clock
 from .services.face_engine import preload_models
 from .services.jobs import recover_interrupted_jobs, runner
+from .services.locations import migrate_locations
 from .services.references import migrate_person_labels
 from .services.transcode import resume_pending_copies
 
@@ -43,6 +44,7 @@ async def lifespan(_: FastAPI):
     init_db()
     with Session(get_engine()) as s:
         migrate_person_labels(s)
+        migrate_locations(s)
     recover_interrupted_jobs()
     cleanup_stale_uploads()
     resume_pending_copies()

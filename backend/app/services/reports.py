@@ -18,6 +18,7 @@ from .. import __version__
 from ..config import settings
 from ..models import AuditEvent, Case, Detection, Job, ReferenceImage, ReviewStatus, Track, Video
 from .clock import format_real, real_time
+from .locations import locations_by_id, video_place
 from .persons import person_segments, summarize_persons
 from .segments import Interval, merge_intervals
 from .video_processor import format_timestamp
@@ -29,8 +30,9 @@ _TEMPLATES = Environment(
 _TEMPLATES.filters["ts"] = format_timestamp
 
 CSV_FIELDS = [
-    "detection_id", "video_id", "video_filename", "frame_index", "timestamp_s", "timestamp",
-    "real_time", "kind", "evidence", "x", "y", "w", "h", "face_confidence", "reference_id", "reference_filename",
+    "detection_id", "video_id", "video_filename", "location_name", "camera_name", "frame_index",
+    "timestamp_s", "timestamp", "real_time", "kind", "evidence", "x", "y", "w", "h", "face_confidence", "reference_id",
+    "reference_filename",
     "distance", "similarity", "is_match", "track_id", "track_is_match", "person_id", "person_label", "quality",
     "sharpness", "size_score", "frontal", "colors", "review_status", "reviewed_by", "reviewed_at", "review_note",
     "crop_file", "frame_file",
@@ -91,7 +93,14 @@ def load_job_data(s: Session, job: Job) -> dict[str, Any]:
                                                                                            Track.start_s))}
     audit = list(s.exec(select(AuditEvent).where(AuditEvent.case_id == job.case_id).order_by(AuditEvent.id)))
     return {"case": case, "job": job, "videos": videos, "references": refs, "detections": detections,
-            "tracks": tracks, "audit": audit}
+            "tracks": tracks, "audit": audit, "locations": locations_by_id(s, job.case_id)}
+
+
+def place_of(v: Video | None, data: dict[str, Any]) -> dict[str, Any]:
+    """Local e câmara de um vídeo ("Local · Câmara")."""
+    if v is None:
+        return {"location_id": None, "location_name": "", "camera_name": "", "camera_label": ""}
+    return video_place(v, data.get("locations") or {})
 
 
 def video_real_time(v: Video | None, video_s: float) -> str:
@@ -118,6 +127,7 @@ def segments_for(data: dict[str, Any]) -> list[dict[str, Any]]:
         v = data["videos"].get(seg["video_id"])
         seg["real_start"] = video_real_time(v, seg["start_s"])
         seg["real_end"] = video_real_time(v, seg["end_s"])
+        seg.update(place_of(v, data))
     return segs
 
 
@@ -143,6 +153,7 @@ def detection_row(d: Detection, data: dict[str, Any]) -> dict[str, Any]:
     t = data.get("tracks", {}).get(d.track_id) if d.track_id is not None else None
     return {
         "detection_id": d.id, "video_id": d.video_id, "video_filename": v.filename if v else "",
+        "location_name": place_of(v, data)["location_name"], "camera_name": place_of(v, data)["camera_name"],
         "frame_index": d.frame_index, "timestamp_s": d.timestamp_s, "timestamp": format_timestamp(d.timestamp_s),
         "real_time": video_real_time(v, d.timestamp_s),
         "kind": d.kind or "face", "evidence": (t.evidence if t is not None and t.kind == "body" else "face"),
@@ -178,8 +189,10 @@ def to_json(data: dict[str, Any]) -> str:
         "faceai_version": __version__,
         "case": case.model_dump(mode="json") if case else None,
         "job": job.model_dump(mode="json"),
+        "locations": (job.params or {}).get("locations") or [],
         "videos": [
-            v.model_dump(mode="json", exclude={"stored_path", "playback_path"}) for v in data["videos"].values()
+            {**v.model_dump(mode="json", exclude={"stored_path", "playback_path"}), **place_of(v, data)}
+            for v in data["videos"].values()
         ],
         "references": [
             r.model_dump(mode="json", exclude={"stored_path", "face_crop_path"}) for r in data["references"].values()
@@ -207,7 +220,7 @@ def persons_for(data: dict[str, Any]) -> list[dict[str, Any]]:
         for seg in person_segments(tracks, person["person_id"], gap):
             v = data["videos"].get(seg["video_id"])
             person["appearances"].append({
-                "video_id": seg["video_id"], "video_filename": v.filename if v else "",
+                "video_id": seg["video_id"], "video_filename": v.filename if v else "", **place_of(v, data),
                 "start_s": seg["start_s"], "end_s": seg["end_s"], "duration_s": seg["duration_s"],
                 "real_start": video_real_time(v, seg["start_s"]), "real_end": video_real_time(v, seg["end_s"]),
             })
@@ -286,7 +299,9 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
         version=__version__,
         case=data["case"],
         job=job,
-        videos=list(data["videos"].values()),
+        videos=sorted(data["videos"].values(),
+                      key=lambda v: (place_of(v, data)["location_name"].casefold(), v.id)),
+        place=lambda v: place_of(v, data),
         references=references,
         segments=segments,
         rows=rows,

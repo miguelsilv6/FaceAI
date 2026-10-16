@@ -67,9 +67,22 @@ class ReferenceImage(SQLModel, table=True):
     person_label: str = ""  # obsoleto (versão anterior: rótulo de texto); convertido em CasePerson no arranque
 
 
+class Location(SQLModel, table=True):
+    """Local de um caso (ex.: "Estação de Campanhã"); agrupa os vídeos das várias câmaras desse local."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    case_id: int = Field(foreign_key="case.id", index=True)
+    name: str
+    created_by: str = ""
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class Video(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     case_id: int = Field(foreign_key="case.id", index=True)
+    # Local (cada vídeo é uma câmara/ângulo desse local) e nome da câmara ("" → mostra-se o nome do ficheiro)
+    location_id: int | None = Field(default=None, foreign_key="location.id", index=True)
+    camera_name: str = ""
     filename: str
     stored_path: str
     size_bytes: int
@@ -203,6 +216,7 @@ class Upload(SQLModel, table=True):
     id: str = Field(primary_key=True)
     case_id: int = Field(foreign_key="case.id", index=True)
     kind: str  # "video" | "reference"
+    location_id: int | None = None  # vídeo: local de destino (None → "Geral")
     filename: str
     size_bytes: int
     received_bytes: int = 0
