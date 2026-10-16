@@ -96,7 +96,7 @@ def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorD
         wanted, wanted_locs = set(body.video_ids or []), set(body.location_ids or [])
         video_ids = [v.id for v in videos if v.id in wanted or v.location_id in wanted_locs]
     if not video_ids:
-        raise HTTPException(422, "Selecione pelo menos um vídeo (câmara) do caso.")
+        raise HTTPException(422, "Selecione pelo menos um vídeo do caso.")
     ref_ids: list[int] = []
     job_params = params.model_dump()
     # Locais abrangidos (nome no momento da análise, para o relatório e a reprodutibilidade)

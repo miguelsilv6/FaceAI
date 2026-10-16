@@ -43,13 +43,13 @@ function CameraNameInput({ video, onSaved }: { video: Video; onSaved: () => void
       await api.updateVideo(video.id, { camera_name: name });
       onSaved();
     } catch (e) {
-      notifyError(e, "Não foi possível mudar o nome da câmara");
+      notifyError(e, "Não foi possível mudar o nome do vídeo");
       setValue(video.camera_name);
     }
   };
   return (
     <TextInput size="xs" variant="filled" value={value} placeholder={video.filename} miw={160}
-      aria-label={`Nome da câmara do vídeo #${video.id}`}
+      aria-label={`Nome do vídeo #${video.id}`}
       onChange={(e) => setValue(e.currentTarget.value)} onBlur={save}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.currentTarget.blur();
@@ -105,7 +105,7 @@ function LocationHeader({ location, cameras, duration, onChange, onDeleted }: {
             </Tooltip>
           </>
         )}
-        <Badge variant="light">{cameras} câmara{cameras === 1 ? "" : "s"}</Badge>
+        <Badge variant="light">{cameras} vídeo{cameras === 1 ? "" : "s"}</Badge>
         {cameras > 0 && <Text size="xs" c="dimmed">{formatTime(duration)} de vídeo</Text>}
       </Group>
       <Tooltip label={cameras ? "Mova ou elimine os vídeos para poder eliminar o local" : "Eliminar o local"}>
@@ -176,15 +176,15 @@ export default function LocationCameras({ caseId, location, videos, locations, j
       <UploadZone accept={VIDEO_ACCEPT} onDrop={upload} progress={progress}
         icon={<IconMovie size={40} stroke={1.5} />}
         title={`Importar vídeos de CCTV para "${location.name}"`}
-        hint="Um vídeo por câmara/ângulo. Envio em blocos: se a ligação falhar, volte a largar o mesmo ficheiro para continuar de onde parou." />
+        hint="Um ficheiro por ângulo de CCTV. Envio em blocos: se a ligação falhar, volte a largar o mesmo ficheiro para continuar de onde parou." />
       <Card withBorder p={0}>
         {vs.length === 0 ? (
-          <Text c="dimmed" p="md">Sem câmaras neste local. Importe os vídeos acima.</Text>
+          <Text c="dimmed" p="md">Sem vídeos neste local. Importe-os acima.</Text>
         ) : (
           <Table.ScrollContainer minWidth={1000}>
             <Table>
               <Table.Thead>
-                <Table.Tr><Table.Th>#</Table.Th><Table.Th>Câmara</Table.Th><Table.Th>Tamanho</Table.Th>
+                <Table.Tr><Table.Th>#</Table.Th><Table.Th>Vídeo</Table.Th><Table.Th>Tamanho</Table.Th>
                   <Table.Th>Duração</Table.Th><Table.Th>FPS</Table.Th><Table.Th>Resolução</Table.Th><Table.Th>Codec</Table.Th><Table.Th>Reprodução no browser</Table.Th><Table.Th>Hora real</Table.Th><Table.Th /></Table.Tr>
               </Table.Thead>
               <Table.Tbody>

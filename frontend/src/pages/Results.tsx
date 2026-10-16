@@ -659,7 +659,7 @@ export default function Results() {
               <b>Evidência complementar.</b> As amostras são o corpo da pessoa nos frames em que a face teve
               correspondência (tronco {job.clothing_summary?.gallery_colors?.tronco ?? "?"}, pernas{" "}
               {job.clothing_summary?.gallery_colors?.pernas ?? "?"}). As aparições "só vestuário" foram encontradas pela
-              roupa noutras câmaras/momentos e têm de ser revistas: roupa semelhante (fardas, roupa escura) pode ser de
+              roupa noutros vídeos/momentos e têm de ser revistas: roupa semelhante (fardas, roupa escura) pode ser de
               outra pessoa. Limiar ReID usado: {job.clothing_summary?.calibration?.threshold_used ?? job.params.reid_threshold}
               {job.clothing_summary?.excluded_by_window ? ` · ${job.clothing_summary.excluded_by_window} excluído(s) pela janela temporal` : ""}.
             </Alert>

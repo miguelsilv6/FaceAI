@@ -116,7 +116,7 @@ const ACTIONS: Record<string, string> = {
   "job.created": "análise criada", "job.completed": "análise concluída", "detection.reviewed": "deteção revista",
   "track.reviewed": "track revisto", "video.uploaded": "vídeo importado", "video.clock_set": "hora real acertada",
   "reference.uploaded": "foto importada", "person.photo_search": "pesquisa por foto", "video.deleted": "vídeo eliminado",
-  "video.updated": "câmara alterada", "location.created": "local criado", "location.updated": "local renomeado",
+  "video.updated": "vídeo alterado", "location.created": "local criado", "location.updated": "local renomeado",
   "location.deleted": "local eliminado",
   "job.deleted": "análise eliminada", "report.generated": "relatório gerado", "job.started": "análise iniciada",
   "job.failed": "análise falhou", "job.cancelled": "análise cancelada", "video.playback_copy_requested": "cópia de reprodução pedida",
@@ -166,7 +166,7 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
       </Group>
 
       <SimpleGrid cols={{ base: 2, md: 4 }}>
-        <Kpi label="Locais / câmaras" value={`${m.locations} / ${m.videos}`}
+        <Kpi label="Locais / vídeos" value={`${m.locations} / ${m.videos}`}
           sub={`${formatDuration(m.duration_s)} · ${m.videos - m.videos_synced} sem hora real · ${formatBytes(m.size_bytes)}`} />
         <Kpi label="Análises concluídas" value={String(data.jobs.by_status.completed ?? 0)}
           sub={`${running} em curso · ${data.jobs.by_status.failed ?? 0} falhada(s)`} />
@@ -213,7 +213,7 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
                     <Table.Tr key={l.location_id}>
                       <Table.Td w="30%">
                         <Text size="sm" fw={600} truncate="end" title={l.name}>{l.name}</Text>
-                        <Text size="xs" c="dimmed">{l.cameras} câmara{l.cameras === 1 ? "" : "s"}</Text>
+                        <Text size="xs" c="dimmed">{l.cameras} vídeo{l.cameras === 1 ? "" : "s"}</Text>
                       </Table.Td>
                       <Table.Td>{l.matches ? <StackedBar counts={l} max={maxLoc} />
                         : <Text size="xs" c="dimmed">sem correspondências</Text>}</Table.Td>
@@ -231,7 +231,7 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
           <SimpleGrid cols={{ base: 1, lg: 2 }}>
             <Card withBorder>
               <Group justify="space-between" mb="xs">
-                <Title order={5}>Por câmara</Title>
+                <Title order={5}>Por vídeo</Title>
                 <Text size="xs" c="dimmed">correspondências</Text>
               </Group>
               {data.per_camera.length === 0 ? <Text c="dimmed" size="sm">Sem dados.</Text> : (

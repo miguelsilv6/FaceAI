@@ -139,8 +139,8 @@ export default function RouteTimeline({ caseId, jobs, videos, locations }: {
         <Button variant="light" size="xs" leftSection={<IconDownload size={16} />} disabled={!segs.length}
           onClick={download}>CSV</Button>
       </Group>
-      <Text size="sm" c="dimmed">Cada linha é uma câmara (vídeo), agrupadas por local; os blocos são as aparições, pela hora real do DVR.
-        Blocos tracejados vêm só do vestuário. Clique num bloco para ver todas as câmaras nesse instante (leitor abaixo).</Text>
+      <Text size="sm" c="dimmed">Cada linha é um vídeo, agrupados por local; os blocos são as aparições, pela hora real do DVR.
+        Blocos tracejados vêm só do vestuário. Clique num bloco para ver todos os vídeos nesse instante (leitor abaixo).</Text>
       {unsyncedVideos.length > 0 && (
         <Alert color="yellow">
           {unsyncedVideos.length} vídeo(s) com aparições mas sem hora real acertada ({unsyncedVideos.map((v) => v.camera_label).join(", ")}):
@@ -149,10 +149,10 @@ export default function RouteTimeline({ caseId, jobs, videos, locations }: {
       )}
       {route && segs.length > 0 && camerasWithSegs < 2 && (
         <Alert color="blue">
-          Só {lanes.length > 1 ? "uma das câmaras tem" : "há uma câmara com"} aparições nas análises escolhidas.
+          Só {lanes.length > 1 ? "um dos vídeos tem" : "há um vídeo com"} aparições nas análises escolhidas.
           {lanes.length > 1
-            ? " As outras câmaras foram analisadas mas a pessoa não foi encontrada nelas (ou só abaixo do limiar)."
-            : " Para ver o percurso entre câmaras, inclua os vídeos das outras câmaras na análise (ou escolha também as análises dessas câmaras no campo Análises) e acerte a hora de cada vídeo."}
+            ? " Os outros vídeos foram analisados mas a pessoa não foi encontrada neles (ou só abaixo do limiar)."
+            : " Para ver o percurso entre vídeos, inclua os outros vídeos na análise (ou escolha também as análises desses vídeos no campo Análises) e acerte a hora de cada vídeo."}
         </Alert>
       )}
       {segs.length === 0 ? (
@@ -214,7 +214,7 @@ export default function RouteTimeline({ caseId, jobs, videos, locations }: {
           <Table.ScrollContainer minWidth={640}>
             <Table striped verticalSpacing={4}>
               <Table.Thead>
-                <Table.Tr><Table.Th>Hora real</Table.Th><Table.Th>Câmara</Table.Th><Table.Th>Pessoa</Table.Th>
+                <Table.Tr><Table.Th>Hora real</Table.Th><Table.Th>Vídeo</Table.Th><Table.Th>Pessoa</Table.Th>
                   <Table.Th>No vídeo</Table.Th><Table.Th>Evidência</Table.Th><Table.Th /></Table.Tr>
               </Table.Thead>
               <Table.Tbody>
@@ -227,7 +227,7 @@ export default function RouteTimeline({ caseId, jobs, videos, locations }: {
                     <Table.Td>{s.evidence}</Table.Td>
                     <Table.Td>
                       <Group gap="xs" wrap="nowrap">
-                        <Anchor component="button" size="xs" onClick={() => watch(s)}>Ver câmaras</Anchor>
+                        <Anchor component="button" size="xs" onClick={() => watch(s)}>Ver vídeos</Anchor>
                         <Anchor component="button" size="xs" onClick={() => open(s)}>Resultados</Anchor>
                       </Group>
                     </Table.Td>

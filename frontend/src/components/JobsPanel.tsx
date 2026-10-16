@@ -124,7 +124,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
             )}
             <SimpleGrid cols={{ base: 1, md: discover ? 1 : 2 }}>
               <Input.Wrapper label="Locais" description={
-                `${discover ? "Todas as faces" : personsCount(choices)} × ${nLocs} ${nLocs === 1 ? "local" : "locais"} (${videoIds.length} câmara${videoIds.length === 1 ? "" : "s"})`}>
+                `${discover ? "Todas as faces" : personsCount(choices)} × ${nLocs} ${nLocs === 1 ? "local" : "locais"} (${videoIds.length} vídeo${videoIds.length === 1 ? "" : "s"})`}>
                 <Stack gap={6} mt={6}>
                   {withVideos.length === 0 ? (
                     <Text size="sm" c="dimmed">Sem vídeos: importe-os no separador "Locais e vídeos".</Text>
@@ -135,7 +135,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                           const n = videos.filter((v) => v.location_id === l.id).length;
                           return (
                             <Chip key={l.id} value={String(l.id)} size="sm" icon={<IconMapPin size={12} />}>
-                              {l.name} · {n} câmara{n === 1 ? "" : "s"}
+                              {l.name} · {n} vídeo{n === 1 ? "" : "s"}
                             </Chip>
                           );
                         })}
@@ -146,7 +146,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                     <Accordion variant="default" chevronPosition="left">
                       <Accordion.Item value="cams">
                         <Accordion.Control py={0}>
-                          <Text size="xs">Ajustar câmaras{excluded.length ? ` (${excluded.length} retirada${excluded.length === 1 ? "" : "s"})` : ""}</Text>
+                          <Text size="xs">Ajustar vídeos{excluded.length ? ` (${excluded.length} retirada${excluded.length === 1 ? "" : "s"})` : ""}</Text>
                         </Accordion.Control>
                         <Accordion.Panel>
                           <Stack gap={6}>
@@ -204,7 +204,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
             {!discover && (
               <Card withBorder padding="sm" bg="var(--mantine-color-default-hover)">
                 <Switch label="Complementar com vestuário (re-identificação pelo corpo)"
-                  description="Usa a roupa da pessoa nos frames em que a face teve correspondência para a procurar noutras câmaras, mesmo de costas ou longe. Evidência complementar: fica sempre por rever."
+                  description="Usa a roupa da pessoa nos frames em que a face teve correspondência para a procurar noutros vídeos, mesmo de costas ou longe. Evidência complementar: fica sempre por rever."
                   checked={params.clothing} onChange={(e) => set("clothing", e.currentTarget.checked)} />
                 {params.clothing && (
                   <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }} mt="sm">
@@ -311,7 +311,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                     </Table.Td>
                     <Table.Td>
                       <Text size="sm" maw={220} truncate title={jobLocations(j, locations)}>{jobLocations(j, locations) || "—"}</Text>
-                      <Text size="xs" c="dimmed">{j.video_ids.length} câmara{j.video_ids.length === 1 ? "" : "s"}</Text>
+                      <Text size="xs" c="dimmed">{j.video_ids.length} vídeo{j.video_ids.length === 1 ? "" : "s"}</Text>
                     </Table.Td>
                     <Table.Td>{j.params.model} / {j.params.detector}</Table.Td>
                     <Table.Td>

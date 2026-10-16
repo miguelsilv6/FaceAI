@@ -67,7 +67,7 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
 
 {{ h("Vídeos analisados") }}
 <table>
-  <tr><th>#</th><th>Local</th><th>Câmara</th><th>Ficheiro</th><th>Tamanho</th><th>Duração</th><th>FPS</th><th>Resolução</th><th>Codec</th></tr>
+  <tr><th>#</th><th>Local</th><th>Vídeo</th><th>Ficheiro</th><th>Tamanho</th><th>Duração</th><th>FPS</th><th>Resolução</th><th>Codec</th></tr>
   {% set frozen = {} %}{% for l in job.params.get("locations") or [] %}{% set _ = frozen.update({l.id: l.name}) %}{% endfor %}
   {% for v in videos %}{% set pl = place(v) %}
   <tr><td>{{ v.id }}</td><td>{{ pl.location_name or "—" }}{% if v.location_id in frozen and frozen[v.location_id] != pl.location_name %}<br><span class="muted">na análise: {{ frozen[v.location_id] }}</span>{% endif %}</td><td>{{ pl.camera_name }}</td><td>{{ v.filename }}</td><td>{{ "{:,}".format(v.size_bytes) }} B</td>
@@ -153,7 +153,7 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
 {% if not tracks %}<p>Nenhum track{% if not discover %} com correspondência{% endif %}.</p>{% else %}
 <table class="det">
   <colgroup><col style="width:62px"><col style="width:7%"><col><col style="width:14%"><col style="width:14%"><col style="width:8%"><col style="width:11%"><col style="width:9%"><col style="width:12%"></colgroup>
-  <tr><th>Face</th><th>Track</th><th>Local · Câmara</th><th>Início</th><th>Fim</th><th>Faces</th><th>{{ "Dist. ao centro" if discover else "Dist. track" }}</th><th>Qualid.</th><th>Revisão</th></tr>
+  <tr><th>Face</th><th>Track</th><th>Local · Vídeo</th><th>Início</th><th>Fim</th><th>Faces</th><th>{{ "Dist. ao centro" if discover else "Dist. track" }}</th><th>Qualid.</th><th>Revisão</th></tr>
   {% for x in tracks %}
   <tr><td>{% if x.crop_img %}<img src="{{ x.crop_img }}" alt="">{% endif %}</td><td>#{{ x.t.id }}{% if x.t.person_id %}<br>{% if discover %}P{{ x.t.person_id }}{% else %}{{ (job.params.persons | selectattr("id", "equalto", x.t.person_id) | map(attribute="label") | first) or ("P" ~ x.t.person_id) }}{% endif %}{% endif %}</td><td>{{ place(x.video).camera_label if x.video else x.t.video_id }}</td>
       <td>{{ x.t.start_s | ts }}{% if x.real_start %}<br><strong>{{ x.real_start }}</strong>{% endif %}</td><td>{{ x.t.end_s | ts }}{% if x.real_end %}<br><strong>{{ x.real_end }}</strong>{% endif %}</td><td>{{ x.t.n_faces }}</td><td>{{ "%.3f"|format(x.t.track_distance) }}</td><td>{{ "%.2f"|format(x.t.best_quality) }}</td>
@@ -169,7 +169,7 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
   {% if rows|length > max_images %}Só os primeiros {{ max_images }} recortes estão incluídos como imagem.{% endif %}</p>
 <table class="det">
   <colgroup><col style="width:62px"><col style="width:6%"><col><col style="width:14%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:7%"><col style="width:7%"><col style="width:12%"></colgroup>
-  <tr><th>Face</th><th>#</th><th>Local · Câmara</th><th>Tempo</th><th>Frame</th><th>{{ "Pessoa" if discover else "Simil." }}</th><th>Dist.{% if discover %} centro{% endif %}</th><th>Q</th><th>Track</th><th>Revisão</th></tr>
+  <tr><th>Face</th><th>#</th><th>Local · Vídeo</th><th>Tempo</th><th>Frame</th><th>{{ "Pessoa" if discover else "Simil." }}</th><th>Dist.{% if discover %} centro{% endif %}</th><th>Q</th><th>Track</th><th>Revisão</th></tr>
   {% for r in rows %}
   <tr><td>{% if r.crop_img %}<img src="{{ r.crop_img }}" alt="">{% endif %}</td><td>{{ r.detection_id }}</td><td>{{ (r.location_name ~ " · " ~ r.camera_name) if r.location_name else (r.camera_name or r.video_filename) }}</td>
       <td>{{ r.timestamp }}{% if r.real_time %}<br><strong>{{ r.real_time }}</strong>{% endif %}</td><td>{{ r.frame_index }}</td><td>{% if discover %}{{ ("#" ~ r.person_id) if r.person_id != "" else "—" }}{% else %}{{ "%.3f"|format(r.similarity) }}{% if r.person_label %}<br><strong>{{ r.person_label }}</strong>{% endif %}{% endif %}</td><td>{{ "%.3f"|format(r.distance) }}</td>
@@ -194,7 +194,7 @@ pertencer a outra pessoa, e a roupa pode mudar (casaco, mochila). Cada apariçã
 {% if clothing %}
 <table class="det">
   <colgroup><col style="width:62px"><col style="width:18%"><col><col style="width:16%"><col style="width:16%"><col style="width:9%"><col style="width:9%"><col style="width:12%"></colgroup>
-  <tr><th>Corpo</th><th>Evidência</th><th>Local · Câmara</th><th>Início</th><th>Fim</th><th>Dist. ReID</th><th>Dist. cor</th><th>Revisão</th></tr>
+  <tr><th>Corpo</th><th>Evidência</th><th>Local · Vídeo</th><th>Início</th><th>Fim</th><th>Dist. ReID</th><th>Dist. cor</th><th>Revisão</th></tr>
   {% for x in clothing %}
   <tr><td>{% if x.crop_img %}<img src="{{ x.crop_img }}" alt="" style="height:80px;width:auto">{% endif %}</td>
       <td>{{ "Amostra (face + vestuário)" if x.t.evidence == "face+vestuário" else "Só vestuário" }}<br><span class="muted">tronco {{ (x.t.colors or {}).get("tronco", "?") }}, pernas {{ (x.t.colors or {}).get("pernas", "?") }}</span>{% if x.t.note %}<br><span class="muted">{{ x.t.note }}</span>{% endif %}</td>
