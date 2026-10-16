@@ -23,16 +23,18 @@ from ..models import (
     JobStatus,
     ReferenceImage,
     ReviewStatus,
+    SavedFrame,
     Track,
     Video,
     utcnow,
 )
-from ..schemas import JobCreate, JobDelete, PersonMerge, QueueUpdate, ReviewUpdate, TrackPerson
+from ..schemas import JobCreate, JobDelete, PersonMerge, QueueUpdate, ReviewUpdate, SavedFrameCreate, TrackPerson
 from ..services import disk, enhance, linking, reports, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.clock import real_time
 from ..services.face_engine import default_threshold, get_engine
+from ..services.frames import extract_frame
 from ..services.imageio import read_image, write_jpeg
 from ..services.jobs import job_dir, runner
 from ..services.locations import locations_by_id, video_place
@@ -96,7 +98,7 @@ def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorD
         wanted, wanted_locs = set(body.video_ids or []), set(body.location_ids or [])
         video_ids = [v.id for v in videos if v.id in wanted or v.location_id in wanted_locs]
     if not video_ids:
-        raise HTTPException(422, "Selecione pelo menos um vídeo (câmara) do caso.")
+        raise HTTPException(422, "Selecione pelo menos um vídeo do caso.")
     ref_ids: list[int] = []
     job_params = params.model_dump()
     # Locais abrangidos (nome no momento da análise, para o relatório e a reprodutibilidade)
@@ -201,8 +203,10 @@ def delete_job(job_id: int, body: JobDelete, session: SessionDep, user: CurrentU
         "detections": len(detections), "tracks": len(tracks), "matches": job.matches, "persons": job.persons,
         "reviewed_detections": sum(1 for d in detections if d.review_status != ReviewStatus.pending),
     }
+    saved = list(session.exec(select(SavedFrame).where(SavedFrame.job_id == job_id)))
+    summary["saved_frames"] = [{"id": f.id, "sha256": f.sha256} for f in saved]
     folder = job_dir(job)
-    for row in (*detections, *tracks):
+    for row in (*detections, *tracks, *saved):
         session.delete(row)
     session.flush()
     session.delete(job)
@@ -871,8 +875,10 @@ def case_validated_summary(case_id: int, session: SessionDep) -> dict:
     """Quantas deteções confirmadas (e frames distintos) iriam para o ZIP do caso."""
     get_case_or_404(session, case_id)
     jobs = list(session.exec(select(Job).where(Job.case_id == case_id)))
-    items = validated_frames.collect(session, jobs).items
-    return {"detections": len(items), "frames": len({(j.id, v.id, d.frame_index) for d, j, v in items})}
+    validated = validated_frames.collect(session, jobs)
+    items = validated.items
+    return {"detections": len(items), "frames": len({(j.id, v.id, d.frame_index) for d, j, v in items}),
+            "saved_frames": len(validated.frames)}
 
 
 def _validated_label(job: Job, pid: int | None) -> str:
@@ -907,38 +913,125 @@ def case_validated_items(case_id: int, session: SessionDep) -> list[dict]:
             "kind": det.kind or "face", "evidence": t.evidence if t is not None and t.kind == "body" else "face",
             "person_id": pid, "person_label": _validated_label(job, pid), "similarity": det.similarity,
             "reviewed_by": det.reviewed_by, "reviewed_at": det.reviewed_at.isoformat() if det.reviewed_at else None,
-            "review_note": det.review_note,
+            "review_note": det.review_note, "type": "detection", "saved_frame_id": None,
+        })
+    for sf, job, video in validated.frames:
+        rt = real_time(video.dvr_start, video.dvr_rate, video.clock_offset_s, sf.timestamp_s)
+        out.append({
+            "detection_id": None, "saved_frame_id": sf.id, "type": "saved_frame", "job_id": job.id,
+            "job_mode": (job.params or {}).get("mode", "match"), "video_id": video.id,
+            "video_filename": video.filename, **validated.places.get(video.id, {}),
+            "frame_index": sf.frame_index, "timestamp_s": sf.timestamp_s,
+            "real_time": rt.isoformat(timespec="milliseconds") if rt else None, "kind": "frame",
+            "evidence": "frame guardado", "person_id": None, "person_label": "", "similarity": None,
+            "reviewed_by": sf.created_by, "reviewed_at": sf.created_at.isoformat() if sf.created_at else None,
+            "review_note": sf.note,
         })
     out.sort(key=lambda x: (x["real_time"] is None, x["real_time"] or "", x["video_id"], x["timestamp_s"]))
     return out
 
 
+@router.post("/jobs/{job_id}/saved-frames", status_code=201)
+def save_frame(job_id: int, body: SavedFrameCreate, session: SessionDep, actor: ActorDep) -> dict:
+    """Guarda o frame original (PNG, sem anotações) no instante do leitor; fica nos resultados como validado."""
+    job = get_job_or_404(session, job_id)
+    if body.video_id not in (job.video_ids or []):
+        raise HTTPException(422, "O vídeo não pertence a esta análise.")
+    video = session.get(Video, body.video_id)
+    if video is None or not Path(video.stored_path).exists():
+        raise HTTPException(404, "O vídeo original já não está disponível.")
+    last = max(0, (video.frame_count or 1) - 1)
+    frame_index = min(last, max(0, int(round(body.t * (video.fps or 0)))))
+    try:
+        image = extract_frame(video.stored_path, frame_index, None, (0, 0, 0, 0)).image
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    ok, buf = cv2.imencode(".png", image)
+    if not ok:
+        raise HTTPException(500, "Falha ao codificar o frame.")
+    png = buf.tobytes()
+    sf = SavedFrame(case_id=job.case_id, job_id=job.id, video_id=video.id, frame_index=frame_index,
+                    timestamp_s=round(frame_index / video.fps, 3) if video.fps else body.t, stored_path="",
+                    sha256=hashlib.sha256(png).hexdigest(), size_bytes=len(png), width=image.shape[1],
+                    height=image.shape[0], note=body.note.strip(), created_by=actor)
+    session.add(sf)
+    session.flush()
+    dest = job_dir(job) / "saved" / f"frame{sf.id:05d}.png"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(png)
+    sf.stored_path = str(dest)
+    session.add(sf)
+    session.commit()
+    session.refresh(sf)
+    log_event(session, "frame.saved", case_id=job.case_id, actor=actor,
+              details={"saved_frame_id": sf.id, "job_id": job.id, "video_id": video.id, "filename": video.filename,
+                       "frame_index": frame_index, "timestamp_s": sf.timestamp_s, "sha256": sf.sha256,
+                       "size_bytes": sf.size_bytes, "note": sf.note})
+    return sf.model_dump(mode="json", exclude={"stored_path"})
+
+
+@router.get("/saved-frames/{saved_frame_id}/image")
+def saved_frame_image(saved_frame_id: int, session: SessionDep, actor: ActorDep, download: bool = False):
+    sf = session.get(SavedFrame, saved_frame_id)
+    if sf is None or not Path(sf.stored_path).exists():
+        raise HTTPException(404, "Frame não encontrado.")
+    if not download:
+        return FileResponse(sf.stored_path, media_type="image/png", headers={"Cache-Control": "private, max-age=300"})
+    filename = f"faceai_caso{sf.case_id}_analise{sf.job_id}_frame_guardado{sf.id}.png"
+    log_event(session, "frame.saved_downloaded", case_id=sf.case_id, actor=actor,
+              details={"saved_frame_id": sf.id, "job_id": sf.job_id, "filename": filename, "sha256": sf.sha256})
+    return FileResponse(sf.stored_path, media_type="image/png", filename=filename)
+
+
+@router.delete("/saved-frames/{saved_frame_id}", status_code=204)
+def delete_saved_frame(saved_frame_id: int, session: SessionDep, user: CurrentUser) -> None:
+    """Retira um frame guardado (quem o guardou, o responsável do caso ou um administrador)."""
+    sf = session.get(SavedFrame, saved_frame_id)
+    if sf is None:
+        raise HTTPException(404, "Frame não encontrado.")
+    if sf.created_by != user.username and not can_manage_case(session, user, sf.case_id):
+        raise HTTPException(403, "Só quem guardou o frame, o responsável do caso ou um administrador o pode retirar.")
+    details = {"saved_frame_id": sf.id, "job_id": sf.job_id, "video_id": sf.video_id, "frame_index": sf.frame_index,
+               "sha256": sf.sha256, "note": sf.note, "created_by": sf.created_by}
+    Path(sf.stored_path).unlink(missing_ok=True)
+    session.delete(sf)
+    session.commit()
+    log_event(session, "frame.saved_deleted", case_id=sf.case_id, actor=user.username, details=details)
+
+
 @router.get("/cases/{case_id}/frames/validated.zip")
-def case_validated_frames(case_id: int, session: SessionDep, actor: ActorDep,
-                          detection_ids: str | None = None) -> StreamingResponse:
-    """ZIP com os frames originais das deteções confirmadas de todas as análises do caso (ou só das indicadas)."""
+def case_validated_frames(case_id: int, session: SessionDep, actor: ActorDep, detection_ids: str | None = None,
+                          frame_ids: str | None = None) -> StreamingResponse:
+    """ZIP com os frames originais das deteções confirmadas e dos frames guardados de todas as análises do caso
+    (ou só dos indicados em detection_ids / frame_ids)."""
     get_case_or_404(session, case_id)
-    only = None
-    if detection_ids:
-        try:
-            only = {int(x) for x in detection_ids.split(",") if x.strip()}
-        except ValueError as exc:
-            raise HTTPException(422, "detection_ids inválido.") from exc
+    selection = None
+    if detection_ids is not None or frame_ids is not None:
+        selection = (_id_set(detection_ids, "detection_ids"), _id_set(frame_ids, "frame_ids"))
     jobs = list(session.exec(select(Job).where(Job.case_id == case_id).order_by(Job.id)))
     return validated_zip_response(session, jobs, case_id=case_id, actor=actor,
-                                  scope=f"caso {case_id}" + (" (seleção)" if only else ""),
-                                  filename=f"faceai_caso{case_id}_frames_validados", only=only)
+                                  scope=f"caso {case_id}" + (" (seleção)" if selection else ""),
+                                  filename=f"faceai_caso{case_id}_frames_validados", selection=selection)
 
 
-def validated_zip_response(session, jobs: list[Job], *, case_id: int, actor: str, scope: str,
-                           filename: str, only: set[int] | None = None) -> StreamingResponse:
+def _id_set(raw: str | None, name: str) -> set[int]:
+    try:
+        return {int(x) for x in (raw or "").split(",") if x.strip()}
+    except ValueError as exc:
+        raise HTTPException(422, f"{name} inválido.") from exc
+
+
+def validated_zip_response(session, jobs: list[Job], *, case_id: int, actor: str, scope: str, filename: str,
+                           selection: tuple[set[int], set[int]] | None = None) -> StreamingResponse:
     validated = validated_frames.collect(session, jobs)
-    if only is not None:  # seleção: só deteções confirmadas deste caso (ids alheios são ignorados)
-        validated.items = [it for it in validated.items if it[0].id in only]
-    if not validated.items:
+    if selection is not None:  # seleção: só itens deste caso (ids alheios são ignorados)
+        validated.items = [it for it in validated.items if it[0].id in selection[0]]
+        validated.frames = [it for it in validated.frames if it[0].id in selection[1]]
+    if not validated.items and not validated.frames:
         raise HTTPException(404, "Não há deteções confirmadas: valide primeiro as deteções que quer exportar.")
     log_event(session, "frames.validated_exported", case_id=case_id, actor=actor,
-              details={"scope": scope, "jobs": [j.id for j in jobs], "detections": validated.detection_ids})
+              details={"scope": scope, "jobs": [j.id for j in jobs], "detections": validated.detection_ids,
+                       "saved_frames": [f.id for f, _, _ in validated.frames]})
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     return StreamingResponse(validated_frames.stream_zip(validated, scope=scope, actor=actor),
                              media_type="application/zip",

@@ -33,7 +33,7 @@ export default function VideosPanel({ caseId, videos, locations, onChange }: Pro
     if (!newName?.trim()) return;
     try {
       const loc = await api.createLocation(caseId, newName.trim());
-      notifyOk(`Local "${loc.name}" criado. Importe os vídeos das câmaras desse local.`);
+      notifyOk(`Local "${loc.name}" criado. Importe os vídeos desse local.`);
       setNewName(null);
       onChange();
       open(loc.id);
@@ -74,13 +74,13 @@ export default function VideosPanel({ caseId, videos, locations, onChange }: Pro
         )}
       </Group>
       <Text size="sm" c="dimmed">
-        Cada local é um estabelecimento ou zona de interesse para o caso, com as suas câmaras. Abra um local para
-        importar os vídeos, dar nome às câmaras e acertar a hora.
+        Cada local é um estabelecimento ou zona de interesse para o caso, com os seus vídeos. Abra um local para
+        importar os vídeos, dar-lhes nome e acertar a hora.
       </Text>
       {locations.length === 0 ? (
         <Card withBorder>
-          <Text c="dimmed">Ainda não há locais. Crie um local (ex.: "Café Central") e importe nele os vídeos das
-            várias câmaras desse local.</Text>
+          <Text c="dimmed">Ainda não há locais. Crie um local (ex.: "Café Central") e importe nele os vídeos
+            desse local.</Text>
         </Card>
       ) : (
         <SimpleGrid cols={{ base: 1, sm: 2, lg: 3 }}>
@@ -101,7 +101,7 @@ export default function VideosPanel({ caseId, videos, locations, onChange }: Pro
                     <IconChevronRight size={18} color="var(--mantine-color-dimmed)" />
                   </Group>
                   <Group gap="xs">
-                    <Badge variant="light">{vs.length} câmara{vs.length === 1 ? "" : "s"}</Badge>
+                    <Badge variant="light">{vs.length} vídeo{vs.length === 1 ? "" : "s"}</Badge>
                     {vs.length > 0 && <Text size="xs" c="dimmed">{formatTime(l.duration_s)} de vídeo</Text>}
                   </Group>
                   {vs.length > 0 ? (

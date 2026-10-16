@@ -48,7 +48,7 @@ export default function DeleteVideoModal({ video, jobs, onClose, onDeleted, loca
               Esta ação não pode ser desfeita. São apagados o ficheiro original e a cópia de reprodução. A auditoria
               mantém o histórico do vídeo e regista a eliminação (quem, quando, motivo e metadados).
             </Alert>
-            <Textarea label="Motivo (fica registado na auditoria)" placeholder="Ex.: vídeo duplicado, câmara errada…"
+            <Textarea label="Motivo (fica registado na auditoria)" placeholder="Ex.: vídeo duplicado, local errado…"
               autosize minRows={2} value={reason} onChange={(e) => setReason(e.currentTarget.value)} />
             <TextInput label={`Para confirmar, escreva o número do vídeo (${video.id})`} value={typed}
               onChange={(e) => setTyped(e.currentTarget.value)} />

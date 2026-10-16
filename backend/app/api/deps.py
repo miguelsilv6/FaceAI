@@ -24,6 +24,7 @@ from ..models import (
     Job,
     Location,
     ReferenceImage,
+    SavedFrame,
     Track,
     Upload,
     User,
@@ -160,6 +161,9 @@ def _case_of(session: Session, params: dict) -> int | None:
     if "location_id" in params:
         loc = session.get(Location, int(params["location_id"]))
         return loc.case_id if loc else -1
+    if "saved_frame_id" in params:
+        sf = session.get(SavedFrame, int(params["saved_frame_id"]))
+        return sf.case_id if sf else -1
     if "upload_id" in params:
         u = session.get(Upload, str(params["upload_id"]))
         return u.case_id if u else -1

@@ -118,12 +118,13 @@ def test_validated_frames_zip(client, tmp_path):
         assert hashlib.sha256(zf.read(row["ficheiro"])).hexdigest() == row["sha256"]
         assert row["revisto_por"] == "admin.teste" and row["video"] == "cctv.mp4" and row["nota"] == "ok"
         assert row["local"] == "Geral" and row["camara"] == "cctv.mp4"
-    assert "Deteções: 3 · frames: 2 · falhas: 0" in zf.read("LEIAME.txt").decode()
+    assert "Deteções: 3 · frames: 2 · frames guardados: 0 · falhas: 0" in zf.read("LEIAME.txt").decode()
     events = [e for e in client.get(f"/api/cases/{case['id']}/audit").json()
               if e["action"] == "frames.validated_exported"]
     assert sorted(events[-1]["details"]["detections"]) == sorted(d["id"] for d in chosen)
 
-    assert client.get(f"/api/cases/{case['id']}/frames/validated").json() == {"detections": 3, "frames": 2}
+    assert client.get(f"/api/cases/{case['id']}/frames/validated").json() == {"detections": 3, "frames": 2,
+                                                                                 "saved_frames": 0}
     # ZIP do caso inteiro: igual ao da única análise
     rc = client.get(f"/api/cases/{case['id']}/frames/validated.zip")
     assert rc.status_code == 200
@@ -186,3 +187,44 @@ def test_disk_alert_levels_and_guards(client, monkeypatch):
                        json={"kind": "video", "filename": "ok.mp4", "size_bytes": 1024}).status_code == 201
     _fake_usage(monkeypatch, 100, 5)
     assert client.post(f"/api/cases/{case['id']}/jobs", json={"params": {}}).status_code == 507
+
+
+def test_saved_frames_from_player(client, tmp_path):
+    case, video = _case_with_video(client, tmp_path, [(1.0, 4.0, RED)])
+    job = _discover(client, case["id"], sample_fps=2)
+    url = f"/api/jobs/{job['id']}/saved-frames"
+    # vídeo de outra análise/caso → 422
+    assert client.post(url, json={"video_id": 999999, "t": 1.0}).status_code == 422
+    r = client.post(url, json={"video_id": video["id"], "t": 2.04, "note": " porta "})
+    assert r.status_code == 201, r.text
+    sf = r.json()
+    assert sf["frame_index"] == 20 and sf["timestamp_s"] == 2.0 and sf["note"] == "porta" and "stored_path" not in sf
+    img = client.get(f"/api/saved-frames/{sf['id']}/image")
+    assert img.headers["content-type"] == "image/png" and hashlib.sha256(img.content).hexdigest() == sf["sha256"]
+    # aparece nos resultados (frames validados) e no ZIP
+    items = client.get(f"/api/cases/{case['id']}/frames/validated/items").json()
+    saved = [i for i in items if i["type"] == "saved_frame"]
+    assert len(saved) == 1 and saved[0]["saved_frame_id"] == sf["id"] and saved[0]["review_note"] == "porta"
+    assert client.get(f"/api/cases/{case['id']}/frames/validated").json()["saved_frames"] == 1
+    rz = client.get(f"/api/cases/{case['id']}/frames/validated.zip", params={"frame_ids": str(sf["id"])})
+    zf = zipfile.ZipFile(io.BytesIO(rz.content))
+    rows = list(csv.DictReader(io.StringIO(zf.read("manifesto.csv").decode("utf-8-sig"))))
+    assert len(rows) == 1 and rows[0]["tipo"] == "frame guardado" and rows[0]["sha256"] == sf["sha256"]
+    assert hashlib.sha256(zf.read(rows[0]["ficheiro"])).hexdigest() == sf["sha256"]
+    # ZIP do caso inteiro também o inclui (mesmo sem deteções confirmadas)
+    assert client.get(f"/api/cases/{case['id']}/frames/validated.zip").status_code == 200
+    # outro utilizador sem acesso → 404; retirar fica na auditoria
+    other = new_client("zeca.frames", "girassol-trovoada-marmelo-9")
+    assert other.get(f"/api/saved-frames/{sf['id']}/image").status_code == 404
+    assert other.delete(f"/api/saved-frames/{sf['id']}").status_code == 404
+    client.get(f"/api/saved-frames/{sf['id']}/image", params={"download": True})
+    assert client.delete(f"/api/saved-frames/{sf['id']}").status_code == 204
+    actions = [e["action"] for e in client.get(f"/api/cases/{case['id']}/audit").json()]
+    assert {"frame.saved", "frame.saved_downloaded", "frame.saved_deleted"} <= set(actions)
+    assert not [i for i in client.get(f"/api/cases/{case['id']}/frames/validated/items").json()
+                if i["type"] == "saved_frame"]
+    # eliminar a análise elimina os frames guardados
+    sf2 = client.post(url, json={"video_id": video["id"], "t": 1.0}).json()
+    r = client.request("DELETE", f"/api/jobs/{job['id']}", json={"confirm_job_id": job["id"], "reason": "teste"})
+    assert r.status_code == 204
+    assert client.get(f"/api/saved-frames/{sf2['id']}/image").status_code == 404

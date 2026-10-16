@@ -179,6 +179,25 @@ class Detection(SQLModel, table=True):
     reviewed_at: datetime | None = None
 
 
+class SavedFrame(SQLModel, table=True):
+    """Frame guardado manualmente a partir do leitor da análise; conta como imagem validada nos resultados."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    case_id: int = Field(foreign_key="case.id", index=True)
+    job_id: int = Field(foreign_key="job.id", index=True)
+    video_id: int = Field(foreign_key="video.id", index=True)
+    frame_index: int
+    timestamp_s: float
+    stored_path: str  # PNG do frame original (sem anotações)
+    sha256: str
+    size_bytes: int = 0
+    width: int = 0
+    height: int = 0
+    note: str = ""
+    created_by: str = ""
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class Track(SQLModel, table=True):
     """Sequência de deteções da mesma face ao longo do vídeo (tracking)."""
 

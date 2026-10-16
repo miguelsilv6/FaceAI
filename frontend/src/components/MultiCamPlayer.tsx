@@ -127,10 +127,10 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
 
   return (
     <div ref={holder}>
-    <Card withBorder aria-label="Leitor multi-câmara">
+    <Card withBorder aria-label="Leitor multi-vídeo">
       <Stack gap="sm">
         <Group justify="space-between" wrap="wrap">
-          <Text fw={600}>Câmaras sincronizadas pela hora real</Text>
+          <Text fw={600}>Vídeos sincronizados pela hora real</Text>
           <Text size="xs" c="dimmed">Só visualização: a análise e as evidências usam sempre os ficheiros originais.</Text>
         </Group>
         {cams.length > 1 && (
@@ -150,7 +150,7 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
                 {camGroups.map((g) => (
                   <Group key={g.location?.id ?? 0} gap={4} wrap="wrap">
                     {g.location && camGroups.length > 1 && (
-                      <Tooltip label={`Mostrar só as câmaras de ${g.location.name}`}>
+                      <Tooltip label={`Mostrar só os vídeos de ${g.location.name}`}>
                         <Button size="compact-xs" variant="light" color="indigo"
                           onClick={() => setShown(g.videos.map((v) => String(v.id)))}>Só {g.location.name}</Button>
                       </Tooltip>
@@ -192,7 +192,7 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
           <Text size="xs" ff="monospace" c="dimmed">{fmt(t0)}</Text>
           <Text size="xs" ff="monospace" c="dimmed">{fmt(t1)}</Text>
         </Group>
-        {!visible.length && <Text size="sm" c="dimmed">Nenhuma câmara selecionada.</Text>}
+        {!visible.length && <Text size="sm" c="dimmed">Nenhum vídeo selecionado.</Text>}
         <SimpleGrid cols={{ base: 1, sm: Math.min(2, cols), lg: cols }} spacing="xs">
           {visible.map((v) => {
             const t = videoTimeAt(v, wall);
@@ -208,8 +208,8 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
                   <Text size="xs" fw={600} truncate="end" title={v.filename}>{cameraLabel(v, locations)}</Text>
                   <Group gap={4} wrap="nowrap">
                     {active.map((s, i) => <Badge key={i} size="xs" color="red">{s.person_label}</Badge>)}
-                    <Tooltip label={focus === v.id ? "Ver todas" : "Ampliar esta câmara"}>
-                      <ActionIcon size="sm" variant="subtle" aria-label={focus === v.id ? "Ver todas as câmaras" : `Ampliar ${cameraLabel(v, locations)}`}
+                    <Tooltip label={focus === v.id ? "Ver todas" : "Ampliar este vídeo"}>
+                      <ActionIcon size="sm" variant="subtle" aria-label={focus === v.id ? "Ver todos os vídeos" : `Ampliar ${cameraLabel(v, locations)}`}
                         onClick={() => setFocus((f) => (f === v.id ? null : v.id))}>
                         {focus === v.id ? <IconArrowsMinimize size={14} /> : <IconArrowsMaximize size={14} />}
                       </ActionIcon>

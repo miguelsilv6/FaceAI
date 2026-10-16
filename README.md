@@ -134,7 +134,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 - **Papéis:**
   - **Administrador:** gere utilizadores (menu do utilizador → *Utilizadores*), vê todos os casos e a auditoria do sistema (logins, falhas, bloqueios, contas);
   - **Analista:** só vê os casos que criou ou que lhe foram atribuídos.
-- **Equipa do caso (need-to-know)**, no separador *Equipa*:
+- **Equipa do caso (need-to-know)** (o separador *Equipa* está desativado nesta fase; o controlo de acesso por caso mantém-se e a gestão faz-se pela API `/api/cases/{id}/members`):
   - quem cria o caso fica **responsável**;
   - o responsável, ou um administrador, dá acesso a outros utilizadores como **membro** ou responsável;
   - só o responsável e o administrador editam ou eliminam o caso; uma análise pode ser eliminada também por quem a criou;
@@ -146,12 +146,12 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 
 ## Utilização
 
-1. **Novo caso:** indica o nome ou referência do processo. Ficas como responsável do caso e podes dar acesso a colegas no separador *Equipa*. O nome e a descrição podem ser editados depois (✏️ ao lado do nome do caso). Os valores anteriores ficam na auditoria.
+1. **Novo caso:** indica o nome ou referência do processo. Ficas como responsável do caso. O nome e a descrição podem ser editados depois (✏️ ao lado do nome do caso). Os valores anteriores ficam na auditoria.
 2. **Referências/Pessoas:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
-3. **Locais e vídeos:** o caso organiza-se em **locais**: os estabelecimentos ou zonas de interesse para o caso (ex.: "Café Central", "Estação de Campanhã"), cada um com os vídeos das suas **câmaras** (os vários ângulos de CCTV desse local).
-   - O separador mostra um cartão por local (n.º de câmaras, duração, quantas têm hora real acertada). **Novo local** cria um local e abre a sua página.
+3. **Locais e vídeos:** o caso organiza-se em **locais**: os estabelecimentos ou zonas de interesse para o caso (ex.: "Café Central", "Estação de Campanhã"), cada um com os seus **vídeos** (um por ângulo de CCTV desse local).
+   - O separador mostra um cartão por local (n.º de vídeos, duração, quantos têm hora real acertada). **Novo local** cria um local e abre a sua página.
    - Os vídeos importam-se na **página do local** (clicar no cartão ou em "Abrir local"): os vídeos largados aí ficam nesse local. O nome do local pode ser mudado aí (✏️); um local só pode ser eliminado quando estiver vazio.
-   - Cada vídeo tem um **nome de câmara** editável na tabela (por omissão, o nome do ficheiro). Em toda a aplicação (resultados, percurso, painel, relatórios, CSV/JSON e ZIP de frames) o vídeo é identificado como **"Local · Câmara"**, e o nome do ficheiro original continua visível.
+   - Cada vídeo tem um **nome** editável na tabela (por omissão, o nome do ficheiro). Em toda a aplicação (resultados, percurso, painel, relatórios, CSV/JSON e ZIP de frames) o vídeo é identificado como **"Local · Vídeo"**, e o nome do ficheiro original continua visível.
    - O menu ⋯ de cada vídeo permite **movê-lo para outro local** ou eliminá-lo. As mudanças ficam na auditoria (`location.*`, `video.updated`).
    - Os casos de versões anteriores ganham, no arranque, um local **"Geral"** com todos os vídeos existentes. Os vídeos importados sem local (API antiga) também vão para o "Geral".
 
@@ -167,7 +167,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 
      O aviso mostra o diagnóstico: erro do browser, contentor e codec reais do original, e codecs suportados pelo browser.
    - O `ffprobe` também deteta as exportações de DVR com extensão `.mp4` que são, na verdade, H.264 "cru".
-4. **Análises:** escolhe o modo (**procurar pessoa(s)** com amostra, ou **descobrir todas as faces** sem amostra), as **pessoas** e os **locais** a analisar. Uma só análise procura, por exemplo, as Pessoas A e B nos Locais X, Y e Z (resumo "2 pessoas × 3 locais (7 câmaras)"). Por omissão entram todos os locais; em "Ajustar câmaras" podem retirar-se câmaras individuais. Os locais abrangidos ficam registados na análise (`params.locations`, com o nome na altura) e no relatório. Nos resultados, o vídeo escolhe-se numa lista agrupada por local e há um filtro por local ao lado do filtro de pessoa. Escolhe também o modelo, os fps e o limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo, com o **tempo restante estimado** e a hora prevista de fim. A estimativa usa o ritmo do último minuto, porque frames sem movimento ou sem faces são muito mais rápidos do que frames com várias faces.
+4. **Análises:** escolhe o modo (**procurar pessoa(s)** com amostra, ou **descobrir todas as faces** sem amostra), as **pessoas** e os **locais** a analisar. Uma só análise procura, por exemplo, as Pessoas A e B nos Locais X, Y e Z (resumo "2 pessoas × 3 locais (7 vídeos)"). Por omissão entram todos os locais; em "Ajustar vídeos" podem retirar-se vídeos individuais. Os locais abrangidos ficam registados na análise (`params.locations`, com o nome na altura) e no relatório. Nos resultados, o vídeo escolhe-se numa lista agrupada por local e há um filtro por local ao lado do filtro de pessoa. Escolhe também o modelo, os fps e o limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo, com o **tempo restante estimado** e a hora prevista de fim. A estimativa usa o ritmo do último minuto, porque frames sem movimento ou sem faces são muito mais rápidos do que frames com várias faces.
 5. **Resultados:**
    - player com linha temporal e tabela de segmentos, e botões ◀ ▶ para passar ao vídeo anterior ou seguinte;
    - teclado em todos os leitores (resultados, "▶ ver" da página do local e Multi View): **← / →** recuam/avançam 10 s e **Espaço** põe em pausa/reproduz (não atua enquanto se escreve num campo);
@@ -177,7 +177,8 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 6. **Eliminar um caso** (🗑 na lista de casos ou ao lado do nome do caso): pede o motivo e a confirmação, escrevendo o número do caso. Recusa se houver análises a decorrer. Cancela as conversões em curso e apaga do servidor os **vídeos originais e as cópias de reprodução**, as referências, as análises (deteções, recortes, frames) e os uploads por concluir. A auditoria mantém o histórico e regista um `case.deleted` com o motivo e a lista dos ficheiros apagados. Exporta antes os relatórios de que precises.
 7. **Eliminar uma análise** (🗑 na lista de análises ou "Eliminar" nos resultados): pede o motivo e a confirmação, escrevendo o número da análise. Apaga as deteções, os tracks, as revisões e os ficheiros gerados. Os vídeos e as referências do caso mantêm-se. A auditoria é *append-only*: guarda o histórico da análise e regista a eliminação (quem, quando, motivo, parâmetros e totais). Não é possível eliminar uma análise a decorrer; é preciso cancelá-la primeiro.
 8. **Exportar:** relatório PDF ou HTML, com estatísticas, parâmetros, tracks e qualidade; CSV; JSON; ou ZIP.
-   - **Separador *Resultados* do caso:** mostra todos os frames validados (deteções confirmadas) de todas as análises, com o local, a câmara, a hora real, a pessoa e quem confirmou. Filtra-se por local, pessoa e análise, escolhem-se os frames e **Descarregar selecionados** gera o ZIP só com esses. Cada cartão tem também o PNG original e "Abrir na análise".
+   - **Guardar frame:** no leitor dos resultados de uma análise, **Guardar frame** guarda o frame original (PNG, sem marcações, com SHA-256) no instante atual. Fica como imagem validada no separador *Resultados* do caso (e na auditoria: `frame.saved`).
+   - **Separador *Resultados* do caso:** mostra todas as imagens validadas de todas as análises: deteções confirmadas e frames guardados no leitor, com o local, o vídeo, a hora real, a pessoa e quem confirmou/guardou. Clicar numa imagem abre-a em tamanho grande (com marcação ou original; ← → para navegar). Filtra-se por local, tipo, pessoa e análise, escolhem-se as imagens e **Descarregar selecionados** gera o ZIP só com essas. Cada cartão tem também o PNG original e "Abrir na análise"; um frame guardado pode ser retirado (fica na auditoria).
    - **Frames originais validados (ZIP):** no menu *Exportar* dos resultados, no separador *Resultados* (seleção) ou para o caso inteiro no separador *Análises*. Inclui o frame completo do vídeo original, sem anotações, de cada deteção **confirmada** (a revisão de um track aplica-se às suas deteções):
      - os frames com várias deteções aparecem uma só vez;
      - `manifesto.csv` com uma linha por deteção (análise, vídeo, frame, tempo e hora real, semelhança, revisor, método de extração e **SHA-256** do PNG);
@@ -208,13 +209,13 @@ O botão **Procurar noutras análises** (👥), num track ou numa pessoa, compar
 ### Painel do caso
 O separador **Painel**, o primeiro de cada caso, resume o caso num relance. Por omissão considera todas as análises concluídas; também se pode escolher só algumas.
 - **Indicadores:**
-  - locais e câmaras (duração, quantos vídeos não têm hora real, espaço ocupado);
+  - locais e vídeos (duração, quantos vídeos não têm hora real, espaço ocupado);
   - análises concluídas e em curso;
   - correspondências e tracks;
   - percentagem da revisão feita.
 - **Progresso da revisão:** confirmadas, rejeitadas e por rever. O botão **Rever pendentes** abre a análise com mais deteções por rever.
-- **Por local:** correspondências de cada local (soma das suas câmaras), pelo estado da revisão.
-- **Por câmara:** correspondências de cada câmara ("Local · Câmara") divididas pelo estado da revisão, com o intervalo de hora real. Clicar abre a análise nesse vídeo.
+- **Por local:** correspondências de cada local (soma dos seus vídeos), pelo estado da revisão.
+- **Por vídeo:** correspondências de cada vídeo ("Local · Vídeo") divididas pelo estado da revisão, com o intervalo de hora real. Clicar abre a análise nesse vídeo.
 - **Por hora real:** histograma das correspondências por hora. As dos vídeos sem relógio acertado são indicadas à parte.
 - **Por pessoa:** só aparece quando a análise procura várias pessoas.
 - **Atividade recente:** os últimos eventos da auditoria.
@@ -229,15 +230,15 @@ Para identificar a mesma pessoa em vários casos, em **Referências/Pessoas** ab
 - **Limitação:** só entram as análises com índice. São todas as do modo descoberta e as do modo procurar feitas desde a versão com ligação entre análises.
 - Os resultados são candidatos: confirma sempre visualmente. Cada pesquisa fica na auditoria (`person.photo_search`), com as fotos usadas e os casos onde houve resultados.
 
-### Percurso multi-câmara
+### Percurso multi-vídeo
 O separador **Percurso/Multi View** do caso junta as aparições das análises escolhidas e ordena-as pela **hora real do DVR**.
-- Por omissão escolhe todas as análises "procurar" concluídas, para juntar câmaras analisadas à parte.
-- Mostra uma linha por câmara (mesmo as que não têm aparições), **agrupadas por local**, com blocos coloridos por pessoa (tracejados se a aparição vier só do vestuário), e a lista cronológica, exportável em CSV (colunas `local`, `camara` e `ficheiro`).
+- Por omissão escolhe todas as análises "procurar" concluídas, para juntar vídeos analisados à parte.
+- Mostra uma linha por vídeo (mesmo os que não têm aparições), **agrupados por local**, com blocos coloridos por pessoa (tracejados se a aparição vier só do vestuário), e a lista cronológica, exportável em CSV (colunas `local`, `camara` e `ficheiro`).
 - O campo **Local** limita o percurso e o leitor a um só local.
 - Os vídeos sem hora acertada ficam fora do eixo e são assinalados.
-- **Leitor multi-câmara:** os vídeos das câmaras com hora acertada aparecem lado a lado e são comandados por um relógio comum, na hora real do DVR. Inclui play/pausa, ±10 s, velocidade de 0,5× a 8×, "Próxima aparição", escolha das câmaras visíveis (agrupadas por local, com "Só <local>") e ampliação de uma câmara.
-  - A câmara onde a pessoa aparece nesse instante fica com contorno vermelho e o nome da pessoa.
-  - Clicar num bloco do percurso leva todas as câmaras para esse instante. "Resultados", na lista, abre a análise.
+- **Leitor multi-vídeo:** os vídeos com hora acertada aparecem lado a lado e são comandados por um relógio comum, na hora real do DVR. Inclui play/pausa, ±10 s, velocidade de 0,5× a 8×, "Próxima aparição", escolha dos vídeos visíveis (agrupados por local, com "Só <local>") e ampliação de um vídeo.
+  - O vídeo onde a pessoa aparece nesse instante fica com contorno vermelho e o nome da pessoa.
+  - Clicar num bloco do percurso leva todos os vídeos para esse instante. "Resultados", na lista, abre a análise.
   - Funciona mesmo antes de haver análises. É só para visualização: as evidências usam sempre os originais.
 
 ### Melhoria de imagem para revisão

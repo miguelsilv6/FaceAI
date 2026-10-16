@@ -74,6 +74,12 @@ class QueueUpdate(BaseModel):
     held: bool | None = Field(None, description="Reter (não começar) ou libertar")
 
 
+class SavedFrameCreate(BaseModel):
+    video_id: int
+    t: float = Field(ge=0, description="Instante no vídeo (s), tal como no leitor")
+    note: str = Field("", max_length=1000)
+
+
 class JobDelete(BaseModel):
     confirm_job_id: int = Field(description="Número da análise, repetido como confirmação do pedido")
     reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")
