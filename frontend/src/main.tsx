@@ -14,6 +14,7 @@ import Layout from "./components/Layout";
 import Account from "./pages/Account";
 import CaseList from "./pages/CaseList";
 import CaseView from "./pages/CaseView";
+import LocationView from "./pages/LocationView";
 import Results from "./pages/Results";
 import Users from "./pages/Users";
 
@@ -38,6 +39,7 @@ createRoot(document.getElementById("root")!).render(
               <Route element={<Layout />}>
                 <Route index element={<CaseList />} />
                 <Route path="cases/:caseId" element={<CaseView />} />
+                <Route path="cases/:caseId/locations/:locationId" element={<LocationView />} />
                 <Route path="jobs/:jobId" element={<ResultsRoute />} />
                 <Route path="account" element={<Account />} />
                 <Route path="users" element={<Users />} />

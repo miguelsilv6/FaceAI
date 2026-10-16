@@ -148,9 +148,9 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 
 1. **Novo caso:** indica o nome ou referência do processo. Ficas como responsável do caso e podes dar acesso a colegas no separador *Equipa*. O nome e a descrição podem ser editados depois (✏️ ao lado do nome do caso). Os valores anteriores ficam na auditoria.
 2. **Referências/Pessoas:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
-3. **Locais e vídeos:** o caso organiza-se em **locais** (ex.: "Estação", "Rua Direita n.º 10"), cada um com os vídeos das suas **câmaras** (os vários ângulos de CCTV desse local).
-   - **Novo local** cria um local; o nome pode ser mudado depois (✏️). Um local só pode ser eliminado quando estiver vazio.
-   - Cada local tem a sua zona de importação: os vídeos largados aí ficam nesse local.
+3. **Locais e vídeos:** o caso organiza-se em **locais**: os estabelecimentos ou zonas de interesse para o caso (ex.: "Café Central", "Estação de Campanhã"), cada um com os vídeos das suas **câmaras** (os vários ângulos de CCTV desse local).
+   - O separador mostra um cartão por local (n.º de câmaras, duração, quantas têm hora real acertada). **Novo local** cria um local e abre a sua página.
+   - Os vídeos importam-se na **página do local** (clicar no cartão ou em "Abrir local"): os vídeos largados aí ficam nesse local. O nome do local pode ser mudado aí (✏️); um local só pode ser eliminado quando estiver vazio.
    - Cada vídeo tem um **nome de câmara** editável na tabela (por omissão, o nome do ficheiro). Em toda a aplicação (resultados, percurso, painel, relatórios, CSV/JSON e ZIP de frames) o vídeo é identificado como **"Local · Câmara"**, e o nome do ficheiro original continua visível.
    - O menu ⋯ de cada vídeo permite **movê-lo para outro local** ou eliminá-lo. As mudanças ficam na auditoria (`location.*`, `video.updated`).
    - Os casos de versões anteriores ganham, no arranque, um local **"Geral"** com todos os vídeos existentes. Os vídeos importados sem local (API antiga) também vão para o "Geral".
