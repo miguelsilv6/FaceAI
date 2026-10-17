@@ -146,6 +146,7 @@ async function uploadChunkedInner<T>(caseId: number, kind: "video" | "reference"
         const res = await fetch(`/api/uploads/${status.id}?offset=${offset}`, {
           method: "PUT", headers: headers({ "Content-Type": "application/octet-stream" }), body: blob,
         });
+        if (res.status === 401) window.dispatchEvent(new Event(UNAUTHORIZED_EVENT)); // sessão expirou a meio do envio
         const body = await res.json().catch(() => ({}));
         if ((res.ok || res.status === 409) && typeof body.received_bytes === "number") {
           offset = body.received_bytes; // 409: o servidor indica de onde continuar

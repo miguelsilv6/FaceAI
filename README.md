@@ -126,6 +126,8 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 | `FACEAI_ENGINE` | `onnx` | `onnx` ou `deepface` (este exige o extra `deepface`) |
 | `FACEAI_MODELS_DIR` | `~/.faceai/models` | Pesos ONNX |
 | `FACEAI_IMPORT_DIR` | — | Pasta do servidor para a importação em bloco (ex.: disco USB montado). Vazio = desligada |
+| `FACEAI_LOG_FILE` | — | Ficheiro de log com rotação (`FACEAI_LOG_MAX_MB`, por omissão 20 MB × 5) |
+| `FACEAI_LOG_FORMAT` | texto | `json`: uma linha JSON por evento, para ferramentas de recolha de logs |
 | `FACEAI_SHUTDOWN_GRACE_S` | `20` | Ao desligar, tempo de espera para a análise em curso voltar à fila |
 | `FACEAI_UPLOAD_CHUNK_MB` | `8` | Tamanho de cada bloco do upload (o Cloudflare limita os pedidos a 100 MB) |
 | `FACEAI_PRELOAD_MODELS` | `1` | Descarregar/carregar os modelos em segundo plano no arranque |
@@ -412,6 +414,16 @@ A hora real aparece nos resultados, nos tracks e nos segmentos, e é exportada n
   - Faz um instantâneo consistente da base de dados (`VACUUM INTO`) e escreve um manifesto com o SHA-256 de cada vídeo.
   - Com `--files`, copia também os ficheiros dos processos e o `audit.jsonl`, de forma incremental.
   - Copiar o `faceai.db` à mão com o servidor ligado pode perder as últimas escritas, que ainda estão no ficheiro `-wal`.
+- **Operação:**
+  - `GET /api/health` funciona sem login e não expõe dados dos processos. Verifica a base de dados, a escrita na pasta de dados, o disco e o executor das análises; devolve 503 se algo impede o serviço.
+  - O `docker-compose.yml` tem `restart: unless-stopped`, `healthcheck` e `stop_grace_period: 60s`.
+  - Com vários processos (`uvicorn --workers N`), só um executa as análises e recupera as interrompidas (bloqueio `runner.lock` na pasta de dados); os outros servem a API.
+  - Cada análise é reclamada de forma atómica, e um cancelamento pedido noutro processo é visto em ≤ 1,5 s.
+  - Estados que antes ficavam "pendentes" para sempre passam a "indisponível" ou "falhou", com o motivo: cópias de reprodução sem ffmpeg ou sem o original, e leitura da hora com o OCR desligado.
+  - O ZIP é escrito num ficheiro temporário em vez de em memória. Uma exportação que falhe fica na auditoria (`job.export_failed`).
+  - Se a pasta de dados for movida ou restaurada noutro caminho, os caminhos dos ficheiros são corrigidos no arranque (`system.data_dir_relocated`).
+  - Os modelos são descarregados para `.part` e só depois renomeados. Num posto sem rede, a mensagem de erro indica onde copiar a pasta de modelos.
+  - Os `.part` de uploads abandonados são limpos a cada 6 h.
 - **Reprodutibilidade:** o relatório inclui os parâmetros completos (filtro de movimento, cascata, tracking, limiares) e as versões do Python, ONNX Runtime, OpenCV e NumPy. Inclui também o **SHA-256 de cada modelo** usado e o dispositivo.
 - **Evidências:** os ficheiros originais são guardados sem alterações. A cópia de reprodução é um ficheiro separado.
 - **Transparência dos filtros:** o relatório indica quantos frames foram saltados por falta de movimento e por não terem faces na 1.ª passagem. Um frame saltado não foi analisado pelo modelo completo. Se for preciso, repete a análise com os filtros desligados.

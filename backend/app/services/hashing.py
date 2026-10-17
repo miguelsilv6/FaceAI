@@ -45,19 +45,26 @@ def backfill_video_hashes() -> int:
     """Calcula os hashes dos vídeos importados por versões anteriores (para a deteção de duplicados)."""
     done = 0
     with Session(get_engine()) as s:
-        pending = s.exec(select(Video).where((Video.sha256 == "") | (Video.quick_hash == ""))).all()
-        for v in pending:
-            try:
-                if not Path(v.stored_path).exists():
-                    continue
-                v.sha256 = v.sha256 or file_sha256(v.stored_path)
-                v.quick_hash = v.quick_hash or quick_hash(v.stored_path)
-            except OSError:
-                log.exception("Não foi possível calcular o hash do vídeo %s", v.id)
+        pending = list(s.exec(select(Video.id, Video.stored_path, Video.sha256, Video.quick_hash)
+                              .where((Video.sha256 == "") | (Video.quick_hash == ""))))
+    for vid, path, sha, quick in pending:
+        # O hash de um vídeo grande demora: calcula-se sem nenhuma sessão aberta e grava-se numa sessão curta.
+        try:
+            if not Path(path).exists():
                 continue
+            sha = sha or file_sha256(path)
+            quick = quick or quick_hash(path)
+        except OSError:
+            log.exception("Não foi possível calcular o hash do vídeo %s", vid)
+            continue
+        with Session(get_engine()) as s:
+            v = s.get(Video, vid)
+            if v is None:
+                continue
+            v.sha256, v.quick_hash = v.sha256 or sha, v.quick_hash or quick
             s.add(v)
             s.commit()
-            done += 1
+        done += 1
     return done
 
 

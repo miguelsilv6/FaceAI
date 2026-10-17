@@ -333,8 +333,15 @@ def render_pdf(html: str) -> bytes:
 
 def build_zip(data: dict[str, Any]) -> bytes:
     buf = io.BytesIO()
+    write_zip(data, buf)
+    return buf.getvalue()
+
+
+def write_zip(data: dict[str, Any], fh) -> None:
+    """Escreve o pacote ZIP num ficheiro (pode ter centenas de MB: não precisa de caber em memória). As imagens
+    (JPEG/PNG, já comprimidas) são guardadas sem nova compressão."""
     html = render_html(data)
-    with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(fh, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("relatorio.html", html)
         zf.writestr("deteccoes.csv", to_csv(data))
         zf.writestr("resultados.json", to_json(data))
@@ -342,8 +349,8 @@ def build_zip(data: dict[str, Any]) -> bytes:
         for d in data["detections"]:
             for p, folder in ((d.crop_path, "crops"), (d.frame_path, "frames")):
                 if p and Path(p).exists():
-                    zf.write(p, f"{folder}/{Path(p).name}")
+                    zf.write(p, f"{folder}/{Path(p).name}", compress_type=zipfile.ZIP_STORED)
         for r in data["references"].values():
             if Path(r.stored_path).exists():
-                zf.write(r.stored_path, f"referencias/{r.id:05d}_{Path(r.filename).name}")
-    return buf.getvalue()
+                zf.write(r.stored_path, f"referencias/{r.id:05d}_{Path(r.filename).name}",
+                         compress_type=zipfile.ZIP_STORED)

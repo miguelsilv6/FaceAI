@@ -221,6 +221,10 @@ docker compose exec faceai python -m app.cli create-admin chefe --name "Nome Ape
   consistente da base de dados (copiar o `faceai.db` à mão pode perder as últimas escritas) e copia os ficheiros de
   forma incremental. Junta o `secret.key` à cópia.
 - Os modelos ficam no volume `faceai-models` e são descarregados na primeira análise.
+- **Saúde e reinício.**
+  - `docker compose ps` mostra o estado da verificação de saúde (`healthy`/`unhealthy`), que usa `GET /api/health`. Atenção: o Docker reinicia sozinho o contentor quando o processo termina (`restart: unless-stopped`), mas **não** por ficar `unhealthy`. Para isso use uma ferramenta de monitorização, ou um *autoheal*, que consulte `/api/health`.
+  - Ao parar (`docker compose stop`, atualização), a análise em curso volta à fila e recomeça no arranque seguinte. Há 60 s para isso (`stop_grace_period`).
+- **Mover a pasta de dados.** Pode copiar a pasta `data` para outro disco ou outra máquina e apontar `FACEAI_DATA_DIR` (ou o volume) para o novo sítio. No arranque, o FaceAI corrige os caminhos dos ficheiros e regista a mudança na auditoria.
 - **Importação em bloco a partir do servidor (opcional).** Para importar diretamente de um disco USB ou de uma partilha
   (cada pasta passa a ser um local), monta a pasta só de leitura e indica-a ao FaceAI no `docker-compose.yml`, no
   serviço `faceai`:

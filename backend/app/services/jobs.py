@@ -80,7 +80,7 @@ class JobRunner:
     sobrevivem a um reinício do servidor; as que estavam a decorrer são marcadas como interrompidas.
     """
 
-    IDLE_WAIT_S = 30.0
+    IDLE_WAIT_S = 5.0  # sem trabalho: volta a ver a fila (análises criadas noutro processo do servidor)
 
     def __init__(self) -> None:
         self._cond = threading.Condition()
@@ -88,7 +88,11 @@ class JobRunner:
         self._stop = False
         self._current: tuple[int, threading.Event] | None = None
 
+    enabled = True  # False neste processo se outro tiver o bloqueio do executor (acquire_runner_lock)
+
     def start(self) -> None:
+        if not self.enabled:
+            return
         with self._cond:
             if self._thread is not None and self._thread.is_alive():
                 self._cond.notify_all()
@@ -112,6 +116,12 @@ class JobRunner:
             job = s.get(Job, job_id)
             if job is not None and job.status == JobStatus.queued:
                 _finish(s, job, JobStatus.cancelled, "Cancelada antes de iniciar.")
+                return True
+            if job is not None and job.status == JobStatus.running:
+                # A correr noutro processo: o pedido fica na base de dados e é visto no próximo commit (≤ 1,5 s).
+                job.cancel_requested = True
+                s.add(job)
+                s.commit()
                 return True
         return False
 
@@ -180,6 +190,41 @@ def queue_positions(s: Session) -> dict[int, int]:
 
 
 runner = JobRunner()
+
+_runner_lock_fh = None
+
+
+def acquire_runner_lock() -> bool:
+    """Um só executor de análises por pasta de dados. Com vários processos (ex.: `uvicorn --workers 4`), só o
+    primeiro corre as análises e recupera as interrompidas; os outros servem a API. Sem isto, um segundo
+    processo marcaria como "interrompidas" as análises que o primeiro está a correr."""
+    global _runner_lock_fh
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover - Windows: um só processo
+        return True
+    path = settings.data_dir / "runner.lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fh = open(path, "a+")  # noqa: SIM115 - fica aberto enquanto o processo viver
+    try:
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        fh.close()
+        log.warning("Outro processo já executa as análises desta pasta de dados (%s): este só serve a API.", path)
+        return False
+    fh.seek(0)
+    fh.truncate()
+    fh.write(str(os.getpid()))
+    fh.flush()
+    _runner_lock_fh = fh
+    return True
+
+
+def release_runner_lock() -> None:
+    global _runner_lock_fh
+    if _runner_lock_fh is not None:
+        _runner_lock_fh.close()  # fechar liberta o flock
+        _runner_lock_fh = None
 
 
 def job_dir(job: Job) -> Path:
@@ -251,6 +296,13 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
             if not getattr(cancel, "shutdown", False):  # a desligar: fica em fila para o próximo arranque
                 _finish(s, job, JobStatus.cancelled, "Cancelada antes de iniciar.")
             return
+        # Reclamação atómica: só um processo passa de "em fila" para "a decorrer" (ex.: dois workers do uvicorn).
+        claimed = s.execute(update(Job).where(Job.id == job_id, Job.status == JobStatus.queued)
+                            .values(status=JobStatus.running).execution_options(synchronize_session=False))
+        s.commit()
+        if claimed.rowcount != 1:
+            return
+        s.refresh(job)
         p = job.params
         if job.partial or _has_results(s, job):
             # Retoma de uma análise interrompida ou repetida: começa do início, sem resultados antigos.
@@ -259,6 +311,7 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                       details={"job_id": job.id, **removed}, commit=False)
         job.status = JobStatus.running
         job.partial = False
+        job.cancel_requested = False
         job.message = ""
         job.started_at = utcnow()
         job.environment = {**engine.environment(),
@@ -349,6 +402,8 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                             s.add(job)
                             commit()
                             last_commit = time.monotonic()
+                            if s.exec(select(Job.cancel_requested).where(Job.id == job.id)).first():
+                                raise JobCancelled()  # pedido feito noutro processo (vários workers)
                 finally:
                     frames_iter.close()  # pára a thread de descodificação (fim, cancelamento ou erro)
                 commit()

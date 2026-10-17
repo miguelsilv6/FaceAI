@@ -148,9 +148,11 @@ def cancel_copies(video_ids: list[int]) -> None:
 
 
 def resume_pending_copies() -> None:
-    """No arranque: retoma conversões interrompidas e avalia vídeos importados por versões anteriores."""
-    if not ffmpeg_available():
-        return
+    """No arranque (em segundo plano): retoma conversões interrompidas e avalia vídeos de versões anteriores.
+
+    Uma conversão que já não pode correr (ffmpeg removido, original em falta) fica "indisponível"/"falhou" com o
+    motivo, em vez de ficar "pendente" para sempre (com a interface a perguntar o estado de poucos em poucos s)."""
+    has_ffmpeg = ffmpeg_available()
     with Session(get_engine(), expire_on_commit=False) as s:
         for video in s.exec(select(Video).where(Video.playback_status.in_(["", PENDING, RUNNING]))):
             if video.playback_status == "" and video.playback_path and Path(video.playback_path).exists():
@@ -158,7 +160,17 @@ def resume_pending_copies() -> None:
                 s.add(video)
                 s.commit()
                 continue
+            if not has_ffmpeg:
+                if video.playback_status in (PENDING, RUNNING):
+                    video.playback_status, video.playback_error = UNAVAILABLE, "ffmpeg não está instalado no servidor."
+                    s.add(video)
+                    s.commit()
+                continue
             if not Path(video.stored_path).exists():
+                if video.playback_status in (PENDING, RUNNING):
+                    video.playback_status, video.playback_error = FAILED, "O ficheiro original não foi encontrado."
+                    s.add(video)
+                    s.commit()
                 continue
             if video.playback_status in (PENDING, RUNNING):
                 video.playback_status = PENDING
@@ -306,3 +318,8 @@ def _transcode(video_id: int) -> None:
                       details={"video_id": video_id, "format": fmt, "size_bytes": dst.stat().st_size,
                                "seconds": round(time.monotonic() - started, 1),
                                "note": "cópia apenas para visualização; o original é o analisado"})
+
+
+def start_resume_pending_copies() -> None:
+    """O ffprobe dos vídeos antigos pode demorar: corre numa thread para não atrasar o arranque do servidor."""
+    threading.Thread(target=resume_pending_copies, name="faceai-transcode-resume", daemon=True).start()

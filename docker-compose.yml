@@ -9,6 +9,14 @@ services:
     volumes:
       - ./data:/data            # casos, evidências, resultados e auditoria
       - faceai-models:/models   # pesos ONNX (descarregados na 1.ª utilização e verificados por SHA-256)
+    restart: unless-stopped     # volta a arrancar depois de uma falha ou de um reinício do anfitrião
+    stop_grace_period: 60s      # tempo para a análise em curso voltar à fila antes de o contentor parar
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
 
   faceai-gpu:
     profiles: ["gpu"]
@@ -21,6 +29,14 @@ services:
     volumes:
       - ./data:/data
       - faceai-models:/models
+    restart: unless-stopped     # volta a arrancar depois de uma falha ou de um reinício do anfitrião
+    stop_grace_period: 60s      # tempo para a análise em curso voltar à fila antes de o contentor parar
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     deploy:
       resources:
         reservations:

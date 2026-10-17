@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import tempfile
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -15,6 +16,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse, StreamingResponse
 from sqlalchemy import String, delete, func, type_coerce, update
 from sqlmodel import select
+from starlette.background import BackgroundTask
 
 from ..config import settings
 from ..models import (
@@ -1227,19 +1229,35 @@ def export_job(job_id: int, fmt: str, session: SessionDep, actor: ActorDep) -> R
     if fmt != "csv":  # integridade dos originais: verifica na hora os vídeos sem verificação recente (pequenos)
         videos = list(session.exec(select(Video).where(Video.id.in_(job.video_ids or [-1]))))
         evidence.ensure_recent(session, videos, case_id=job.case_id, actor=actor)
-    data = reports.load_job_data(session, job)
-    if fmt == "html":
-        body: bytes | str = reports.render_html(data)
-    elif fmt == "pdf":
-        body = reports.render_pdf(reports.render_html(data, max_images=150))
-    elif fmt == "csv":
-        body = "﻿" + reports.to_csv(data)  # BOM para abrir corretamente no Excel
-    elif fmt == "json":
-        body = reports.to_json(data)
-    else:
-        body = reports.build_zip(data)
     media_type, ext = EXPORTS[fmt]
     stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     filename = f"faceai_caso{job.case_id}_analise{job.id}_{stamp}.{ext}"
-    return Response(content=body, media_type=media_type,
-                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    tmp_path: Path | None = None
+    try:
+        data = reports.load_job_data(session, job)
+        if fmt == "html":
+            body: bytes | str = reports.render_html(data)
+        elif fmt == "pdf":
+            body = reports.render_pdf(reports.render_html(data, max_images=150))
+        elif fmt == "csv":
+            body = "﻿" + reports.to_csv(data)  # BOM para abrir corretamente no Excel
+        elif fmt == "json":
+            body = reports.to_json(data)
+        else:  # ZIP: escrito num ficheiro temporário e enviado do disco (não precisa de caber em memória)
+            tmp_dir = settings.data_dir / "tmp"
+            tmp_dir.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(dir=tmp_dir, suffix=".zip", delete=False) as fh:
+                tmp_path = Path(fh.name)
+                reports.write_zip(data, fh)
+    except Exception as exc:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        session.rollback()
+        log_event(session, "job.export_failed", case_id=job.case_id, actor=actor,
+                  details={"job_id": job_id, "format": fmt, "error": f"{type(exc).__name__}: {exc}"})
+        raise HTTPException(500, f"Não foi possível gerar a exportação ({fmt}): {exc}") from exc
+    if tmp_path is not None:
+        return FileResponse(tmp_path, media_type=media_type, headers=headers,
+                            background=BackgroundTask(tmp_path.unlink, missing_ok=True))
+    return Response(content=body, media_type=media_type, headers=headers)

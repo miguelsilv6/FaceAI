@@ -92,8 +92,14 @@ def ensure_model(mf: ModelFile) -> Path:
         log.info("A descarregar %s (%s)…", mf.pack, mf.url)
         with tempfile.TemporaryDirectory(dir=models_dir()) as tmp:
             zpath = Path(tmp) / f"{mf.pack}.zip"
-            with urllib.request.urlopen(mf.url, timeout=60) as resp, zpath.open("wb") as out:
-                shutil.copyfileobj(resp, out, length=1 << 20)
+            try:
+                with urllib.request.urlopen(mf.url, timeout=60) as resp, zpath.open("wb") as out:
+                    shutil.copyfileobj(resp, out, length=1 << 20)
+            except OSError as exc:  # inclui URLError/timeout: posto sem acesso à Internet
+                raise RuntimeError(
+                    f"Modelo {mf.filename} em falta e não foi possível descarregá-lo ({exc}). Num posto offline, "
+                    f"copie a pasta de modelos de outro computador para {models_dir()} (ver o guia de "
+                    "instalação).") from exc
             with zipfile.ZipFile(zpath) as zf:
                 for info in zf.infolist():
                     name = Path(info.filename).name
@@ -104,11 +110,13 @@ def ensure_model(mf: ModelFile) -> Path:
                     if name not in wanted:
                         continue
                     dest = target.parent / name
-                    with zf.open(info) as src, dest.open("wb") as dst:
+                    part = dest.with_name(dest.name + ".part")  # nunca fica um modelo meio escrito com o nome final
+                    with zf.open(info) as src, part.open("wb") as dst:
                         shutil.copyfileobj(src, dst, length=1 << 20)
-                    if sha256_file(dest) != wanted[name].sha256:
-                        dest.unlink(missing_ok=True)
+                    if sha256_file(part) != wanted[name].sha256:
+                        part.unlink(missing_ok=True)
                         raise RuntimeError(f"SHA-256 inválido para {name}: ficheiro descartado.")
+                    part.replace(dest)
         if not target.exists():
             raise RuntimeError(f"{mf.filename} não encontrado no pacote {mf.pack}.")
         return target
