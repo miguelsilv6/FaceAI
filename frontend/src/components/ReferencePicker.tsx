@@ -35,7 +35,7 @@ function Thumb({ refImage, children }: { refImage: ReferenceImage; children: Rea
     <HoverCard openDelay={150} shadow="md" withinPortal position="top">
       <HoverCard.Target>{children}</HoverCard.Target>
       <HoverCard.Dropdown p={4}>
-        <Image src={api.referenceImageUrl(refImage.id, !!refImage.face_crop_path)} w={130} h={130} fit="cover"
+        <Image loading="lazy" decoding="async" src={api.referenceImageUrl(refImage.id, !!refImage.face_crop_path)} w={130} h={130} fit="cover"
           radius="sm" alt={refImage.filename} />
         <Text size="xs" ta="center" mt={2} maw={130} truncate>{refImage.filename}</Text>
       </HoverCard.Dropdown>
@@ -121,7 +121,7 @@ export default function ReferencePicker({ refs, persons, value, onChange, descri
                   <Group gap="xs" wrap="nowrap">
                     {value.includes(`r:${r.id}`) ? <IconCheck size={14} /> : <span style={{ width: 14 }} />}
                     <Thumb refImage={r}>
-                      <Image src={api.referenceImageUrl(r.id, !!r.face_crop_path)} w={28} h={28} radius="sm" fit="cover"
+                      <Image loading="lazy" decoding="async" src={api.referenceImageUrl(r.id, !!r.face_crop_path)} w={28} h={28} radius="sm" fit="cover"
                         alt="" />
                     </Thumb>
                     <Text size="sm" truncate>#{r.id} {r.filename}</Text>

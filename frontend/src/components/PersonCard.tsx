@@ -34,7 +34,7 @@ export default function PersonCard({ person, selected, others, firstRealTime, on
       outline: selected ? "2px solid var(--mantine-color-blue-6)" : undefined }}>
       <Card.Section style={{ cursor: "pointer" }} onClick={() => onSelect(person)}>
         {person.best_detection_id != null && (
-          <Image src={api.detectionImageUrl(person.best_detection_id, "crop")} h={140} fit="cover"
+          <Image loading="lazy" decoding="async" src={api.detectionImageUrl(person.best_detection_id, "crop")} h={140} fit="cover"
             alt={`Pessoa ${person.person_id}`} />
         )}
       </Card.Section>
@@ -79,7 +79,7 @@ export default function PersonCard({ person, selected, others, firstRealTime, on
                 {others.map((o) => (
                   <Menu.Item key={o.person_id} onClick={() => onMerge(person, o)}
                     leftSection={o.best_detection_id != null
-                      ? <Image src={api.detectionImageUrl(o.best_detection_id, "crop")} w={28} h={28} radius="sm" />
+                      ? <Image loading="lazy" decoding="async" src={api.detectionImageUrl(o.best_detection_id, "crop")} w={28} h={28} radius="sm" />
                       : undefined}>
                     Pessoa #{o.person_id} ({o.n_faces} faces)
                   </Menu.Item>

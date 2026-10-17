@@ -10,6 +10,7 @@ import { api, formatDate, formatEta } from "../api";
 import { notifyError, notifyOk } from "../notify";
 import { cameraName, jobLocations } from "../places";
 import type { CasePerson, Job, JobMode, JobParams, Location, ReferenceImage, SystemInfo, Video } from "../types";
+import { usePolling } from "../usePolling";
 import DeleteJobModal from "./DeleteJobModal";
 import JobStatusBadge from "./JobStatusBadge";
 import ReferencePicker, { allChoices, choicesToRefIds, type RefChoice } from "./ReferencePicker";
@@ -82,11 +83,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
 
   // Atualiza a lista enquanto houver análises a decorrer.
   const active = jobs.some((j) => j.status === "running" || j.status === "queued");
-  useEffect(() => {
-    if (!active) return;
-    const t = setInterval(onChange, 1500);
-    return () => clearInterval(t);
-  }, [active, onChange]);
+  usePolling(onChange, 3000, active);
 
   const set = <K extends keyof JobParams>(key: K, value: JobParams[K]) => setParams((p) => (p ? { ...p, [key]: value } : p));
 

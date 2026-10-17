@@ -101,7 +101,7 @@ export default function SimilarModal({ query, defaultThreshold, onClose }: {
                         <Table.Tr key={`${r.job_id}-${r.track_id}`}>
                           <Table.Td w={64}>
                             {r.best_detection_id != null && (
-                              <Image src={api.detectionImageUrl(r.best_detection_id, "crop")} h={48} w={48} fit="cover"
+                              <Image loading="lazy" decoding="async" src={api.detectionImageUrl(r.best_detection_id, "crop")} h={48} w={48} fit="cover"
                                 radius="sm" alt={`Track ${r.track_id}`} />
                             )}
                           </Table.Td>

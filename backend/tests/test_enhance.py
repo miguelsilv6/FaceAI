@@ -33,6 +33,14 @@ def test_enhanced_endpoint(client, tmp_path):
     case, _ = _case_with_video(client, tmp_path, [(1.0, 3.0, RED)], duration_s=4)
     job = _discover(client, case["id"])
     det = client.get(f"/api/jobs/{job['id']}/detections").json()[0]
+    assert "crop_path" not in det  # a API não expõe caminhos do servidor
+    from sqlmodel import Session
+
+    import app.db
+    from app.models import Detection
+
+    with Session(app.db.get_engine()) as s:
+        det["crop_path"] = s.get(Detection, det["id"]).crop_path
     crop_before = open(det["crop_path"], "rb").read()
 
     r = client.get(f"/api/detections/{det['id']}/enhanced", params={"ops": "clahe,sharpen", "upscale": 2})

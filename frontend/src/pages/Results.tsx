@@ -6,7 +6,7 @@ import {
   IconAlertTriangle, IconChevronLeft, IconChevronRight, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhoto,
   IconPlayerStop, IconRefresh, IconTrash,
 } from "@tabler/icons-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ComponentProps, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { api, browserCodecs, formatEta, formatTime, realTime } from "../api";
@@ -24,11 +24,24 @@ import JobStatusBadge from "../components/JobStatusBadge";
 import Timeline from "../components/Timeline";
 import { notifyError, notifyOk } from "../notify";
 import { personColor } from "../personColors";
+import { usePolling } from "../usePolling";
 import { VIDEO_KEYS_HINT, useHtmlVideoKeys } from "../useVideoKeys";
 import type {
   CasePerson, Detection, Job, Location, Person, ReferenceImage, ReviewStatus, Segment, Track, Video, VideoProbe,
 } from "../types";
 import { cameraLabel, cameraName, groupByLocation } from "../places";
+
+const PAGE = 240;
+
+/** "Mostrar mais" no fim de uma grelha paginada. */
+function ShowMore({ shown, total, onMore }: { shown: number; total: number; onMore: () => void }) {
+  if (total <= shown) return null;
+  return (
+    <Group justify="center" mt="sm">
+      <Button variant="light" onClick={onMore}>Mostrar mais ({total - shown} de {total})</Button>
+    </Group>
+  );
+}
 
 const EXPORTS = [
   ["pdf", "Relatório PDF"],
@@ -75,23 +88,30 @@ export default function Results() {
   const [playError, setPlayError] = useState<{ videoId: number; detail: string } | null>(null);
   const autoCopyRequested = useRef(new Set<string>());
   const navigate = useNavigate();
-  const [currentTime, setCurrentTime] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   useHtmlVideoKeys(videoRef);
   const [savingFrame, setSavingFrame] = useState(false);
 
+  // Maior id de deteção já recebido: durante a análise só se pedem as novas (after_id).
+  const lastDetId = useRef(0);
+  const lastAux = useRef(0);
+  const applyAux = useCallback(([s, t, p]: [Segment[], Track[], Person[]]) => {
+    setSegments(s);
+    setTracks(t.filter((x) => x.kind !== "body"));
+    setBodyTracks(t.filter((x) => x.kind === "body"));
+    setPersons(p);
+  }, []);
   const loadResults = useCallback(() => {
     Promise.all([api.detections(jobId), api.segments(jobId), api.tracks(jobId), api.persons(jobId)])
       .then(([d, s, t, p]) => {
+        lastDetId.current = d.reduce((m, x) => Math.max(m, x.id), 0);
+        lastAux.current = Date.now();
         setDetections(d.filter((x) => x.kind !== "body"));
         setBodyDets(d.filter((x) => x.kind === "body"));
-        setSegments(s);
-        setTracks(t.filter((x) => x.kind !== "body"));
-        setBodyTracks(t.filter((x) => x.kind === "body"));
-        setPersons(p);
+        applyAux([s, t, p]);
       })
       .catch(notifyError);
-  }, [jobId]);
+  }, [jobId, applyAux]);
 
   useEffect(() => {
     api.job(jobId).then((j) => {
@@ -111,17 +131,29 @@ export default function Results() {
 
   // Atualiza o estado e os resultados parciais enquanto a análise decorre.
   const running = job?.status === "running" || job?.status === "queued";
-  useEffect(() => {
-    if (!running) return;
-    const t = setInterval(() => {
-      api.job(jobId).then((j) => {
-        setJob(j);
-        if (j.status !== "running" && j.status !== "queued") loadResults();
-      });
+  // Só o estado da análise e as deteções novas a cada 2 s; tracks, segmentos e pessoas (recalculados no servidor)
+  // no máximo de 10 em 10 s. No fim, uma recarga completa (o agrupamento final altera deteções antigas).
+  usePolling(async () => {
+    const j = await api.job(jobId);
+    setJob(j);
+    if (j.status !== "running" && j.status !== "queued") {
       loadResults();
-    }, 2000);
-    return () => clearInterval(t);
-  }, [running, jobId, loadResults]);
+      return;
+    }
+    const fresh = await api.detections(jobId, lastDetId.current);
+    if (fresh.length) {
+      lastDetId.current = fresh.reduce((m, x) => Math.max(m, x.id), lastDetId.current);
+      const byTime = (a: Detection, b: Detection) => a.video_id - b.video_id || a.timestamp_s - b.timestamp_s;
+      const faces = fresh.filter((x) => x.kind !== "body");
+      const bodies = fresh.filter((x) => x.kind === "body");
+      if (faces.length) setDetections((cur) => [...cur, ...faces].sort(byTime));
+      if (bodies.length) setBodyDets((cur) => [...cur, ...bodies].sort(byTime));
+    }
+    if (fresh.length && Date.now() - lastAux.current > 10_000) {
+      lastAux.current = Date.now();
+      applyAux(await Promise.all([api.segments(jobId), api.tracks(jobId), api.persons(jobId)]));
+    }
+  }, 2000, running);
 
   const video = videos.find((v) => v.id === videoId) ?? null;
   const converting = video?.playback_status === "pending" || video?.playback_status === "running";
@@ -129,17 +161,13 @@ export default function Results() {
   // é substituído a cada 2 s enquanto a análise decorre, o que reiniciava o intervalo antes de ele disparar.
   const caseId = job?.case_id;
   const jobVideoIds = job?.video_ids.join(",") ?? "";
-  useEffect(() => {
-    if (!converting || caseId == null) return;
+  usePolling(async () => {
+    if (caseId == null) return;
     const ids = new Set(jobVideoIds.split(",").map(Number));
-    const t = setInterval(() => {
-      api.videos(caseId).then((vs) => {
-        const byId = new Map(vs.filter((v) => ids.has(v.id)).map((v) => [v.id, v]));
-        setVideos((cur) => cur.map((v) => byId.get(v.id) ?? v)); // mantém a ordem por local
-      }).catch(() => undefined);
-    }, 2000);
-    return () => clearInterval(t);
-  }, [converting, caseId, jobVideoIds]);
+    const vs = await api.videos(caseId);
+    const byId = new Map(vs.filter((v) => ids.has(v.id)).map((v) => [v.id, v]));
+    setVideos((cur) => cur.map((v) => byId.get(v.id) ?? v)); // mantém a ordem por local
+  }, 3000, converting && caseId != null);
   // Cópia de reprodução de todos os vídeos do caso: se o browser não reproduz um, os outros do mesmo DVR também não.
   const createPlaybackCopy = async (format?: "mp4" | "webm") => {
     if (!video || !job) return;
@@ -215,9 +243,12 @@ export default function Results() {
     const next = navVideos[videoIndex + delta];
     if (next) {
       setVideoId(next.id);
-      setCurrentTime(0);
     }
   };
+  // Grelhas grandes (milhares de cartões, cada um com imagens): mostram-se por páginas.
+  const [limit, setLimit] = useState(PAGE);
+  useEffect(() => setLimit(PAGE),
+    [view, videoId, trackFilter, personFilter, minSim, showCandidates, order, evidenceFilter, locFilter]);
   const visible = useMemo(() => {
     const list = videoDets.filter((d) => (trackFilter == null || d.track_id === trackFilter) && (discover
       ? inPerson(d)
@@ -278,7 +309,6 @@ export default function Results() {
       el.currentTime = Math.max(0, t);
       el.pause();
     }
-    setCurrentTime(t);
   };
 
   const review = async (det: Detection, status: ReviewStatus) => {
@@ -542,11 +572,9 @@ export default function Results() {
                       setPlayError(null);
                       if (startAt.current.video === video.id && startAt.current.t) { // instante pedido no URL (uma vez)
                         e.currentTarget.currentTime = startAt.current.t;
-                        setCurrentTime(startAt.current.t);
                         startAt.current = { video: null, t: 0 };
                       }
-                    }}
-                    onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)} />
+                    }} />
                 )}
                 {!converting && (playError?.videoId === video.id || video.playback_status === "failed"
                   || video.playback_status === "unavailable") ? (
@@ -576,10 +604,10 @@ export default function Results() {
                     Também pode ver os frames de cada deteção (botão 🔍).
                   </Text>
                 )}
-                <Timeline duration={video.duration_s} segments={videoSegments}
+                <LiveTimeline videoRef={videoRef} videoKey={`${video.id}-${video.playback_status}-${video.playback_format}-${converting}`}
+                  duration={video.duration_s} segments={videoSegments}
                   detections={discover ? videoDets.filter(inPerson) : videoDets.filter(isEffectiveMatch)}
-                  realTime={video.dvr_start ? (sec) => realTime(video, sec) : undefined}
-                  currentTime={currentTime} onSeek={seek} />
+                  realTime={video.dvr_start ? (sec) => realTime(video, sec) : undefined} onSeek={seek} />
                 {!converting && (
                   <Group justify="space-between" wrap="wrap" gap="xs">
                     <Tooltip label="Guarda o frame original (sem marcações) neste instante; fica no separador Resultados do processo como imagem validada">
@@ -625,7 +653,7 @@ export default function Results() {
                 <Table.Tbody>
                   {videoSegments.map((s, i) => (
                     <Table.Tr key={i} style={{ cursor: "pointer" }} onClick={() => seek(s.start_s)}>
-                      <Table.Td><Image src={api.detectionImageUrl(s.best_detection_id, "crop")} w={48} h={48} radius="sm" /></Table.Td>
+                      <Table.Td><Image loading="lazy" decoding="async" src={api.detectionImageUrl(s.best_detection_id, "crop")} w={48} h={48} radius="sm" /></Table.Td>
                       {clothing && (
                         <Table.Td><Badge size="xs" variant="light"
                           color={s.evidence === "vestuário" ? "grape" : s.evidence === "face+vestuário" ? "orange" : "red"}>
@@ -724,8 +752,8 @@ export default function Results() {
           visiblePersons.length === 0 ? (
             <Text c="dimmed">{running ? "As pessoas são agrupadas no fim da análise…" : "Não foram encontradas faces."}</Text>
           ) : (
-            <SimpleGrid cols={{ base: 1, xs: 2, sm: 3, md: 4, xl: 5 }}>
-              {visiblePersons.map((p) => (
+            <><SimpleGrid cols={{ base: 1, xs: 2, sm: 3, md: 4, xl: 5 }}>
+              {visiblePersons.slice(0, limit).map((p) => (
                 <PersonCard key={p.person_id} person={p} selected={personFilter === p.person_id}
                   others={persons.filter((o) => o.person_id !== p.person_id)}
                   firstRealTime={realTime(videoById.get(p.first.video_id), p.first.start_s)}
@@ -734,14 +762,14 @@ export default function Results() {
                   onFindSimilar={job.status === "completed"
                     ? (x) => setSimilar({ kind: "person", jobId: job.id, personId: x.person_id }) : undefined} />
               ))}
-            </SimpleGrid>
+            </SimpleGrid><ShowMore shown={limit} total={visiblePersons.length} onMore={() => setLimit((l) => l + PAGE)} /></>
           )
         ) : showTracks ? (
           visibleTracks.length === 0 ? (
             <Text c="dimmed">Sem tracks com os filtros atuais.</Text>
           ) : (
-            <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
-              {visibleTracks.map((t) => (
+            <><SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
+              {visibleTracks.slice(0, limit).map((t) => (
                 <TrackCard key={t.id} track={t} onSeek={seek} onReview={reviewTrack}
                   realStart={realTime(video, t.start_s)} realEnd={realTime(video, t.end_s)} onOpenFrame={openFrame}
                   personIds={discover ? personIds : undefined} onMove={discover ? moveTrack : undefined}
@@ -749,18 +777,18 @@ export default function Results() {
                   onFindSimilar={job.status === "completed" ? (x) => setSimilar({ kind: "track", trackId: x.id }) : undefined}
                   onShowDetections={(x) => { setTrackFilter(x.id); setView("detections"); }} />
               ))}
-            </SimpleGrid>
+            </SimpleGrid><ShowMore shown={limit} total={visibleTracks.length} onMore={() => setLimit((l) => l + PAGE)} /></>
           )
         ) : visible.length === 0 ? (
           <Text c="dimmed">Sem deteções com os filtros atuais.</Text>
         ) : (
-          <SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
-            {visible.map((d) => (
+          <><SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
+            {visible.slice(0, limit).map((d) => (
               <DetectionCard key={d.id} det={d} onSeek={(x) => seek(x.timestamp_s)} onReview={review} onOpenFrame={setFrameDet}
                 realTime={realTime(video, d.timestamp_s)} personId={personOf(d)} personLabel={labelOf(personOf(d))}
                 personAssign={assignFor(d.id)} />
             ))}
-          </SimpleGrid>
+          </SimpleGrid><ShowMore shown={limit} total={visible.length} onMore={() => setLimit((l) => l + PAGE)} /></>
         )}
       </Card>
 
@@ -823,4 +851,25 @@ export default function Results() {
       </Modal>
     </Stack>
   );
+}
+
+/** Linha temporal com o instante atual do vídeo. O instante muda ~4×/s durante a reprodução: fica neste componente
+ * (que escuta o próprio elemento de vídeo) para não re-renderizar a página inteira e as grelhas de resultados. */
+function LiveTimeline({ videoRef, videoKey, ...props }: Omit<ComponentProps<typeof Timeline>, "currentTime"> & {
+  videoRef: RefObject<HTMLVideoElement | null>; videoKey: string;
+}) {
+  const [t, setT] = useState(0);
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    const update = () => setT(el.currentTime);
+    update();
+    el.addEventListener("timeupdate", update);
+    el.addEventListener("seeked", update);
+    return () => {
+      el.removeEventListener("timeupdate", update);
+      el.removeEventListener("seeked", update);
+    };
+  }, [videoRef, videoKey]);
+  return <Timeline {...props} currentTime={t} />;
 }

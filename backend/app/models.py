@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, Column, event, text
+from sqlalchemy import JSON, Column, Index, event, text
 from sqlmodel import Field, SQLModel
 
 
@@ -156,10 +156,16 @@ class Detection(SQLModel, table=True):
     No modo descoberta (sem referência) `reference_id` é nulo e a distância é ao centro do grupo da pessoa.
     """
 
+    # Ordem da lista (vídeo, tempo) e revisão por análise; reference_id: eliminar/desassociar uma referência.
+    __table_args__ = (
+        Index("ix_detection_job_video_ts", "job_id", "video_id", "timestamp_s"),
+        Index("ix_detection_job_review", "job_id", "review_status"),
+    )
+
     id: int | None = Field(default=None, primary_key=True)
     job_id: int = Field(foreign_key="job.id", index=True)
     video_id: int = Field(foreign_key="video.id", index=True)
-    reference_id: int | None = Field(default=None, foreign_key="referenceimage.id")
+    reference_id: int | None = Field(default=None, foreign_key="referenceimage.id", index=True)
     frame_index: int
     timestamp_s: float
     x: int
@@ -233,6 +239,8 @@ class Alert(SQLModel, table=True):
 
 class Track(SQLModel, table=True):
     """Sequência de deteções da mesma face ao longo do vídeo (tracking)."""
+
+    __table_args__ = (Index("ix_track_job_person", "job_id", "person_id"),)
 
     id: int | None = Field(default=None, primary_key=True)
     job_id: int = Field(foreign_key="job.id", index=True)

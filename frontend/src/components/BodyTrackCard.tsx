@@ -39,7 +39,7 @@ export default function BodyTrackCard({ track, video, cameraLabel, realStart, on
     <Card withBorder padding="xs" style={{ opacity: track.review_status === "rejected" ? 0.55 : 1 }}>
       <Card.Section style={{ cursor: "pointer", background: "var(--mantine-color-default-hover)" }} onClick={() => onSeek(track)}>
         {track.best_detection_id != null && (
-          <Image src={api.detectionImageUrl(track.best_detection_id, "crop")} h={170} fit="contain" alt={`Corpo ${track.id}`} />
+          <Image loading="lazy" decoding="async" src={api.detectionImageUrl(track.best_detection_id, "crop")} h={170} fit="contain" alt={`Corpo ${track.id}`} />
         )}
       </Card.Section>
       <Stack gap={4} mt={6}>

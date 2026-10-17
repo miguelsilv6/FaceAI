@@ -8,6 +8,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy import delete, func
 from sqlmodel import select
 
 from ..config import settings
@@ -264,8 +265,9 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
     cancel_copies([v.id for v in videos])
 
     job_ids = [j.id for j in jobs] or [-1]
-    detections = list(session.exec(select(Detection).where(Detection.job_id.in_(job_ids))))
-    tracks = list(session.exec(select(Track).where(Track.job_id.in_(job_ids))))
+    n_detections = session.exec(select(func.count()).select_from(Detection)
+                                .where(Detection.job_id.in_(job_ids))).one()
+    n_tracks = session.exec(select(func.count()).select_from(Track).where(Track.job_id.in_(job_ids))).one()
     files = [Path(p) for v in videos for p in (v.stored_path, v.playback_path) if p]
     files += [Path(p) for r in refs for p in (r.stored_path, r.face_crop_path) if p]
     files += [Path(u.temp_path) for u in uploads]
@@ -274,7 +276,7 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
         "videos": [{"id": v.id, "filename": v.filename, "size_bytes": v.size_bytes,
                     "playback_copy": bool(v.playback_path)} for v in videos],
         "references": [{"id": r.id, "filename": r.filename} for r in refs],
-        "jobs": [j.id for j in jobs], "detections": len(detections), "tracks": len(tracks),
+        "jobs": [j.id for j in jobs], "detections": n_detections, "tracks": n_tracks,
         "pending_uploads": len(uploads),
     }
     members = list(session.exec(select(CaseMember).where(CaseMember.case_id == case_id)))
@@ -286,7 +288,9 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
     saved = list(session.exec(select(SavedFrame).where(SavedFrame.case_id == case_id)))
     saved += list(session.exec(select(Alert).where(Alert.case_id == case_id)))
     summary["saved_frames"] = len(saved)
-    for rows in (detections, tracks, saved, jobs, uploads, refs, persons, videos, locations, members):
+    session.exec(delete(Detection).where(Detection.job_id.in_(job_ids)))  # em massa (podem ser muitas)
+    session.exec(delete(Track).where(Track.job_id.in_(job_ids)))
+    for rows in (saved, jobs, uploads, refs, persons, videos, locations, members):
         for row in rows:
             session.delete(row)
         session.flush()
@@ -423,7 +427,8 @@ def reference_image(ref_id: int, session: SessionDep, face: bool = False) -> Fil
     if ref is None:
         raise HTTPException(404, "Referência não encontrada.")
     path = ref.face_crop_path if face and ref.face_crop_path else ref.stored_path
-    return FileResponse(path)
+    # O recorte da face pode ser recalculado (nova validação): cache curta.
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=600"})
 
 
 @router.patch("/references/{ref_id}", response_model=ReferenceImage)

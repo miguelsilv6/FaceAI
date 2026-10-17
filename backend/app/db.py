@@ -25,6 +25,12 @@ def get_engine():
             cur = dbapi_conn.cursor()
             cur.execute("PRAGMA journal_mode=WAL")
             cur.execute("PRAGMA foreign_keys=ON")
+            # Com WAL, NORMAL é seguro (uma queda de energia pode perder só a última transação, nunca corromper) e
+            # torna as escritas das análises muito mais rápidas. Cache de 64 MiB e leituras por mmap (256 MiB).
+            cur.execute("PRAGMA synchronous=NORMAL")
+            cur.execute("PRAGMA cache_size=-65536")
+            cur.execute("PRAGMA mmap_size=268435456")
+            cur.execute("PRAGMA temp_store=MEMORY")
             cur.close()
 
     return _engine

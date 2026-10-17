@@ -66,6 +66,17 @@ Vídeo ─► frames a N fps ─► [1] filtro de movimento ─► [2] SCRFD-500
 
 Em CCTV real, o ganho do pré-filtro depende do movimento na cena: quanto mais estática a câmara, maior.
 
+**Interface com análises grandes** (teste de carga com 50 000 deteções e 2 000 tracks):
+- **Lista de deteções:** demora 0,76 s em vez de 1,5 s e transfere 1,2 MB com gzip, em vez de 24 MB. Já não inclui os caminhos dos ficheiros no servidor.
+- **Durante uma análise,** os resultados pedem só as deteções novas (`after_id`). Tracks, segmentos e pessoas são atualizados no máximo de 10 em 10 s, e a lista completa só é pedida uma vez, no fim. Todas as sondagens esperam pela resposta anterior e param com o separador oculto.
+- **Grelhas:** mostram 240 cartões de cada vez, com "Mostrar mais".
+- **Imagens:**
+  - são carregadas só quando ficam visíveis e ficam em cache no browser (os ficheiros de uma deteção nunca mudam);
+  - os frames validados usam miniaturas (`?w=360`).
+- **Reprodução:** o instante atual do vídeo já não re-renderiza a página inteira.
+- **Aplicação:** a página inicial carrega 39 KB de código da aplicação, em vez de um ficheiro de 876 KB. As restantes páginas carregam a pedido e as bibliotecas ficam em cache entre versões.
+- **Base de dados:** tem novos índices compostos e `synchronous=NORMAL` (seguro com WAL). Rever e eliminar em massa é feito diretamente em SQL. A suite de testes passou a correr em metade do tempo.
+
 ---
 
 ## Instalação
