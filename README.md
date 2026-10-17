@@ -104,6 +104,8 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 | `FACEAI_DATA_DIR` | `./data` | Processos, evidências, base de dados, `audit.jsonl` |
 | `FACEAI_ENGINE` | `onnx` | `onnx` ou `deepface` (este exige o extra `deepface`) |
 | `FACEAI_MODELS_DIR` | `~/.faceai/models` | Pesos ONNX |
+| `FACEAI_IMPORT_DIR` | — | Pasta do servidor para a importação em bloco (ex.: disco USB montado). Vazio = desligada |
+| `FACEAI_SHUTDOWN_GRACE_S` | `20` | Ao desligar, tempo de espera para a análise em curso voltar à fila |
 | `FACEAI_UPLOAD_CHUNK_MB` | `8` | Tamanho de cada bloco do upload (o Cloudflare limita os pedidos a 100 MB) |
 | `FACEAI_PRELOAD_MODELS` | `1` | Descarregar/carregar os modelos em segundo plano no arranque |
 | `FACEAI_SECRET_KEY` | *(vazio)* | Chave que cifra os segredos MFA. Se ficar vazia, usa-se `data/secret.key`, gerado no 1.º arranque com permissões 0600. **Faz backup**: sem ela, quem tem MFA ativo tem de o reconfigurar. |
@@ -153,6 +155,13 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
    - Os vídeos importam-se na **página do local** (clicar no cartão ou em "Abrir local"): os vídeos largados aí ficam nesse local. O nome do local pode ser mudado aí (✏️); um local só pode ser eliminado quando estiver vazio.
    - Cada vídeo tem um **nome** editável na tabela (por omissão, o nome do ficheiro). Em toda a aplicação (resultados, percurso, painel, relatórios, CSV/JSON e ZIP de frames) o vídeo é identificado como **"Local · Vídeo"**, e o nome do ficheiro original continua visível.
    - O menu ⋯ de cada vídeo permite **movê-lo para outro local** ou eliminá-lo. As mudanças ficam na auditoria (`location.*`, `video.updated`).
+   - **Importação em bloco (cada pasta é um local):** em *Locais e vídeos* → **Importar pastas**. Os vídeos de cada subpasta (incluindo as subpastas dela) vão para um local com o nome da subpasta; os vídeos soltos na pasta escolhida vão para um local com o nome dessa pasta. Antes de importar, vê-se a lista de pastas: o nome de cada local pode ser alterado e cada pasta pode ser excluída. Um nome igual a um local que já existe junta os vídeos a esse local. Os duplicados são ignorados e listados no fim.
+     - **Do computador:** escolhe-se uma pasta no browser. Os vídeos sobem pelo upload em blocos, com retoma.
+     - **Da pasta do servidor:** o administrador define `FACEAI_IMPORT_DIR` (por exemplo, um disco USB ou uma partilha montada). Só o responsável do processo ou um administrador pode navegar nessa pasta e importar dela, porque pode conter material de outros processos. Fora dela não se lê nada (`..` e symlinks para fora são recusados).
+       - O servidor **copia** os ficheiros (os originais ficam intactos) e calcula o SHA-256 durante a cópia.
+       - Tudo corre em segundo plano, com progresso na janela.
+       - Na auditoria ficam `import.server_started` e `import.server_finished`, com o caminho de origem e o SHA-256 de cada vídeo.
+   - **Sair a meio de um upload:** fechar o separador, recarregar ou ir para outro site pede confirmação ao browser, que mostra a sua própria mensagem. Terminar sessão também pede confirmação. Navegar dentro da aplicação não interrompe os uploads: continuam e aparecem na barra "Em curso".
    - **Vídeos duplicados:** o mesmo ficheiro (mesmo conteúdo, qualquer nome ou local) não pode ser importado duas vezes no mesmo processo. Antes de enviar, o browser calcula uma impressão rápida (SHA-256 do tamanho, do 1.º e do último MiB) e o servidor recusa logo se o vídeo já existir; no fim do envio, o **SHA-256** completo confirma. Ao importar **vários vídeos** de uma vez, todos são validados primeiro (`POST /cases/{id}/videos/check`) e só se enviam os que ainda não existem; os repetidos dentro do próprio lote também são detetados. O aviso indica o vídeo existente ("Local · Vídeo (#id)") e a recusa fica na auditoria (`video.duplicate_rejected`). Noutro processo, o mesmo ficheiro é aceite.
    - Cada vídeo fica com o seu **SHA-256** (auditoria `video.uploaded`, relatório e JSON). Os vídeos de versões anteriores recebem-no em segundo plano no arranque.
    - Os processos de versões anteriores ganham, no arranque, um local **"Geral"** com todos os vídeos existentes. Os vídeos importados sem local (API antiga) também vão para o "Geral".
@@ -363,6 +372,25 @@ A hora real aparece nos resultados, nos tracks e nos segmentos, e é exportada n
 ## Considerações forenses e legais
 
 - **Auditoria:** todas as ações ficam registadas com o utilizador autenticado, o IP e a hora UTC, na base de dados e em `data/audit.jsonl` (append-only). Inclui criação do processo, uploads (incluindo blocos iniciados ou cancelados), parâmetros, início e fim de análise, revisões de deteções e de tracks, e exportações. O registo é incluído no relatório e no ZIP.
+- **Cadeia de hashes da auditoria:** cada evento guarda `prev_hash` e `hash = SHA-256(prev_hash ‖ evento)`.
+  - Alterar, apagar ou inserir um evento fora da aplicação quebra a cadeia. O `audit.jsonl` também guarda os hashes, por isso apagar os últimos eventos da base de dados também é detetado.
+  - Para verificar: separador *Auditoria* → **Verificar integridade da auditoria**, ou `python -m app.cli verify-audit`.
+  - O relatório indica o estado da cadeia.
+  - Os eventos anteriores a esta versão são incluídos na cadeia no primeiro arranque.
+- **Integridade dos originais:** em *Locais e vídeos*, **Verificar integridade** recalcula em segundo plano o SHA-256 de cada vídeo e compara-o com o da importação.
+  - Também pela consola: `python -m app.cli verify-evidence [processo]`.
+  - O relatório mostra a data e o resultado da última verificação de cada vídeo e avisa se algum foi alterado ou está em falta.
+  - Ao exportar, os vídeos sem verificação nas últimas 24 h são verificados na hora, até 4 GiB no total.
+- **Interrupções:**
+  - Se o servidor for **desligado** (reinício, atualização) durante uma análise, ela volta à fila e recomeça do início no arranque seguinte. Na auditoria fica `job.interrupted` (autor "sistema"), não "cancelada pelo utilizador".
+  - Se o servidor **cair** (falha, corte de energia), a análise fica falhada e marcada como **incompleta**, com aviso nos resultados e no relatório. Não é repetida automaticamente: se foi ela que fez cair o servidor, voltaria a fazê-lo.
+  - Pode repetir qualquer análise falhada ou cancelada com **Repetir análise**: os resultados anteriores são apagados ao recomeçar e ficam resumidos na auditoria.
+- **Ids nunca reutilizados:** processos, análises, vídeos, imagens e locais eliminados nunca cedem o número (nem a pasta `case_NNNNN/` ou `job_NNNNN/`) a um registo novo.
+- **Importação robusta:** o SHA-256 de um vídeo enviado em blocos é calculado à medida que os blocos chegam, por isso concluir não obriga a reler GB de dados. Um erro transitório ao concluir (por exemplo, base de dados ocupada) repõe o ficheiro; voltar a pedir a conclusão chega, sem reenviar o vídeo.
+- **Cópia de segurança com o servidor ligado:** `python -m app.cli backup <pasta> [--files]`.
+  - Faz um instantâneo consistente da base de dados (`VACUUM INTO`) e escreve um manifesto com o SHA-256 de cada vídeo.
+  - Com `--files`, copia também os ficheiros dos processos e o `audit.jsonl`, de forma incremental.
+  - Copiar o `faceai.db` à mão com o servidor ligado pode perder as últimas escritas, que ainda estão no ficheiro `-wal`.
 - **Reprodutibilidade:** o relatório inclui os parâmetros completos (filtro de movimento, cascata, tracking, limiares) e as versões do Python, ONNX Runtime, OpenCV e NumPy. Inclui também o **SHA-256 de cada modelo** usado e o dispositivo.
 - **Evidências:** os ficheiros originais são guardados sem alterações. A cópia de reprodução é um ficheiro separado.
 - **Transparência dos filtros:** o relatório indica quantos frames foram saltados por falta de movimento e por não terem faces na 1.ª passagem. Um frame saltado não foi analisado pelo modelo completo. Se for preciso, repete a análise com os filtros desligados.

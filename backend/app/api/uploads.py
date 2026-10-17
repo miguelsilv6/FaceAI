@@ -11,6 +11,9 @@ Protocolo:
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import logging
+import threading
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -50,8 +53,48 @@ STALE_AFTER = timedelta(days=7)
 _locks: dict[str, asyncio.Lock] = {}
 
 
+# A conclusão (mover o ficheiro e registar o vídeo) também é exclusiva: um "complete" repetido pelo cliente (resposta
+# perdida, timeout do proxy) espera pelo primeiro e devolve o mesmo resultado.
+_complete_locks: dict[str, threading.Lock] = {}
+_complete_guard = threading.Lock()
+# SHA-256 calculado à medida que os blocos chegam (offset já processado, estado do hash): a conclusão não tem de
+# reler o ficheiro todo. Perde-se num reinício do servidor; nesse caso o hash é calculado na conclusão.
+_hashers: dict[str, tuple[int, object]] = {}
+
+log = logging.getLogger(__name__)
+
+
 def _lock(upload_id: str) -> asyncio.Lock:
     return _locks.setdefault(upload_id, asyncio.Lock())
+
+
+def _complete_lock(upload_id: str) -> threading.Lock:
+    with _complete_guard:
+        return _complete_locks.setdefault(upload_id, threading.Lock())
+
+
+def _forget(upload_id: str) -> None:
+    _locks.pop(upload_id, None)
+    _hashers.pop(upload_id, None)
+    with _complete_guard:
+        _complete_locks.pop(upload_id, None)
+
+
+def _feed_hash(upload_id: str, offset: int, data: bytes) -> None:
+    state = _hashers.get(upload_id)
+    if state is None and offset == 0:
+        state = (0, hashlib.sha256())
+    if state is None or state[0] != offset:
+        _hashers.pop(upload_id, None)  # sequência perdida (ex.: reinício): calcula-se na conclusão
+        return
+    h = state[1]
+    h.update(data)
+    _hashers[upload_id] = (offset + len(data), h)
+
+
+def _streamed_sha256(upload_id: str, size: int) -> str | None:
+    state = _hashers.get(upload_id)
+    return state[1].hexdigest() if state is not None and state[0] == size else None
 
 
 def cleanup_stale_uploads() -> int:
@@ -171,6 +214,7 @@ def _write_chunk(session, upload_id: str, offset: int, data: bytes):
         raise HTTPException(413, "O bloco excede o tamanho declarado do ficheiro.")
     with tmp.open("ab") as fh:
         fh.write(data)
+    _feed_hash(upload_id, offset, data)
     u.received_bytes += len(data)
     session.add(u)
     session.commit()
@@ -187,6 +231,12 @@ def _result(session, u: Upload):
 
 @router.post("/uploads/{upload_id}/complete")
 def complete_upload(upload_id: str, session: SessionDep, actor: ActorDep):
+    with _complete_lock(upload_id):
+        return _complete(upload_id, session, actor)
+
+
+def _complete(upload_id: str, session, actor: str):
+    session.expire_all()  # outro pedido pode ter concluído o upload enquanto este esperava pelo lock
     u = session.get(Upload, upload_id)
     if u is None:
         raise HTTPException(404, "Upload não encontrado.")
@@ -202,32 +252,61 @@ def complete_upload(upload_id: str, session: SessionDep, actor: ActorDep):
     dest_dir = settings.case_dir(u.case_id) / sub
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{uuid.uuid4().hex}{Path(u.filename).suffix.lower()}"
+    sha256 = _streamed_sha256(upload_id, size) if u.kind == "video" else None
     tmp.replace(dest)
-    _locks.pop(upload_id, None)
+    result = None
     try:
         if u.kind == "video":
             result = register_video(session, u.case_id, dest, u.filename, size, actor or u.created_by,
-                                    u.location_id)
+                                    u.location_id, sha256=sha256)
         else:
             result = register_reference(session, u.case_id, dest, u.filename, size, actor or u.created_by)
+        u.completed_at = utcnow()
+        u.result_id = result.id
+        session.add(u)
+        session.commit()
     except HTTPException:
         # Ficheiro inválido (ex.: vídeo que o OpenCV não abre): o erro é definitivo, o upload é descartado.
+        session.rollback()
         dest.unlink(missing_ok=True)
-        session.delete(u)
-        session.commit()
+        u = session.get(Upload, upload_id)
+        if u is not None:
+            session.delete(u)
+            session.commit()
+        _forget(upload_id)
         raise
-    u.completed_at = utcnow()
-    u.result_id = result.id
-    session.add(u)
-    session.commit()
+    except Exception:
+        # Erro transitório (base de dados bloqueada, disco): o ficheiro volta para o upload, que pode ser
+        # concluído outra vez sem reenviar nada.
+        session.rollback()
+        if result is None:
+            if dest.exists():
+                dest.replace(tmp)
+        else:  # o vídeo ficou registado: falta só marcar o upload como concluído
+            _mark_completed(upload_id, result.id)
+        log.exception("Conclusão do upload %s falhou", upload_id)
+        raise HTTPException(503, "Não foi possível concluir a importação agora; tente concluir de novo.") from None
+    _forget(upload_id)
     return result
+
+
+def _mark_completed(upload_id: str, result_id: int) -> None:
+    try:
+        with Session(get_engine()) as s:
+            u = s.get(Upload, upload_id)
+            if u is not None and u.completed_at is None:
+                u.completed_at, u.result_id = utcnow(), result_id
+                s.add(u)
+                s.commit()
+    except Exception:  # pragma: no cover
+        log.exception("Upload %s: não foi possível marcar como concluído", upload_id)
 
 
 @router.delete("/uploads/{upload_id}", status_code=204)
 def cancel_upload(upload_id: str, session: SessionDep, actor: ActorDep) -> None:
     u = _get_open(session, upload_id)
     Path(u.temp_path).unlink(missing_ok=True)
-    _locks.pop(upload_id, None)
+    _forget(upload_id)
     session.delete(u)
     session.commit()
     log_event(session, "upload.cancelled", case_id=u.case_id, actor=actor,

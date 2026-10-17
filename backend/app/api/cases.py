@@ -42,8 +42,8 @@ from ..schemas import (
     VideoDelete,
     VideoUpdate,
 )
-from ..services import disk
-from ..services.audit import log_event
+from ..services import disk, evidence
+from ..services.audit import log_event, verify_chain
 from ..services.clock_auto import request_auto_clock
 from ..services.face_engine import get_engine
 from ..services.hashing import file_sha256, quick_hash
@@ -146,13 +146,13 @@ def find_duplicate(session, case_id: int, *, sha256: str | None = None, quick: s
 
 
 def register_video(session, case_id: int, path: Path, filename: str, size: int, actor: str,
-                   location_id: int | None = None) -> Video:
+                   location_id: int | None = None, *, sha256: str | None = None) -> Video:
     """Regista um vídeo já gravado em disco (metadados via OpenCV) e pede a cópia de reprodução, se útil.
 
     Um ficheiro igual (SHA-256) a um vídeo já existente no caso é recusado (409) e apagado."""
     try:
         loc = location_of_case(session, case_id, location_id, actor)
-        digest = file_sha256(path)
+        digest = sha256 or file_sha256(path)  # o upload em blocos calcula o SHA-256 à medida que recebe
         existing = find_duplicate(session, case_id, sha256=digest)
         if existing is not None:
             log_event(session, "video.duplicate_rejected", case_id=case_id, actor=actor,
@@ -370,6 +370,31 @@ def remove_member(case_id: int, user_id: int, session: SessionDep, user: Current
 def case_audit(case_id: int, session: SessionDep) -> list[AuditEvent]:
     get_case_or_404(session, case_id)
     return list(session.exec(select(AuditEvent).where(AuditEvent.case_id == case_id).order_by(AuditEvent.id)))
+
+
+@router.get("/cases/{case_id}/audit/verify")
+def verify_case_audit(case_id: int, session: SessionDep, actor: ActorDep) -> dict:
+    """Integridade da auditoria: recalcula a cadeia de hashes de todos os eventos (a cadeia é global)."""
+    get_case_or_404(session, case_id)
+    result = verify_chain(session)
+    result["case_events"] = len(session.exec(select(AuditEvent.id).where(AuditEvent.case_id == case_id)).all())
+    log_event(session, "audit.verified", case_id=case_id, actor=actor,
+              details={k: result[k] for k in ("ok", "events", "unsealed", "broken_at", "last_hash")})
+    return result
+
+
+@router.post("/cases/{case_id}/evidence/verify")
+def verify_case_evidence(case_id: int, session: SessionDep, actor: ActorDep) -> dict:
+    """Recalcula em segundo plano o SHA-256 de todos os vídeos originais do processo e compara-o com o da
+    importação (resultado em cada vídeo e na auditoria: evidence.verified)."""
+    get_case_or_404(session, case_id)
+    return evidence.start_case_verification(case_id, actor)
+
+
+@router.get("/cases/{case_id}/evidence/verify")
+def case_evidence_status(case_id: int, session: SessionDep) -> dict:
+    get_case_or_404(session, case_id)
+    return evidence.progress(case_id)
 
 
 # ---------------------------------------------------------------- referências

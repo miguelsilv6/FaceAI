@@ -6,6 +6,7 @@ import bisect
 import logging
 import math
 import os
+import shutil
 import threading
 import time
 import traceback
@@ -18,7 +19,7 @@ from sqlmodel import Session, select
 
 from ..config import settings
 from ..db import get_engine as get_db_engine
-from ..models import Detection, Job, JobStatus, ReferenceImage, Track, Video, utcnow
+from ..models import Alert, Detection, Job, JobStatus, ReferenceImage, Track, Video, utcnow
 from .audit import log_event
 from .body_analysis import BodyCollector, ClothingParams, FaceLink
 from .body_engine import get_body_engine
@@ -39,6 +40,16 @@ PROGRESS_COMMIT_EVERY = 10  # frames
 
 class JobCancelled(Exception):
     pass
+
+
+class JobInterrupted(Exception):
+    """O servidor está a desligar: a análise volta à fila (não é um cancelamento pelo utilizador)."""
+
+
+class _StopEvent(threading.Event):
+    """Pedido de paragem da análise em curso; ``shutdown`` distingue o desligar do servidor do cancelamento."""
+
+    shutdown = False
 
 
 class JobRunner:
@@ -83,15 +94,18 @@ class JobRunner:
                 return True
         return False
 
-    def shutdown(self) -> None:
+    def shutdown(self, timeout: float = 30) -> None:
         with self._cond:
             self._stop = True
             if self._current is not None:
-                self._current[1].set()
+                stop = self._current[1]
+                if isinstance(stop, _StopEvent):
+                    stop.shutdown = True
+                stop.set()
             self._cond.notify_all()
             thread = self._thread
         if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=10)
+            thread.join(timeout=timeout)
         self._thread = None
 
     def _next_job_id(self) -> int | None:
@@ -115,7 +129,7 @@ class JobRunner:
                     if not self._stop:
                         self._cond.wait(self.IDLE_WAIT_S)
                 continue
-            event = threading.Event()
+            event = _StopEvent()
             with self._cond:
                 self._current = (job_id, event)
             try:
@@ -152,17 +166,58 @@ def job_dir(job: Job) -> Path:
 
 
 def recover_interrupted_jobs() -> None:
-    """Marca como falhadas as análises que estavam a correr quando o servidor parou. As que estavam em fila
-    continuam na fila e são executadas a seguir."""
+    """Análises que estavam a correr quando o servidor parou sem aviso (falha, corte de energia): ficam como
+    falhadas e com resultados parciais (podem ser repetidas). Não voltam sozinhas à fila: se a própria análise
+    fez cair o servidor (ex.: falta de memória), repeti-la automaticamente faria-o cair outra vez. As que estavam
+    em fila continuam na fila e são executadas a seguir."""
     with Session(get_db_engine(), expire_on_commit=False) as s:
         for job in s.exec(select(Job).where(Job.status == JobStatus.running)):
             job.status = JobStatus.failed
-            job.message = "Interrompida (o servidor foi reiniciado)."
+            job.partial = True
+            job.message = ("Interrompida: o servidor parou durante a análise. Os resultados estão incompletos; "
+                           "use \"Repetir análise\".")
             job.finished_at = utcnow()
+            job.current_video_id = None
+            job.eta_s = None
             s.add(job)
             log_event(s, "job.interrupted", case_id=job.case_id, actor="sistema",
-                      details={"job_id": job.id}, commit=False)
+                      details={"job_id": job.id, "reason": "servidor parou sem aviso", "progress": job.progress,
+                               "requeued": False}, commit=False)
         s.commit()
+
+
+def reset_results(s: Session, job: Job) -> dict[str, int]:
+    """Apaga os resultados de uma execução anterior da análise (deteções, tracks, alertas e ficheiros gerados),
+    antes de a voltar a correr. Os frames guardados manualmente (pasta saved/) mantêm-se."""
+    removed = {"detections": 0, "tracks": 0, "alerts": 0}
+    for model, key in ((Alert, "alerts"), (Detection, "detections"), (Track, "tracks")):
+        rows = list(s.exec(select(model).where(model.job_id == job.id)))
+        removed[key] = len(rows)
+        for row in rows:
+            s.delete(row)
+    s.flush()
+    folder = job_dir(job)
+    if folder.exists():
+        for child in folder.iterdir():
+            if child.name == "saved":
+                continue
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            else:
+                child.unlink(missing_ok=True)
+    for name in ("progress", "frames_processed", "faces_detected", "matches", "frames_sampled",
+                 "frames_skipped_motion", "frames_skipped_noface", "tracks", "persons", "clothing_samples"):
+        setattr(job, name, 0)
+    job.clothing_summary = {}
+    job.eta_s = None
+    job.current_video_id = None
+    return removed
+
+
+def _has_results(s: Session, job: Job) -> bool:
+    return (s.exec(select(Detection.id).where(Detection.job_id == job.id).limit(1)).first() is not None
+            or s.exec(select(Track.id).where(Track.job_id == job.id).limit(1)).first() is not None
+            or job.frames_sampled > 0)
 
 
 def run_job(job_id: int, cancel: threading.Event) -> None:
@@ -172,10 +227,18 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
         if job is None or job.status != JobStatus.queued:
             return
         if cancel.is_set():
-            _finish(s, job, JobStatus.cancelled, "Cancelada antes de iniciar.")
+            if not getattr(cancel, "shutdown", False):  # a desligar: fica em fila para o próximo arranque
+                _finish(s, job, JobStatus.cancelled, "Cancelada antes de iniciar.")
             return
         p = job.params
+        if job.partial or _has_results(s, job):
+            # Retoma de uma análise interrompida ou repetida: começa do início, sem resultados antigos.
+            removed = reset_results(s, job)
+            log_event(s, "job.results_reset", case_id=job.case_id, actor="sistema",
+                      details={"job_id": job.id, **removed}, commit=False)
         job.status = JobStatus.running
+        job.partial = False
+        job.message = ""
         job.started_at = utcnow()
         job.environment = {**engine.environment(),
                            "resources": {"cpu_threads": settings.cpu_threads or "auto", "job_nice": settings.job_nice}}
@@ -240,7 +303,7 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                 analyzer = _VideoAnalyzer(ctx, s, job, video, body)
                 for frame in sample_frames(video.stored_path, ctx.sample_fps, fps=video.fps or None):
                     if cancel.is_set():
-                        raise JobCancelled()
+                        raise JobInterrupted() if getattr(cancel, "shutdown", False) else JobCancelled()
                     analyzer.process(frame)
                     done += 1
                     if done % PROGRESS_COMMIT_EVERY == 0:
@@ -285,9 +348,32 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
             _finish(s, job, JobStatus.completed, (job.message + " " if job.message else "") + summary + ".")
         except JobCancelled:
             _finish_safely(s, job_id, JobStatus.cancelled, "Cancelada pelo utilizador.")
+        except JobInterrupted:
+            _requeue_after_shutdown(s, job_id)
         except Exception as exc:
             log.error("Job %s falhou: %s", job_id, traceback.format_exc())
             _finish_safely(s, job_id, JobStatus.failed, f"Erro: {exc}")
+
+
+def _requeue_after_shutdown(s: Session, job_id: int) -> None:
+    """Servidor a desligar (reinício, atualização): a análise volta à fila e recomeça do início no arranque."""
+    try:
+        s.rollback()
+        job = s.get(Job, job_id)
+        if job is None:
+            return
+        progress = job.progress
+        job.status = JobStatus.queued
+        job.partial = True
+        job.message = "Interrompida ao desligar o servidor; recomeça do início no próximo arranque."
+        job.current_video_id = None
+        job.eta_s = None
+        s.add(job)
+        s.commit()
+        log_event(s, "job.interrupted", case_id=job.case_id, actor="sistema",
+                  details={"job_id": job_id, "reason": "servidor desligado", "progress": progress, "requeued": True})
+    except Exception:  # pragma: no cover - fica "running" e o arranque seguinte marca-a como interrompida
+        log.exception("Não foi possível voltar a pôr o job %s na fila", job_id)
 
 
 def _finish_safely(s: Session, job_id: int, status: JobStatus, message: str) -> None:

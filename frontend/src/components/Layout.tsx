@@ -7,6 +7,7 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { api } from "../api";
 import { useAuth } from "../auth";
+import { LEAVE_WARNING, installUploadGuard, useActiveUploads } from "../uploadGuard";
 import ActivityBar from "./ActivityBar";
 import ErrorBoundary from "./ErrorBoundary";
 import Signature from "./Signature";
@@ -22,7 +23,9 @@ export default function Layout() {
 
   useEffect(() => {
     api.system().then(setSystem).catch(() => setSystem(null));
+    installUploadGuard();
   }, []);
+  const uploading = useActiveUploads();
 
   const env = system?.environment;
   return (
@@ -56,7 +59,7 @@ export default function Layout() {
                 {isAdmin && <Menu.Item leftSection={<IconUsers size={16} />} onClick={() => navigate("/users")}>
                   Utilizadores</Menu.Item>}
                 <Menu.Divider />
-                <Menu.Item color="red" leftSection={<IconLogout size={16} />} onClick={() => void logout()}>
+                <Menu.Item color="red" leftSection={<IconLogout size={16} />} onClick={() => { if (!uploading || window.confirm(LEAVE_WARNING)) void logout(); }}>
                   Terminar sessão</Menu.Item>
               </Menu.Dropdown>
             </Menu>

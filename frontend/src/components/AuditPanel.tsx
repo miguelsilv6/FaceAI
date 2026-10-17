@@ -1,9 +1,49 @@
-import { Card, Code, Table, Text } from "@mantine/core";
+import { Alert, Button, Card, Code, Group, Stack, Table, Text } from "@mantine/core";
+import { IconShieldCheck, IconShieldX } from "@tabler/icons-react";
+import { useState } from "react";
 
-import { formatDate } from "../api";
-import type { AuditEvent } from "../types";
+import { api, formatDate } from "../api";
+import { notifyError } from "../notify";
+import type { AuditChainCheck, AuditEvent } from "../types";
 
-export default function AuditPanel({ events }: { events: AuditEvent[] }) {
+export default function AuditPanel({ caseId, events }: { caseId?: number; events: AuditEvent[] }) {
+  const [check, setCheck] = useState<AuditChainCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  if (caseId === undefined) return <AuditTable events={events} />;
+  const verify = async () => {
+    setChecking(true);
+    try {
+      setCheck(await api.verifyAudit(caseId));
+    } catch (e) {
+      notifyError(e);
+    } finally {
+      setChecking(false);
+    }
+  };
+  return (
+    <Stack>
+      <Group justify="space-between" wrap="wrap">
+        <Text size="sm" c="dimmed">Cada evento guarda o SHA-256 do anterior e do seu conteúdo: alterar, apagar ou inserir um
+          evento fora da aplicação quebra a cadeia.</Text>
+        <Button size="xs" variant="light" leftSection={<IconShieldCheck size={14} />} loading={checking}
+          onClick={verify}>Verificar integridade da auditoria</Button>
+      </Group>
+      {check && (
+        <Alert color={check.ok ? "teal" : "red"} icon={check.ok ? <IconShieldCheck size={18} /> : <IconShieldX size={18} />}
+          title={check.ok ? "Cadeia de auditoria íntegra" : "Cadeia de auditoria quebrada"}>
+          {check.ok
+            ? <>{check.events} evento(s) verificados em toda a aplicação ({check.case_events} deste processo). Último hash:{" "}
+              <Code>{check.last_hash.slice(0, 16)}…</Code></>
+            : <>No evento #{check.broken_at ?? "—"}: {check.reason}.</>}
+          {check.unsealed > 0 && <Text size="sm">{check.unsealed} evento(s) ainda sem hash.</Text>}
+        </Alert>
+      )}
+      <AuditTable events={events} />
+    </Stack>
+  );
+}
+
+function AuditTable({ events }: { events: AuditEvent[] }) {
   if (!events.length) return <Text c="dimmed">Sem eventos.</Text>;
   return (
     <Card withBorder p={0}>

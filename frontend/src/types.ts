@@ -53,6 +53,8 @@ export interface Video {
   height: number;
   codec: string;
   uploaded_at: string;
+  verified_at?: string | null; // última verificação de integridade (SHA-256 recalculado)
+  verified_ok?: boolean | null;
   playback_status: "" | "not_needed" | "pending" | "running" | "ready" | "failed" | "unavailable";
   playback_progress: number;
   playback_error: string;
@@ -171,6 +173,7 @@ export interface Job {
   clothing_summary: ClothingSummary | null;
   eta_s: number | null;
   message: string;
+  partial?: boolean; // interrompida a meio: resultados incompletos
   created_by: string;
   created_at: string;
   started_at: string | null;
@@ -288,6 +291,28 @@ export interface AuditEvent {
   ip?: string;
   action: string;
   details: Record<string, unknown>;
+  hash?: string;
+}
+
+export interface AuditChainCheck {
+  ok: boolean;
+  events: number;
+  unsealed: number;
+  broken_at: number | null;
+  reason: string;
+  last_hash: string;
+  case_events: number;
+}
+
+export interface EvidenceCheck {
+  running: boolean;
+  done?: number;
+  total?: number;
+  current?: string;
+  ok?: number;
+  failed?: { video_id: number; filename: string; reason: string }[];
+  finished_at?: string;
+  error?: string;
 }
 
 export interface SystemInfo {
@@ -565,4 +590,38 @@ export interface PersonAlert {
   note: string;
   reviewed_by: string;
   reviewed_at: string | null;
+}
+
+/** Importação em bloco a partir da pasta do servidor (FACEAI_IMPORT_DIR): cada pasta → um local. */
+export interface ServerImportGroup {
+  path: string;
+  location_name: string;
+  existing_location_id: number | null;
+  videos: { name: string; path: string; size: number; subfolder: string }[];
+}
+
+export interface ServerImportScan {
+  enabled: boolean;
+  root?: string;
+  path?: string;
+  parent?: string | null;
+  dirs?: { name: string; path: string }[];
+  plan?: ServerImportGroup[];
+  total_bytes?: number;
+  truncated?: boolean;
+}
+
+export interface ServerImportState {
+  running: boolean;
+  done?: number;
+  total?: number;
+  bytes_done?: number;
+  bytes_total?: number;
+  current?: string;
+  imported?: number;
+  duplicates?: { path: string; message: string }[];
+  errors?: { path: string; message: string }[];
+  locations_created?: string[];
+  finished_at?: string;
+  error?: string;
 }

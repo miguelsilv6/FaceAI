@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 from .. import __version__
 from ..config import settings
 from ..models import Alert, AuditEvent, Case, CasePerson, Detection, Job, ReferenceImage, ReviewStatus, Track, Video
+from .audit import verify_chain
 from .clock import format_real, real_time
 from .locations import locations_by_id, video_place
 from .persons import person_segments, summarize_persons
@@ -97,7 +98,8 @@ def load_job_data(s: Session, job: Job) -> dict[str, Any]:
         cp = s.get(CasePerson, a.case_person_id)
         alerts.append({"alert": a, "person": cp.name if cp else f"#{a.case_person_id}"})
     return {"case": case, "job": job, "videos": videos, "references": refs, "detections": detections,
-            "tracks": tracks, "audit": audit, "locations": locations_by_id(s, job.case_id), "alerts": alerts}
+            "tracks": tracks, "audit": audit, "locations": locations_by_id(s, job.case_id), "alerts": alerts,
+            "audit_chain": verify_chain(s)}
 
 
 def place_of(v: Video | None, data: dict[str, Any]) -> dict[str, Any]:
@@ -318,6 +320,7 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
         persons=persons,
         review_counts=review_counts,
         audit=data["audit"],
+        audit_chain=data.get("audit_chain"),
         max_images=max_images,
     )
 

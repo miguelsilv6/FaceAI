@@ -5,6 +5,10 @@
   reset-mfa <username>      remove o MFA (ex.: telemóvel perdido)
   unlock <username>         desbloqueia a conta
   list-users                lista os utilizadores
+  verify-audit              verifica a cadeia de hashes da auditoria (alterações, eventos apagados)
+  verify-evidence [case_id] recalcula o SHA-256 dos vídeos originais e compara com o da importação
+  backup <pasta> [--files]  cópia consistente da base de dados (VACUUM INTO) + manifesto; com --files,
+                            copia também os ficheiros dos processos (incremental)
 
 Com Docker: docker compose exec faceai python -m app.cli create-admin
 """
@@ -14,11 +18,12 @@ from __future__ import annotations
 import argparse
 import getpass
 import sys
+from pathlib import Path
 
 from sqlmodel import Session, select
 
 from .db import get_engine, init_db
-from .models import User, UserRole
+from .models import User, UserRole, Video
 from .services import auth
 from .services.audit import log_event
 
@@ -101,6 +106,50 @@ def list_users(s: Session) -> None:
         print(f"{u.username:24} {', '.join(flags)}")
 
 
+def verify_audit(s: Session) -> None:
+    from .services.audit import verify_chain
+
+    r = verify_chain(s)
+    log_event(s, "audit.verified", actor=ACTOR, ip="local",
+              details={k: r[k] for k in ("ok", "events", "unsealed", "broken_at", "last_hash")})
+    if r["ok"]:
+        print(f"Cadeia íntegra: {r['events']} evento(s); último hash {r['last_hash']}.")
+    else:
+        sys.exit(f"CADEIA QUEBRADA no evento #{r['broken_at']}: {r['reason']}.")
+    if r["unsealed"]:
+        print(f"Atenção: {r['unsealed']} evento(s) sem hash.")
+
+
+def verify_evidence(s: Session, case_id: int | None) -> None:
+    from .services.evidence import verify_videos
+
+    q = select(Video).order_by(Video.case_id, Video.id)
+    if case_id is not None:
+        q = q.where(Video.case_id == case_id)
+    by_case: dict[int, list[Video]] = {}
+    for v in s.exec(q):
+        by_case.setdefault(v.case_id, []).append(v)
+    bad = 0
+    for cid, videos in by_case.items():
+        summary = verify_videos(s, videos, case_id=cid, actor=ACTOR)
+        for f in summary["failed"]:
+            bad += 1
+            print(f"Processo {cid} · vídeo #{f['video_id']} {f['filename']}: {f['reason']}")
+        print(f"Processo {cid}: {summary['ok']}/{summary['videos']} vídeo(s) íntegro(s).")
+    if bad:
+        sys.exit(1)
+
+
+def run_backup(dest: str, include_files: bool) -> None:
+    from .services.backup import backup
+
+    m = backup(Path(dest), include_files=include_files)
+    print(f"Base de dados: {Path(dest) / m['database']['file']} (SHA-256 {m['database']['sha256']}).")
+    if include_files:
+        print(f"Ficheiros: {m['files']['copied']} copiado(s), {m['files']['unchanged']} sem alterações.")
+    print(f"Manifesto: manifest_{m['created_at']}.json ({len(m['videos'])} vídeo(s)).")
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="python -m app.cli", description="Administração local do FaceAI.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -110,6 +159,11 @@ def main(argv: list[str] | None = None) -> None:
     for name in ("reset-password", "reset-mfa", "unlock"):
         sub.add_parser(name).add_argument("username")
     sub.add_parser("list-users")
+    sub.add_parser("verify-audit")
+    sub.add_parser("verify-evidence").add_argument("case_id", nargs="?", type=int)
+    b = sub.add_parser("backup")
+    b.add_argument("dest")
+    b.add_argument("--files", action="store_true", help="copiar também os ficheiros dos processos")
     args = p.parse_args(argv)
 
     init_db()
@@ -122,6 +176,12 @@ def main(argv: list[str] | None = None) -> None:
             reset_mfa(s, args.username)
         elif args.cmd == "unlock":
             unlock(s, args.username)
+        elif args.cmd == "verify-audit":
+            verify_audit(s)
+        elif args.cmd == "verify-evidence":
+            verify_evidence(s, args.case_id)
+        elif args.cmd == "backup":
+            run_backup(args.dest, args.files)
         else:
             list_users(s)
 

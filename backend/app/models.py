@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, event, text
 from sqlmodel import Field, SQLModel
 
 
@@ -110,6 +110,9 @@ class Video(SQLModel, table=True):
     # Leitura automática da hora por OCR na importação: "" | pending | running | done | failed | unavailable
     clock_auto_status: str = ""
     clock_auto_message: str = ""
+    # Verificação de integridade (o SHA-256 do ficheiro é recalculado e comparado com o da importação)
+    verified_at: datetime | None = None
+    verified_ok: bool | None = None
     uploaded_at: datetime = Field(default_factory=utcnow)
 
 
@@ -138,6 +141,9 @@ class Job(SQLModel, table=True):
     clothing_samples: int = 0
     clothing_summary: dict[str, Any] | None = Field(default_factory=dict, sa_column=Column(JSON))
     message: str = ""
+    # Resultados incompletos: a análise foi interrompida a meio (servidor desligado ou reiniciado). Os resultados
+    # parciais são apagados quando a análise volta a correr (ver services/jobs.reset_results).
+    partial: bool = False
     created_by: str = ""
     created_at: datetime = Field(default_factory=utcnow)
     started_at: datetime | None = None
@@ -341,3 +347,31 @@ class AuditEvent(SQLModel, table=True):
     ip: str = ""
     action: str
     details: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    # Cadeia de hashes (deteção de alterações): hash = SHA-256(prev_hash ‖ evento canónico). Ver services/audit.py
+    prev_hash: str = ""
+    hash: str = Field(default="", index=True)
+
+
+class IdSequence(SQLModel, table=True):
+    """Último id atribuído por tabela. Os ids de processos, análises, vídeos e imagens nunca são reutilizados
+    depois de uma eliminação (o SQLite sem AUTOINCREMENT reutiliza o maior): as pastas e ficheiros
+    (ex.: case_00012/, job_00034/) nunca passam para um registo novo. Ver _assign_id."""
+
+    name: str = Field(primary_key=True)
+    value: int = 0
+
+
+def _assign_id(mapper, connection, target) -> None:
+    if target.id is not None:
+        return
+    table = mapper.local_table.name
+    # Atómico (a escrita bloqueia a base de dados até ao commit): o próximo id é sempre maior do que qualquer
+    # id já atribuído ou existente na tabela.
+    target.id = connection.execute(text(
+        f'INSERT INTO idsequence (name, value) VALUES (:n, (SELECT COALESCE(MAX(id), 0) + 1 FROM "{table}")) '
+        f'ON CONFLICT(name) DO UPDATE SET value = MAX(value, (SELECT COALESCE(MAX(id), 0) FROM "{table}")) + 1 '
+        "RETURNING value"), {"n": table}).scalar_one()
+
+
+for _model in (Case, Job, Video, ReferenceImage, SavedFrame, Location):
+    event.listen(_model, "before_insert", _assign_id)
