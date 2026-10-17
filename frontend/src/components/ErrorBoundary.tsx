@@ -28,7 +28,7 @@ export default class ErrorBoundary extends Component<{ children: ReactNode }, St
           <Code block>{error.message || String(error)}</Code>
           <Group gap="xs">
             <Button size="xs" onClick={() => window.location.reload()}>Recarregar</Button>
-            <Button size="xs" variant="default" component="a" href="/">Voltar aos casos</Button>
+            <Button size="xs" variant="default" component="a" href="/">Voltar aos processos</Button>
           </Group>
         </Stack>
       </Alert>

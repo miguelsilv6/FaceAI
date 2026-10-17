@@ -110,7 +110,7 @@ def check_space(needed_bytes: int) -> None:
     if st["free"] - max(0, needed_bytes) < st["min_free_bytes"]:
         raise HTTPException(507, f"Espaço em disco insuficiente no servidor: livres {st['free'] / 1024**3:.1f} GB, "
                                  f"são precisos {needed_bytes / 1024**3:.1f} GB + {st['min_free_bytes'] / 1024**3:.0f}"
-                                 " GB de reserva. Liberte espaço (elimine análises ou casos antigos).")
+                                 " GB de reserva. Liberte espaço (elimine análises ou processos antigos).")
 
 
 def note_alert(s: Session, st: dict) -> None:

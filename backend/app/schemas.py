@@ -27,7 +27,7 @@ class CaseOut(BaseModel):
 
 
 class ReferenceUpdate(BaseModel):
-    case_person_id: int | None = Field(description="Pessoa do caso a que a foto pertence (null = foto solta)")
+    case_person_id: int | None = Field(description="Pessoa do processo a que a foto pertence (null = foto solta)")
 
 
 class CasePersonCreate(BaseModel):
@@ -55,7 +55,7 @@ class LocationCreate(BaseModel):
 
 
 class VideoUpdate(BaseModel):
-    location_id: int | None = Field(None, description="Mover o vídeo para outro local do mesmo caso")
+    location_id: int | None = Field(None, description="Mover o vídeo para outro local do mesmo processo")
     camera_name: str | None = Field(None, max_length=120, description="Nome da câmara (vazio = nome do ficheiro)")
 
 
@@ -65,7 +65,7 @@ class VideoDelete(BaseModel):
 
 
 class CaseDelete(BaseModel):
-    confirm_case_id: int = Field(description="Número do caso, repetido como confirmação do pedido")
+    confirm_case_id: int = Field(description="Número do processo, repetido como confirmação do pedido")
     reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")
 
 

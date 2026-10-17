@@ -118,7 +118,7 @@ def location_of_case(session, case_id: int, location_id: int | None, actor: str 
         return loc
     loc = session.get(Location, location_id)
     if loc is None or loc.case_id != case_id:
-        raise HTTPException(422, "Local inexistente neste caso.")
+        raise HTTPException(422, "Local inexistente neste processo.")
     return loc
 
 
@@ -220,7 +220,7 @@ def update_case(case_id: int, body: CaseUpdate, session: SessionDep, user: Curre
     changes = {}
     if body.name is not None and body.name.strip() != case.name:
         if not body.name.strip():
-            raise HTTPException(422, "O nome do caso não pode ficar vazio.")
+            raise HTTPException(422, "O nome do processo não pode ficar vazio.")
         changes["name"] = {"from": case.name, "to": body.name.strip()}
         case.name = body.name.strip()
     if body.description is not None and body.description != case.description:
@@ -246,10 +246,10 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
     case = get_case_or_404(session, case_id)
     _require_manager(session, user, case_id)
     if body.confirm_case_id != case_id:
-        raise HTTPException(422, "Confirmação inválida: indique o número do caso a eliminar.")
+        raise HTTPException(422, "Confirmação inválida: indique o número do processo a eliminar.")
     jobs = list(session.exec(select(Job).where(Job.case_id == case_id)))
     if any(j.status in (JobStatus.queued, JobStatus.running) for j in jobs):
-        raise HTTPException(409, "Há análises a decorrer neste caso. Cancele-as primeiro.")
+        raise HTTPException(409, "Há análises a decorrer neste processo. Cancele-as primeiro.")
     videos = list(session.exec(select(Video).where(Video.case_id == case_id)))
     refs = list(session.exec(select(ReferenceImage).where(ReferenceImage.case_id == case_id)))
     uploads = list(session.exec(select(Upload).where(Upload.case_id == case_id)))
@@ -305,7 +305,7 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
 
 def _require_manager(session, user: User, case_id: int) -> None:
     if not can_manage_case(session, user, case_id):
-        raise HTTPException(403, "Só o responsável do caso ou um administrador pode fazer isto.")
+        raise HTTPException(403, "Só o responsável do processo ou um administrador pode fazer isto.")
 
 
 # ---------------------------------------------------------------- membros do caso (need-to-know)
@@ -349,7 +349,7 @@ def remove_member(case_id: int, user_id: int, session: SessionDep, user: Current
         raise HTTPException(404, "Membro não encontrado.")
     owners = session.exec(select(CaseMember).where(CaseMember.case_id == case_id, CaseMember.role == "owner")).all()
     if m.role == "owner" and len(owners) <= 1:
-        raise HTTPException(409, "O caso tem de ficar com pelo menos um responsável.")
+        raise HTTPException(409, "O processo tem de ficar com pelo menos um responsável.")
     target = session.get(User, user_id)
     session.delete(m)
     session.commit()
@@ -440,7 +440,7 @@ def _person_of_case(session, case_id: int, case_person_id: int | None) -> CasePe
         return None
     person = session.get(CasePerson, case_person_id)
     if person is None or person.case_id != case_id:
-        raise HTTPException(422, "Pessoa inexistente neste caso.")
+        raise HTTPException(422, "Pessoa inexistente neste processo.")
     return person
 
 
@@ -459,7 +459,7 @@ def _check_name(session, case_id: int, name: str, exclude: int | None = None) ->
         raise HTTPException(422, "Indique o nome da pessoa.")
     for other in session.exec(select(CasePerson).where(CasePerson.case_id == case_id)):
         if other.id != exclude and other.name.casefold() == name.casefold():
-            raise HTTPException(409, f"Já existe a pessoa \"{other.name}\" neste caso.")
+            raise HTTPException(409, f"Já existe a pessoa \"{other.name}\" neste processo.")
     return name
 
 
@@ -579,9 +579,18 @@ def update_video(video_id: int, body: VideoUpdate, session: SessionDep, actor: A
 # ---------------------------------------------------------------- locais
 def _location_out(session, loc: Location) -> dict:
     videos = session.exec(select(Video).where(Video.location_id == loc.id).order_by(Video.id)).all()
+    copies = 0  # cópias de reprodução (H.264/VP9) dos vídeos do local
+    for v in videos:
+        if v.playback_path:
+            try:
+                copies += Path(v.playback_path).stat().st_size
+            except OSError:
+                pass
+    originals = sum(v.size_bytes for v in videos)
     return {"id": loc.id, "case_id": loc.case_id, "name": loc.name, "created_by": loc.created_by,
             "created_at": loc.created_at, "video_ids": [v.id for v in videos],
-            "duration_s": round(sum(v.duration_s for v in videos), 3)}
+            "duration_s": round(sum(v.duration_s for v in videos), 3),
+            "size_bytes": originals + copies, "originals_bytes": originals, "playback_bytes": copies}
 
 
 def _check_location_name(session, case_id: int, name: str, exclude: int | None = None) -> str:
@@ -590,7 +599,7 @@ def _check_location_name(session, case_id: int, name: str, exclude: int | None =
         raise HTTPException(422, "Indique o nome do local.")
     for other in session.exec(select(Location).where(Location.case_id == case_id)):
         if other.id != exclude and other.name.casefold() == name.casefold():
-            raise HTTPException(409, f"Já existe o local \"{other.name}\" neste caso.")
+            raise HTTPException(409, f"Já existe o local \"{other.name}\" neste processo.")
     return name
 
 

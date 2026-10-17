@@ -116,7 +116,7 @@ def create_upload(case_id: int, body: UploadCreate, session: SessionDep, actor: 
                                                  Upload.size_bytes == body.size_bytes,
                                                  Upload.completed_at == None)).first()  # noqa: E711
         if busy is not None:
-            raise HTTPException(409, f"{filename}: este ficheiro já está a ser importado neste caso "
+            raise HTTPException(409, f"{filename}: este ficheiro já está a ser importado neste processo "
                                      f"({busy.filename}). Para retomar, largue o mesmo ficheiro no mesmo local.",
                                 headers={DUPLICATE_HEADER: "upload"})
     disk.check_space(body.size_bytes)

@@ -2,7 +2,7 @@ import {
   ActionIcon, Alert, Badge, Button, Card, Group, Loader, Menu, Stack, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconArrowsExchange, IconCheck, IconClock, IconDots, IconMapPin, IconMovie, IconPencil, IconPlayerPlay, IconTrash, IconX,
+  IconArrowsExchange, IconCheck, IconClock, IconDatabase, IconDots, IconMapPin, IconMovie, IconPencil, IconPlayerPlay, IconTrash, IconX,
 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 
@@ -107,6 +107,11 @@ function LocationHeader({ location, cameras, duration, onChange, onDeleted }: {
         )}
         <Badge variant="light">{cameras} vídeo{cameras === 1 ? "" : "s"}</Badge>
         {cameras > 0 && <Text size="xs" c="dimmed">{formatTime(duration)} de vídeo</Text>}
+        {cameras > 0 && (
+          <Tooltip label={`Originais ${formatBytes(location.originals_bytes)} · cópias de reprodução ${formatBytes(location.playback_bytes)}`}>
+            <Badge variant="default" leftSection={<IconDatabase size={12} />}>{formatBytes(location.size_bytes)} em disco</Badge>
+          </Tooltip>
+        )}
       </Group>
       <Tooltip label={cameras ? "Mova ou elimine os vídeos para poder eliminar o local" : "Eliminar o local"}>
         <span>
@@ -180,7 +185,7 @@ export default function LocationCameras({ caseId, location, videos, locations, j
         title={`Importar vídeos de CCTV para "${location.name}"`}
         hint="Um ficheiro por ângulo de CCTV. Envio em blocos: se a ligação falhar, volte a largar o mesmo ficheiro para continuar de onde parou." />
       {duplicates.length > 0 && (
-        <Alert color="yellow" title={`${duplicates.length} ficheiro(s) não importado(s): já existem neste caso`}
+        <Alert color="yellow" title={`${duplicates.length} ficheiro(s) não importado(s): já existem neste processo`}
           withCloseButton closeButtonLabel="Fechar" onClose={() => setDuplicates([])}>
           <Stack gap={2}>
             {duplicates.map((d) => <Text key={d.file} size="sm">{d.message}</Text>)}

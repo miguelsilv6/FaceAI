@@ -32,6 +32,9 @@ export interface Location {
   created_at: string;
   video_ids: number[];
   duration_s: number;
+  size_bytes: number; // espaço em disco: vídeos originais + cópias de reprodução
+  originals_bytes: number;
+  playback_bytes: number;
 }
 
 export interface Video {

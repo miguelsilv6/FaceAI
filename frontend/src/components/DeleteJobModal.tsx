@@ -28,7 +28,7 @@ export default function DeleteJobModal({ job, onClose, onDeleted }: Props) {
     setBusy(true);
     try {
       await api.deleteJob(job.id, reason.trim());
-      notifyOk(`A análise #${job.id} foi eliminada. O registo fica na auditoria do caso.`);
+      notifyOk(`A análise #${job.id} foi eliminada. O registo fica na auditoria do processo.`);
       onDeleted(job);
     } catch (e) {
       notifyError(e, "Não foi possível eliminar a análise");
@@ -48,7 +48,7 @@ export default function DeleteJobModal({ job, onClose, onDeleted }: Props) {
               <List.Item>os recortes, os frames e os PNG originais gerados pela análise.</List.Item>
             </List>
             <Text size="sm" mt={4}>
-              Os vídeos e as imagens de referência do caso <b>não</b> são apagados. A auditoria mantém o histórico da
+              Os vídeos e as imagens de referência do processo <b>não</b> são apagados. A auditoria mantém o histórico da
               análise e regista a eliminação (quem, quando, motivo e parâmetros).
             </Text>
           </Alert>

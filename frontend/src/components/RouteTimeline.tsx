@@ -130,7 +130,7 @@ export default function RouteTimeline({ caseId, jobs, videos, locations }: {
   };
 
   if (!completed.length) {
-    return <Stack><Text c="dimmed">Ainda não há análises concluídas neste caso.</Text>{player}</Stack>;
+    return <Stack><Text c="dimmed">Ainda não há análises concluídas neste processo.</Text>{player}</Stack>;
   }
   return (
     <Stack>

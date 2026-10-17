@@ -54,13 +54,13 @@ export default function SimilarModal({ query, defaultThreshold, onClose }: {
 
   const title = !query ? "" : query.kind === "track" ? `Track #${query.trackId} noutras análises`
     : query.kind === "person" ? `Pessoa #${query.personId} noutras análises`
-      : query.kind === "casePerson" ? `«${query.name}» noutros casos` : `Foto «${query.name}» noutros casos`;
+      : query.kind === "casePerson" ? `«${query.name}» noutros processos` : `Foto «${query.name}» noutros processos`;
   return (
     <Modal opened={!!query} onClose={onClose} title={title} size="xl">
       <Stack>
         <Group justify="space-between" wrap="wrap">
           <SegmentedControl size="xs" value={scope} onChange={(v) => setScope(v as "all" | "case")}
-            data={[{ value: "all", label: "Todos os meus casos" }, { value: "case", label: "Só este caso" }]} />
+            data={[{ value: "all", label: "Todos os meus processos" }, { value: "case", label: "Só este processo" }]} />
           <Stack gap={2} w={260}>
             <Text size="xs">{byPhoto && perJob ? "Limiar: o de cada análise"
               : `Distância máxima: ${threshold.toFixed(2)} (semelhança ≥ ${((1 - threshold) * 100).toFixed(0)}%)`}</Text>
@@ -93,7 +93,7 @@ export default function SimilarModal({ query, defaultThreshold, onClose }: {
                 <Table.ScrollContainer minWidth={700}>
                   <Table highlightOnHover verticalSpacing={4}>
                     <Table.Thead>
-                      <Table.Tr><Table.Th>Face</Table.Th><Table.Th>Caso / análise</Table.Th><Table.Th>Vídeo</Table.Th>
+                      <Table.Tr><Table.Th>Face</Table.Th><Table.Th>Processo / análise</Table.Th><Table.Th>Vídeo</Table.Th>
                         <Table.Th>Quando</Table.Th><Table.Th>Semelhança</Table.Th><Table.Th>Revisão</Table.Th></Table.Tr>
                     </Table.Thead>
                     <Table.Tbody>

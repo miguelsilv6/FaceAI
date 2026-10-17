@@ -54,6 +54,9 @@ def test_location_crud_and_audit(client, tmp_path):
     assert v["location_id"] == x["id"] and v["camera_name"] == ""
     locs = {loc["name"]: loc for loc in client.get(f"/api/cases/{case['id']}/locations").json()}
     assert locs["Estação"]["video_ids"] == [v["id"]] and "Geral" not in locs
+    # espaço ocupado pelo local: originais (+ cópias de reprodução, se houver)
+    assert locs["Estação"]["originals_bytes"] == v["size_bytes"]
+    assert locs["Estação"]["size_bytes"] == v["size_bytes"] + locs["Estação"]["playback_bytes"]
     # local com vídeos não pode ser eliminado; vazio pode
     r = client.delete(f"/api/locations/{x['id']}")
     assert r.status_code == 409 and "Mova" in r.json()["detail"]

@@ -185,7 +185,7 @@ def authorize_objects(request: Request, session: SessionDep, user: CurrentUser) 
 def get_case_or_404(session: Session, case_id: int) -> Case:
     case = session.get(Case, case_id)
     if case is None:
-        raise HTTPException(404, "Caso não encontrado.")
+        raise HTTPException(404, "Processo não encontrado.")
     return case
 
 

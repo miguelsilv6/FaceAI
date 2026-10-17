@@ -120,7 +120,7 @@ function CompletedJobs({ caseId, jobs, locations, onShowImages, onOpenTab }: {
         )}
       </Group>
       {completed.length === 0 ? (
-        <Text size="sm" c="dimmed">Ainda não há análises concluídas neste caso.</Text>
+        <Text size="sm" c="dimmed">Ainda não há análises concluídas neste processo.</Text>
       ) : (
         <Table.ScrollContainer minWidth={760}>
           <Table highlightOnHover verticalSpacing={6}>
@@ -247,7 +247,7 @@ export default function ValidatedFramesPanel({ caseId, jobs, locations: caseLoca
         {header}
         <Title order={5}>Imagens validadas</Title>
         <Alert color="blue" icon={<IconInfoCircle size={18} />}>
-          Ainda não há imagens validadas neste caso. Confirme as deteções (✓) nos resultados das análises, ou use
+          Ainda não há imagens validadas neste processo. Confirme as deteções (✓) nos resultados das análises, ou use
           "Guardar frame" no leitor da análise: aparecem aqui para ver e descarregar os frames originais.
         </Alert>
       </Stack>

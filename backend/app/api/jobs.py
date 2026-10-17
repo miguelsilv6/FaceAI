@@ -91,14 +91,14 @@ def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorD
     videos = list(session.exec(select(Video).where(Video.case_id == case_id).order_by(Video.id)))
     locs = locations_by_id(session, case_id)
     if body.location_ids is not None and any(i not in locs for i in body.location_ids):
-        raise HTTPException(422, "Local inexistente neste caso.")
+        raise HTTPException(422, "Local inexistente neste processo.")
     if body.video_ids is None and body.location_ids is None:
         video_ids = [v.id for v in videos]
     else:  # união: os vídeos indicados e todas as câmaras dos locais indicados
         wanted, wanted_locs = set(body.video_ids or []), set(body.location_ids or [])
         video_ids = [v.id for v in videos if v.id in wanted or v.location_id in wanted_locs]
     if not video_ids:
-        raise HTTPException(422, "Selecione pelo menos um vídeo do caso.")
+        raise HTTPException(422, "Selecione pelo menos um vídeo do processo.")
     ref_ids: list[int] = []
     job_params = params.model_dump()
     # Locais abrangidos (nome no momento da análise, para o relatório e a reprodutibilidade)
@@ -157,7 +157,7 @@ def update_queue(job_id: int, body: QueueUpdate, session: SessionDep, user: Curr
     """Prioridade e retenção de uma análise em fila (quem a criou, o responsável do caso ou um admin)."""
     job = get_job_or_404(session, job_id)
     if job.created_by != user.username and not can_manage_case(session, user, job.case_id):
-        raise HTTPException(403, "Só quem criou a análise, o responsável do caso ou um administrador pode alterar.")
+        raise HTTPException(403, "Só quem criou a análise, o responsável do processo ou um administrador pode alterar.")
     if job.status != JobStatus.queued:
         raise HTTPException(409, "Só é possível alterar análises em fila.")
     changes = {}
@@ -187,7 +187,8 @@ def delete_job(job_id: int, body: JobDelete, session: SessionDep, user: CurrentU
     actor = user.username
     job = get_job_or_404(session, job_id)
     if job.created_by != actor and not can_manage_case(session, user, job.case_id):
-        raise HTTPException(403, "Só quem criou a análise, o responsável do caso ou um administrador a pode eliminar.")
+        raise HTTPException(403, "Só quem criou a análise, o responsável do processo ou um administrador a pode "
+                                 "eliminar.")
     if body.confirm_job_id != job_id:
         raise HTTPException(422, "Confirmação inválida: indique o número da análise a eliminar.")
     if job.status in (JobStatus.queued, JobStatus.running):
@@ -740,7 +741,7 @@ def detection_as_reference(det_id: int, session: SessionDep, actor: ActorDep,
     if case_person_id is not None:
         person = session.get(CasePerson, case_person_id)
         if person is None or person.case_id != job.case_id:
-            raise HTTPException(422, "Pessoa inexistente neste caso.")
+            raise HTTPException(422, "Pessoa inexistente neste processo.")
     crop = read_image(det.crop_path)
     scale = 160 / min(crop.shape[:2])
     if scale > 1:  # faces pequenas de CCTV: ampliar ajuda o detetor a validá-la como referência
@@ -990,7 +991,8 @@ def delete_saved_frame(saved_frame_id: int, session: SessionDep, user: CurrentUs
     if sf is None:
         raise HTTPException(404, "Frame não encontrado.")
     if sf.created_by != user.username and not can_manage_case(session, user, sf.case_id):
-        raise HTTPException(403, "Só quem guardou o frame, o responsável do caso ou um administrador o pode retirar.")
+        raise HTTPException(403, "Só quem guardou o frame, o responsável do processo ou um administrador o pode "
+                                 "retirar.")
     details = {"saved_frame_id": sf.id, "job_id": sf.job_id, "video_id": sf.video_id, "frame_index": sf.frame_index,
                "sha256": sf.sha256, "note": sf.note, "created_by": sf.created_by}
     Path(sf.stored_path).unlink(missing_ok=True)
@@ -1010,7 +1012,7 @@ def case_validated_frames(case_id: int, session: SessionDep, actor: ActorDep, de
         selection = (_id_set(detection_ids, "detection_ids"), _id_set(frame_ids, "frame_ids"))
     jobs = list(session.exec(select(Job).where(Job.case_id == case_id).order_by(Job.id)))
     return validated_zip_response(session, jobs, case_id=case_id, actor=actor,
-                                  scope=f"caso {case_id}" + (" (seleção)" if selection else ""),
+                                  scope=f"processo {case_id}" + (" (seleção)" if selection else ""),
                                   filename=f"faceai_caso{case_id}_frames_validados", selection=selection)
 
 

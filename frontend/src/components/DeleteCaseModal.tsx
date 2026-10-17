@@ -38,17 +38,17 @@ export default function DeleteCaseModal({ kase, onClose, onDeleted }: Props) {
     setBusy(true);
     try {
       await api.deleteCase(kase.id, reason.trim());
-      notifyOk(`O caso #${kase.id} foi eliminado. O registo fica na auditoria (audit.jsonl).`);
+      notifyOk(`O processo #${kase.id} foi eliminado. O registo fica na auditoria (audit.jsonl).`);
       onDeleted(kase);
     } catch (e) {
-      notifyError(e, "Não foi possível eliminar o caso");
+      notifyError(e, "Não foi possível eliminar o processo");
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <Modal opened={kase != null} onClose={onClose} title={kase ? `Eliminar o caso #${kase.id} — ${kase.name}?` : ""} size="lg">
+    <Modal opened={kase != null} onClose={onClose} title={kase ? `Eliminar o processo #${kase.id} — ${kase.name}?` : ""} size="lg">
       {kase && (
         <Stack>
           <Alert color="red" icon={<IconAlertTriangle size={18} />}>
@@ -66,21 +66,21 @@ export default function DeleteCaseModal({ kase, onClose, onDeleted }: Props) {
               <List.Item>os uploads por concluir.</List.Item>
             </List>
             <Text size="sm" mt={4}>
-              Guarde antes os relatórios/pacotes ZIP de que precise. A auditoria mantém o histórico do caso e regista a
+              Guarde antes os relatórios/pacotes ZIP de que precise. A auditoria mantém o histórico do processo e regista a
               eliminação (quem, quando, motivo e ficheiros apagados).
             </Text>
           </Alert>
           {counts?.running ? (
-            <Alert color="orange">Há {counts.running} análise(s) a decorrer neste caso. Cancele-as antes de eliminar o caso.</Alert>
+            <Alert color="orange">Há {counts.running} análise(s) a decorrer neste processo. Cancele-as antes de eliminar o processo.</Alert>
           ) : null}
           <Textarea label="Motivo (fica registado na auditoria)" autosize minRows={2} value={reason}
-            placeholder="Ex.: processo arquivado, caso de teste…" onChange={(e) => setReason(e.currentTarget.value)} />
-          <TextInput label={`Para confirmar, escreva o número do caso: ${kase.id}`} value={typed} data-autofocus
+            placeholder="Ex.: processo arquivado, processo de teste, importação errada…" onChange={(e) => setReason(e.currentTarget.value)} />
+          <TextInput label={`Para confirmar, escreva o número do processo: ${kase.id}`} value={typed} data-autofocus
             onChange={(e) => setTyped(e.currentTarget.value)} onKeyDown={(e) => e.key === "Enter" && remove()} />
           <Group justify="flex-end">
             <Button variant="default" onClick={onClose}>Cancelar</Button>
             <Button color="red" leftSection={<IconTrash size={16} />} disabled={!confirmed} loading={busy} onClick={remove}>
-              Eliminar caso definitivamente
+              Eliminar processo definitivamente
             </Button>
           </Group>
         </Stack>

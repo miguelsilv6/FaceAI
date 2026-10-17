@@ -25,7 +25,7 @@ export default function DeleteVideoModal({ video, jobs, onClose, onDeleted, loca
     setBusy(true);
     try {
       await api.deleteVideo(video.id, reason.trim());
-      notifyOk(`O vídeo "${video.filename}" foi eliminado. O registo fica na auditoria do caso.`);
+      notifyOk(`O vídeo "${video.filename}" foi eliminado. O registo fica na auditoria do processo.`);
       onDeleted();
     } catch (e) {
       notifyError(e, "Não foi possível eliminar o vídeo");

@@ -264,7 +264,7 @@ export default function Results() {
     setSavingFrame(true);
     try {
       const sf = await api.saveFrame(job.id, video.id, el.currentTime);
-      notifyOk(`Frame ${sf.frame_index} (${formatTime(sf.timestamp_s)}) guardado no separador Resultados do caso.`);
+      notifyOk(`Frame ${sf.frame_index} (${formatTime(sf.timestamp_s)}) guardado no separador Resultados do processo.`);
     } catch (e) {
       notifyError(e, "Não foi possível guardar o frame");
     } finally {
@@ -403,8 +403,8 @@ export default function Results() {
   return (
     <Stack maw={1400} mx="auto">
       <Breadcrumbs>
-        <Anchor component={Link} to="/">Casos</Anchor>
-        <Anchor component={Link} to={`/cases/${job.case_id}`}>Caso #{job.case_id}</Anchor>
+        <Anchor component={Link} to="/">Processos</Anchor>
+        <Anchor component={Link} to={`/cases/${job.case_id}`}>Processo #{job.case_id}</Anchor>
         <Text>Análise #{job.id}</Text>
       </Breadcrumbs>
 
@@ -562,7 +562,7 @@ export default function Results() {
                   currentTime={currentTime} onSeek={seek} />
                 {!converting && (
                   <Group justify="space-between" wrap="wrap" gap="xs">
-                    <Tooltip label="Guarda o frame original (sem marcações) neste instante; fica no separador Resultados do caso como imagem validada">
+                    <Tooltip label="Guarda o frame original (sem marcações) neste instante; fica no separador Resultados do processo como imagem validada">
                       <Button size="xs" variant="light" leftSection={<IconDeviceFloppy size={14} />} loading={savingFrame}
                         onClick={saveFrame}>Guardar frame</Button>
                     </Tooltip>
