@@ -1,4 +1,4 @@
-import type { Location, Video } from "./types";
+import type { Job, Location, Video } from "./types";
 
 /** Nome da câmara (por omissão, o nome do ficheiro). */
 export function cameraName(v: Pick<Video, "camera_name" | "filename">): string {
@@ -21,4 +21,11 @@ export function groupByLocation<V extends Pick<Video, "location_id">>(videos: V[
   const orphans = videos.filter((v) => !locations.some((l) => l.id === v.location_id));
   if (orphans.length) groups.push({ location: null, videos: orphans });
   return groups;
+}
+
+/** Locais de uma análise (nome atual; análises antigas sem registo de locais → vazio). */
+export function jobLocations(j: Job, locations: Pick<Location, "id" | "name">[]): string {
+  return (j.params.locations ?? [])
+    .map((l) => locations.find((x) => x.id === l.id)?.name ?? l.name)
+    .filter(Boolean).join(", ");
 }

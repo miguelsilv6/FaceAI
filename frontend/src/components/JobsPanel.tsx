@@ -8,7 +8,7 @@ import { useNavigate } from "react-router-dom";
 
 import { api, formatDate, formatEta } from "../api";
 import { notifyError, notifyOk } from "../notify";
-import { cameraName } from "../places";
+import { cameraName, jobLocations } from "../places";
 import type { CasePerson, Job, JobMode, JobParams, Location, ReferenceImage, SystemInfo, Video } from "../types";
 import DeleteJobModal from "./DeleteJobModal";
 import JobStatusBadge from "./JobStatusBadge";
@@ -404,11 +404,4 @@ function personsCount(choices: RefChoice[]): string {
   const r = choices.length - p;
   const parts = [p ? `${p} pessoa${p === 1 ? "" : "s"}` : "", r ? `${r} foto${r === 1 ? "" : "s"}` : ""].filter(Boolean);
   return parts.join(" + ") || "0 pessoas";
-}
-
-/** Locais de uma análise (nome atual; análises antigas sem registo de locais → vazio). */
-function jobLocations(j: Job, locations: Location[]): string {
-  return (j.params.locations ?? [])
-    .map((l) => locations.find((x) => x.id === l.id)?.name ?? l.name)
-    .filter(Boolean).join(", ");
 }
