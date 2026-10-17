@@ -24,18 +24,24 @@ def client(tmp_path, monkeypatch):
     importlib.reload(app.config)
     app.db.settings = app.config.settings
     app.db._engine = None
-    from app.services import audit, backup, clock_auto, disk, face_engine, jobs, reports, transcode
+    from app.services import audit, backup, clock_auto, disk, face_engine, jobs, relocate, reports, transcode
 
     monkeypatch.setattr(transcode, "ffmpeg_available", lambda: False)
 
-    for mod in (audit, backup, clock_auto, disk, jobs, reports):
+    for mod in (audit, backup, clock_auto, disk, jobs, relocate, reports):
         mod.settings = app.config.settings
     import app.api.cases as cases_api
     import app.api.deps as deps
+    import app.api.health as health_api
+    import app.api.jobs as jobs_api
+    import app.api.uploads as uploads_api
     import app.main
     from app.services import auth
 
     cases_api.settings = app.config.settings
+    jobs_api.settings = app.config.settings
+    uploads_api.settings = app.config.settings
+    health_api.settings = app.config.settings
     app.main.settings = app.config.settings
     deps.settings = app.config.settings
     auth.settings = app.config.settings

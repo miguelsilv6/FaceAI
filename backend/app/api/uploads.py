@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import logging
 import threading
+import time
 import uuid
 from datetime import timedelta
 from pathlib import Path
@@ -110,7 +111,33 @@ def cleanup_stale_uploads() -> int:
                 s.delete(u)
                 removed += 1
         s.commit()
+        # Ficheiros .part sem registo (ex.: registo apagado com o processo enquanto o envio decorria), com mais
+        # de um dia: ninguém os pode retomar.
+        known = {Path(p).name for p in s.exec(select(Upload.temp_path))}
+    tmp_dir = settings.data_dir / "uploads"
+    if tmp_dir.is_dir():
+        old = time.time() - 86400
+        for part in tmp_dir.glob("*.part"):
+            try:
+                if part.name not in known and part.stat().st_mtime < old:
+                    part.unlink()
+                    removed += 1
+            except OSError:
+                continue
     return removed
+
+
+def start_periodic_cleanup(interval_s: float = 6 * 3600) -> None:
+    """Repete a limpeza dos uploads abandonados a cada 6 h (não só no arranque)."""
+    def loop() -> None:
+        while True:
+            time.sleep(interval_s)
+            try:
+                cleanup_stale_uploads()
+            except Exception:  # pragma: no cover
+                log.exception("Limpeza periódica dos uploads falhou")
+
+    threading.Thread(target=loop, name="faceai-upload-cleanup", daemon=True).start()
 
 
 def _status(u: Upload) -> dict:

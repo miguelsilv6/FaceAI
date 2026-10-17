@@ -144,6 +144,7 @@ class Job(SQLModel, table=True):
     # Resultados incompletos: a análise foi interrompida a meio (servidor desligado ou reiniciado). Os resultados
     # parciais são apagados quando a análise volta a correr (ver services/jobs.reset_results).
     partial: bool = False
+    cancel_requested: bool = False  # pedido de cancelamento feito por outro processo do servidor
     created_by: str = ""
     created_at: datetime = Field(default_factory=utcnow)
     started_at: datetime | None = None

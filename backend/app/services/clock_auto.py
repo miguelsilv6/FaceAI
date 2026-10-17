@@ -44,12 +44,17 @@ def request_auto_clock(s: Session, video: Video) -> None:
 
 
 def resume_pending_auto_clock() -> None:
-    """No arranque: retoma as leituras que ficaram por fazer."""
-    if not settings.auto_clock_ocr:
-        return
+    """No arranque: retoma as leituras que ficaram por fazer. Com o OCR automático desligado entretanto, as que
+    estavam pendentes passam a "indisponível" (senão ficavam "pendentes" para sempre e a interface a atualizar)."""
     with Session(get_engine()) as s:
         for video in s.exec(select(Video).where(Video.clock_auto_status.in_([PENDING, RUNNING]))):
-            _enqueue(video.id)
+            if settings.auto_clock_ocr:
+                _enqueue(video.id)
+            else:
+                video.clock_auto_status = UNAVAILABLE
+                video.clock_auto_message = "Leitura automática da hora desligada (FACEAI_AUTO_CLOCK_OCR=0)."
+                s.add(video)
+        s.commit()
 
 
 def process(video_id: int) -> None:
