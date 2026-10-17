@@ -173,7 +173,7 @@ function RefThumb({ reference: r, persons, onMove, onSearch, onDelete }: {
       e.dataTransfer.effectAllowed = "move";
     }} style={{ cursor: "grab" }}>
       <Card.Section>
-        <Image src={api.referenceImageUrl(r.id, !!r.face_crop_path)} h={110} fit="cover" alt={r.filename} draggable={false} />
+        <Image loading="lazy" decoding="async" src={api.referenceImageUrl(r.id, !!r.face_crop_path)} h={110} fit="cover" alt={r.filename} draggable={false} />
       </Card.Section>
       <Group justify="space-between" mt={4} gap={2} wrap="nowrap">
         <Tooltip label={r.message || r.filename} multiline w={240}>

@@ -304,7 +304,8 @@ export const api = {
   saveFrame: (jobId: number, videoId: number, t: number, note = "") =>
     request<{ id: number; frame_index: number; timestamp_s: number }>("POST", `/api/jobs/${jobId}/saved-frames`,
       { video_id: videoId, t, note }),
-  savedFrameUrl: (id: number, download = false) => `/api/saved-frames/${id}/image${download ? "?download=1" : ""}`,
+  savedFrameUrl: (id: number, download = false, thumbWidth?: 160 | 360) =>
+    `/api/saved-frames/${id}/image${download ? "?download=1" : thumbWidth ? `?w=${thumbWidth}` : ""}`,
   deleteSavedFrame: (id: number) => request<void>("DELETE", `/api/saved-frames/${id}`),
   validatedItems: (caseId: number) => request<ValidatedItem[]>("GET", `/api/cases/${caseId}/frames/validated/items`),
   case: (id: number) => request<Case>("GET", `/api/cases/${id}`),
@@ -377,7 +378,8 @@ export const api = {
     request<void>("DELETE", `/api/videos/${id}`, { confirm_video_id: id, reason }),
   deleteJob: (id: number, reason: string) =>
     request<void>("DELETE", `/api/jobs/${id}`, { confirm_job_id: id, reason }),
-  detections: (jobId: number) => request<Detection[]>("GET", `/api/jobs/${jobId}/detections`),
+  detections: (jobId: number, afterId?: number) => request<Detection[]>("GET",
+    `/api/jobs/${jobId}/detections${afterId != null ? `?after_id=${afterId}` : ""}`),
   segments: (jobId: number, personId?: number | null) => request<Segment[]>("GET",
     `/api/jobs/${jobId}/segments${personId != null ? `?person_id=${personId}` : ""}`),
   tracks: (jobId: number) => request<Track[]>("GET", `/api/jobs/${jobId}/tracks`),

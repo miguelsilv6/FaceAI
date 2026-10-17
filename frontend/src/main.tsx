@@ -2,21 +2,24 @@ import "@mantine/core/styles.css";
 import "@mantine/dropzone/styles.css";
 import "@mantine/notifications/styles.css";
 
-import { MantineProvider, createTheme } from "@mantine/core";
+import { Center, Loader, MantineProvider, createTheme } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
-import { StrictMode } from "react";
+import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 
 import { AuthGate } from "./auth";
 import ErrorBoundary from "./components/ErrorBoundary";
 import Layout from "./components/Layout";
-import Account from "./pages/Account";
 import CaseList from "./pages/CaseList";
-import CaseView from "./pages/CaseView";
-import LocationView from "./pages/LocationView";
-import Results from "./pages/Results";
-import Users from "./pages/Users";
+
+// Páginas carregadas a pedido: a lista de processos (página inicial) abre sem descarregar o resto da aplicação.
+const Account = lazy(() => import("./pages/Account"));
+const CaseView = lazy(() => import("./pages/CaseView"));
+const LocationView = lazy(() => import("./pages/LocationView"));
+const Results = lazy(() => import("./pages/Results"));
+const Users = lazy(() => import("./pages/Users"));
+const loading = <Center mih={200}><Loader size="sm" /></Center>;
 
 /** Outra análise (ou outro instante pedido no URL) = página nova: o estado de Results é lido ao montar. */
 function ResultsRoute() {
@@ -35,6 +38,7 @@ createRoot(document.getElementById("root")!).render(
         <Notifications position="top-right" />
         <ErrorBoundary>
           <AuthGate>
+            <Suspense fallback={loading}>
             <Routes>
               <Route element={<Layout />}>
                 <Route index element={<CaseList />} />
@@ -45,6 +49,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="users" element={<Users />} />
               </Route>
             </Routes>
+            </Suspense>
           </AuthGate>
         </ErrorBoundary>
       </BrowserRouter>

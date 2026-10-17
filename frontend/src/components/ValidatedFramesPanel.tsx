@@ -21,6 +21,12 @@ function imageUrl(i: ValidatedItem, variant: "annotated" | "original" = "annotat
   return i.type === "saved_frame" ? api.savedFrameUrl(i.saved_frame_id!) : api.detectionFrameUrl(i.detection_id!, variant);
 }
 
+/** Miniatura JPEG reduzida para a grelha (o visualizador e os downloads usam o ficheiro completo). */
+function thumbUrl(i: ValidatedItem) {
+  return i.type === "saved_frame" ? api.savedFrameUrl(i.saved_frame_id!, false, 360)
+    : `${api.detectionImageUrl(i.detection_id!, "frame")}?w=360`;
+}
+
 function downloadUrl(i: ValidatedItem) {
   return i.type === "saved_frame" ? api.savedFrameUrl(i.saved_frame_id!, true)
     : api.detectionFrameUrl(i.detection_id!, "original", true);
@@ -70,7 +76,7 @@ function PhotoViewer({ items, index, onIndex, onClose }: {
           </Group>
         </Group>
         <Box style={{ position: "relative", background: "#000", borderRadius: 6 }}>
-          <Image src={imageUrl(item, variant)} fit="contain" mah="72vh" alt={`Frame de ${title(item)}`} />
+          <Image loading="lazy" decoding="async" src={imageUrl(item, variant)} fit="contain" mah="72vh" alt={`Frame de ${title(item)}`} />
           {items.length > 1 && <>
             <ActionIcon variant="filled" color="dark" size="xl" radius="xl" aria-label="Foto anterior" onClick={() => go(-1)}
               style={{ position: "absolute", left: 8, top: "50%", transform: "translateY(-50%)", opacity: 0.8 }}>
@@ -216,7 +222,8 @@ export default function ValidatedFramesPanel({ caseId, jobs, locations: caseLoca
   const visible = (items ?? []).filter((i) => (loc === "all" || String(i.location_id) === loc)
     && (!person || i.person_label === person) && (!job || String(i.job_id) === job)
     && (kind === "all" || i.type === kind));
-  const chosen = visible.filter((i) => selected.includes(keyOf(i)));
+  const selectedSet = new Set(selected);
+  const chosen = visible.filter((i) => selectedSet.has(keyOf(i)));
 
   const toggle = (k: string) => setSelected((s) => (s.includes(k) ? s.filter((x) => x !== k) : [...s, k]));
   const setVisible = (on: boolean) => {
@@ -297,13 +304,13 @@ export default function ValidatedFramesPanel({ caseId, jobs, locations: caseLoca
       <SimpleGrid cols={{ base: 1, xs: 2, md: 3, xl: 4 }}>
         {visible.map((i, idx) => {
           const k = keyOf(i);
-          const on = selected.includes(k);
+          const on = selectedSet.has(k);
           const saved = i.type === "saved_frame";
           return (
             <Card key={k} withBorder padding="xs" data-testid={`validated-${k}`}
               style={{ outline: on ? "2px solid var(--mantine-color-blue-6)" : undefined }}>
               <Card.Section style={{ position: "relative", cursor: "zoom-in" }} onClick={() => setViewing(idx)}>
-                <Image src={imageUrl(i)} h={170} fit="contain" bg="black" alt={`Frame de ${title(i)}`} />
+                <Image loading="lazy" decoding="async" src={thumbUrl(i)} h={170} fit="contain" bg="black" alt={`Frame de ${title(i)}`} />
                 <Box style={{ position: "absolute", top: 8, left: 8 }} onClick={(e) => e.stopPropagation()}>
                   <Checkbox checked={on} onChange={() => toggle(k)} aria-label={`Selecionar ${k}`} />
                 </Box>

@@ -41,10 +41,10 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
       <Card.Section style={{ cursor: "pointer" }} onClick={() => onSeek(track.start_s)}>
         <Group gap={0} wrap="nowrap" grow>
           {track.best_detection_id != null && (
-            <Image src={api.detectionImageUrl(track.best_detection_id, "crop")} h={120} fit="cover" alt={`Track ${track.id}`} />
+            <Image loading="lazy" decoding="async" src={api.detectionImageUrl(track.best_detection_id, "crop")} h={120} fit="cover" alt={`Track ${track.id}`} />
           )}
           {track.reference_id != null && (
-            <Image src={api.referenceImageUrl(track.reference_id, true)} h={120} fit="cover" alt="Referência" />
+            <Image loading="lazy" decoding="async" src={api.referenceImageUrl(track.reference_id, true)} h={120} fit="cover" alt="Referência" />
           )}
         </Group>
       </Card.Section>

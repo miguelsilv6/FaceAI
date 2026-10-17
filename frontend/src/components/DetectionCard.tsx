@@ -32,9 +32,9 @@ export default function DetectionCard({ det, onSeek, onReview, onOpenFrame, real
     <Card withBorder padding="xs" style={{ opacity: det.review_status === "rejected" ? 0.55 : 1 }}>
       <Card.Section style={{ cursor: "pointer" }} onClick={() => onSeek(det)}>
         <Group gap={0} wrap="nowrap" grow>
-          <Image src={api.detectionImageUrl(det.id, "crop")} h={120} fit="cover" alt={`Deteção ${det.id}`} />
+          <Image loading="lazy" decoding="async" src={api.detectionImageUrl(det.id, "crop")} h={120} fit="cover" alt={`Deteção ${det.id}`} />
           {det.reference_id != null && (
-            <Image src={api.referenceImageUrl(det.reference_id, true)} h={120} fit="cover" alt="Referência" />
+            <Image loading="lazy" decoding="async" src={api.referenceImageUrl(det.reference_id, true)} h={120} fit="cover" alt="Referência" />
           )}
         </Group>
       </Card.Section>

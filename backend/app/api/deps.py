@@ -148,14 +148,14 @@ def _case_of(session: Session, params: dict) -> int | None:
     if "ref_id" in params:
         r = session.get(ReferenceImage, int(params["ref_id"]))
         return r.case_id if r else -1
-    if "det_id" in params:
-        d = session.get(Detection, int(params["det_id"]))
-        job = session.get(Job, d.job_id) if d else None
-        return job.case_id if job else -1
+    if "det_id" in params:  # uma só consulta (pedido frequente: cada imagem de uma grelha)
+        cid = session.exec(select(Job.case_id).join(Detection, Detection.job_id == Job.id)
+                           .where(Detection.id == int(params["det_id"]))).first()
+        return cid if cid is not None else -1
     if "track_id" in params:
-        t = session.get(Track, int(params["track_id"]))
-        job = session.get(Job, t.job_id) if t else None
-        return job.case_id if job else -1
+        cid = session.exec(select(Job.case_id).join(Track, Track.job_id == Job.id)
+                           .where(Track.id == int(params["track_id"]))).first()
+        return cid if cid is not None else -1
     if "case_person_id" in params:
         cp = session.get(CasePerson, int(params["case_person_id"]))
         return cp.case_id if cp else -1

@@ -10,6 +10,7 @@ import { api, formatBytes, formatTime, realTime } from "../api";
 import { notifyError, notifyOk } from "../notify";
 import { cameraName } from "../places";
 import type { Job, Location, Video } from "../types";
+import { usePolling } from "../usePolling";
 import ClockModal from "./ClockModal";
 import DeleteVideoModal from "./DeleteVideoModal";
 import PlaybackBadge from "./PlaybackBadge";
@@ -135,11 +136,7 @@ export default function LocationCameras({ caseId, location, videos, locations, j
   // Atualiza o estado das conversões para o browser (e da leitura da hora por OCR) enquanto decorrem.
   const converting = vs.some((v) => v.playback_status === "pending" || v.playback_status === "running"
     || v.clock_auto_status === "pending" || v.clock_auto_status === "running");
-  useEffect(() => {
-    if (!converting) return;
-    const t = setInterval(onChange, 3000);
-    return () => clearInterval(t);
-  }, [converting, onChange]);
+  usePolling(onChange, 3000, converting);
 
   const createCopy = async (v: Video) => {
     try {

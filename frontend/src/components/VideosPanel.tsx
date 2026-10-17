@@ -11,6 +11,7 @@ import { notifyError, notifyOk } from "../notify";
 import { cameraName } from "../places";
 import BulkImportModal from "./BulkImportModal";
 import type { EvidenceCheck, Location, Video } from "../types";
+import { usePolling } from "../usePolling";
 
 interface Props {
   caseId: number;
@@ -28,11 +29,7 @@ export default function VideosPanel({ caseId, videos, locations, onChange }: Pro
 
   const busy = videos.some((v) => v.playback_status === "pending" || v.playback_status === "running"
     || v.clock_auto_status === "pending" || v.clock_auto_status === "running");
-  useEffect(() => {
-    if (!busy) return;
-    const t = setInterval(onChange, 3000);
-    return () => clearInterval(t);
-  }, [busy, onChange]);
+  usePolling(onChange, 3000, busy);
 
   // Verificação de integridade (SHA-256 recalculado em segundo plano no servidor)
   const [check, setCheck] = useState<EvidenceCheck | null>(null);

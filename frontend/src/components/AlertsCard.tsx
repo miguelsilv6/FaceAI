@@ -54,13 +54,13 @@ export default function AlertsCard({ jobId, caseId, reloadKey, onShowPerson, onC
               <Group gap="xs" wrap="nowrap">
                 {a.reference_id != null && (
                   <Tooltip label={`Foto de ${a.case_person_name}`}>
-                    <Image src={api.referenceImageUrl(a.reference_id, a.reference_has_crop)} w={44} h={44} radius="sm"
+                    <Image loading="lazy" decoding="async" src={api.referenceImageUrl(a.reference_id, a.reference_has_crop)} w={44} h={44} radius="sm"
                       fit="cover" alt={a.case_person_name} />
                   </Tooltip>
                 )}
                 {a.best_detection_id != null && (
                   <Tooltip label={a.discovered_person_id != null ? `Pessoa #${a.discovered_person_id} (esta análise)` : "Melhor correspondência"}>
-                    <Image src={api.detectionImageUrl(a.best_detection_id, "crop")} w={44} h={44} radius="sm"
+                    <Image loading="lazy" decoding="async" src={api.detectionImageUrl(a.best_detection_id, "crop")} w={44} h={44} radius="sm"
                       fit="cover" alt="Face da análise" />
                   </Tooltip>
                 )}

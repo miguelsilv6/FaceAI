@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import shutil
 import uuid
 from datetime import UTC, datetime
@@ -10,8 +11,9 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse, StreamingResponse
+from sqlalchemy import String, delete, func, type_coerce, update
 from sqlmodel import select
 
 from ..config import settings
@@ -39,7 +41,7 @@ from ..schemas import (
     SavedFrameCreate,
     TrackPerson,
 )
-from ..services import disk, enhance, evidence, linking, reports, validated_frames
+from ..services import disk, enhance, evidence, linking, reports, thumbs, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.clock import real_time
@@ -234,24 +236,29 @@ def delete_job(job_id: int, body: JobDelete, session: SessionDep, user: CurrentU
         raise HTTPException(422, "Confirmação inválida: indique o número da análise a eliminar.")
     if job.status in (JobStatus.queued, JobStatus.running):
         raise HTTPException(409, "A análise ainda está a decorrer. Cancele-a primeiro.")
-    detections = list(session.exec(select(Detection).where(Detection.job_id == job_id)))
-    tracks = list(session.exec(select(Track).where(Track.job_id == job_id)))
+    # Contagens em SQL e eliminação em massa (uma análise pode ter centenas de milhares de deteções).
+    n_detections = session.exec(select(func.count()).select_from(Detection).where(Detection.job_id == job_id)).one()
+    n_reviewed = session.exec(select(func.count()).select_from(Detection).where(
+        Detection.job_id == job_id, Detection.review_status != ReviewStatus.pending)).one()
+    n_tracks = session.exec(select(func.count()).select_from(Track).where(Track.job_id == job_id)).one()
     summary = {
         "job_id": job_id, "reason": body.reason.strip(), "status": job.status.value,
         "mode": job.params.get("mode", "match"), "params": job.params, "video_ids": job.video_ids,
         "reference_ids": job.reference_ids, "created_by": job.created_by,
         "created_at": job.created_at.isoformat() if job.created_at else None,
         "finished_at": job.finished_at.isoformat() if job.finished_at else None, "message": job.message,
-        "detections": len(detections), "tracks": len(tracks), "matches": job.matches, "persons": job.persons,
-        "reviewed_detections": sum(1 for d in detections if d.review_status != ReviewStatus.pending),
+        "detections": n_detections, "tracks": n_tracks, "matches": job.matches, "persons": job.persons,
+        "reviewed_detections": n_reviewed,
     }
     saved = list(session.exec(select(SavedFrame).where(SavedFrame.job_id == job_id)))
     summary["saved_frames"] = [{"id": f.id, "sha256": f.sha256} for f in saved]
     alerts = list(session.exec(select(Alert).where(Alert.job_id == job_id)))
     summary["alerts"] = [{"id": a.id, "case_person_id": a.case_person_id, "status": a.status} for a in alerts]
     folder = job_dir(job)
-    for row in (*detections, *tracks, *saved, *alerts):
+    for row in (*saved, *alerts):
         session.delete(row)
+    session.exec(delete(Detection).where(Detection.job_id == job_id))
+    session.exec(delete(Track).where(Track.job_id == job_id))
     session.flush()
     session.delete(job)
     session.commit()
@@ -259,6 +266,36 @@ def delete_job(job_id: int, body: JobDelete, session: SessionDep, user: CurrentU
     shutil.rmtree(folder, ignore_errors=True)
     summary["files_removed"] = removed
     log_event(session, "job.deleted", case_id=job.case_id, actor=actor, details=summary)
+
+
+IMMUTABLE_CACHE = {"Cache-Control": "private, max-age=86400, immutable"}
+
+def _thumb(path: str, cache_dir: Path, width: int) -> Path:
+    try:
+        return thumbs.thumbnail(path, cache_dir, width)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+# Colunas devolvidas na lista de deteções (sem os caminhos dos ficheiros no servidor: as imagens servem-se por id).
+# "colors" vem como texto: quase sempre vazio nas faces, evita descodificar o JSON de cada linha.
+_DETECTION_LIST_COLS = [type_coerce(c, String).label(c.name) if c.name == "colors" else c
+                        for c in Detection.__table__.columns if c.name not in ("crop_path", "frame_path")]
+_DETECTION_LIST_NAMES = [c.name for c in Detection.__table__.columns if c.name not in ("crop_path", "frame_path")]
+_COLORS = _DETECTION_LIST_NAMES.index("colors")
+
+
+def _json_default(v):
+    if isinstance(v, datetime):
+        return v.isoformat()
+    raise TypeError(f"{type(v).__name__} não serializável")
+
+
+def _detection_row(row) -> dict:
+    values = list(row)
+    raw = values[_COLORS]
+    values[_COLORS] = {} if raw in (None, "", "{}", "null") else json.loads(raw)
+    return dict(zip(_DETECTION_LIST_NAMES, values, strict=True))
 
 
 @router.get("/jobs/{job_id}/detections", response_model=list[Detection])
@@ -269,9 +306,14 @@ def list_detections(
     only_matches: bool = False,
     min_similarity: float | None = None,
     kind: str | None = None,
-) -> list[Detection]:
+    after_id: int | None = Query(None, description="Só deteções com id maior (atualização incremental)"),
+    limit: int | None = Query(None, ge=1, le=200_000),
+) -> Response:
+    """Deteções da análise. Lê só as colunas necessárias (sem o ORM) e serializa diretamente: com dezenas de
+    milhares de deteções é várias vezes mais rápido. Com ``after_id`` devolve só as novas, por ordem de id (para
+    acompanhar uma análise em curso sem voltar a descarregar tudo)."""
     get_job_or_404(session, job_id)
-    q = select(Detection).where(Detection.job_id == job_id)
+    q = select(*_DETECTION_LIST_COLS).where(Detection.job_id == job_id)
     if kind is not None:
         q = q.where(Detection.kind == kind)
     if video_id is not None:
@@ -280,7 +322,16 @@ def list_detections(
         q = q.where(Detection.is_match == True)  # noqa: E712
     if min_similarity is not None:
         q = q.where(Detection.similarity >= min_similarity)
-    return list(session.exec(q.order_by(Detection.video_id, Detection.timestamp_s)))
+    if after_id is not None:
+        q = q.where(Detection.id > after_id).order_by(Detection.id)
+    else:
+        q = q.order_by(Detection.video_id, Detection.timestamp_s)
+    if limit is not None:
+        q = q.limit(limit)
+    # Core (sem a camada de carregamento do ORM): ~2× mais rápido em listas grandes.
+    rows = [_detection_row(row) for row in session.connection().execute(q)]
+    return Response(json.dumps(rows, ensure_ascii=False, separators=(",", ":"), default=_json_default),
+                    media_type="application/json")
 
 
 @router.get("/jobs/{job_id}/segments")
@@ -291,7 +342,10 @@ def list_segments(job_id: int, session: SessionDep, gap_s: float | None = None,
     if job.params.get("mode") == "discover":
         tracks_ = list(session.exec(select(Track).where(Track.job_id == job_id)))
         return person_segments(tracks_, person_id, gap)
-    dets = list(session.exec(select(Detection).where(Detection.job_id == job_id)))
+    # Só as colunas usadas nos segmentos (as linhas têm acesso por atributo, como os objetos): sem o ORM.
+    dets = list(session.exec(select(Detection.id, Detection.video_id, Detection.track_id, Detection.timestamp_s,
+                                    Detection.distance, Detection.is_match, Detection.review_status,
+                                    Detection.person_id).where(Detection.job_id == job_id)))
     tracks = {t.id: t for t in session.exec(select(Track).where(Track.job_id == job_id))}
     if len(job.params.get("persons") or []) > 1:  # várias pessoas: segmentos de cada uma, com o seu n.º
         out: list[dict] = []
@@ -414,7 +468,8 @@ def case_dashboard(case_id: int, session: SessionDep, job_ids: str | None = None
     for job in jobs:
         if (job.params or {}).get("mode") == "discover":
             discover["jobs"] += 1
-            discover["faces"] += len(list(session.exec(select(Detection.id).where(Detection.job_id == job.id))))
+            discover["faces"] += session.exec(select(func.count()).select_from(Detection)
+                                              .where(Detection.job_id == job.id)).one()
             discover["persons"] += job.persons or 0
             continue
         labels = {p["id"]: p["label"] for p in (job.params or {}).get("persons") or []}
@@ -539,15 +594,18 @@ def _person_tracks(session, job_id: int, person_id: int) -> list[Track]:
 
 
 def _review_tracks(session, tracks: list[Track], body: ReviewUpdate, actor: str) -> list[int]:
+    """Revê os tracks e todas as suas deteções (uma só atualização em massa das deteções)."""
     now = utcnow()
-    det_ids: list[int] = []
     for t in tracks:
         t.review_status, t.review_note, t.reviewed_by, t.reviewed_at = body.status, body.note, actor, now
         session.add(t)
-        for det in session.exec(select(Detection).where(Detection.track_id == t.id)):
-            det.review_status, det.review_note, det.reviewed_by, det.reviewed_at = body.status, body.note, actor, now
-            session.add(det)
-            det_ids.append(det.id)
+    track_ids = [t.id for t in tracks]
+    if not track_ids:
+        return []
+    det_ids = list(session.exec(select(Detection.id).where(Detection.track_id.in_(track_ids))))
+    session.exec(update(Detection).where(Detection.track_id.in_(track_ids))
+                 .values(review_status=body.status, review_note=body.note, reviewed_by=actor, reviewed_at=now)
+                 .execution_options(synchronize_session="fetch"))
     return det_ids
 
 
@@ -752,6 +810,8 @@ def detection_original_frame(det_id: int, session: SessionDep, actor: ActorDep, 
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     headers = {"X-FaceAI-Frame-Index": str(det.frame_index), "X-FaceAI-Extraction": method}
+    if not download:
+        headers.update(IMMUTABLE_CACHE)
     if err is not None:
         headers["X-FaceAI-Crop-Error"] = str(err)
     if download:
@@ -810,13 +870,20 @@ def detection_enhanced(det_id: int, session: SessionDep, actor: ActorDep, src: s
 
 @router.get("/detections/{det_id}/{kind}")
 def detection_image(det_id: int, kind: str, session: SessionDep, actor: ActorDep, download: bool = False,
+                    w: int | None = Query(None, description="Miniatura JPEG com esta largura (160 ou 360)"),
                     ) -> Response:
     det = session.get(Detection, det_id)
     if det is None or kind not in ("crop", "frame"):
         raise HTTPException(404, "Imagem não encontrada.")
     path = det.crop_path if kind == "crop" else det.frame_path
+    if w is not None and not download and Path(path).exists():
+        # crops/ e frames/ têm ficheiros com o mesmo nome: uma pasta de miniaturas para cada uma
+        src = Path(path)
+        return FileResponse(_thumb(path, src.parent.parent / "thumbs" / src.parent.name, w), media_type="image/jpeg",
+                            headers=IMMUTABLE_CACHE)
     if not download:
-        return FileResponse(path, media_type="image/jpeg")
+        # Os ficheiros de uma deteção nunca mudam (e os ids nunca são reutilizados): cache no browser.
+        return FileResponse(path, media_type="image/jpeg", headers=IMMUTABLE_CACHE)
     job = session.get(Job, det.job_id)
     if job is None or not Path(path).exists():
         raise HTTPException(404, "Imagem não encontrada.")
@@ -1076,12 +1143,16 @@ def save_frame(job_id: int, body: SavedFrameCreate, session: SessionDep, actor: 
 
 
 @router.get("/saved-frames/{saved_frame_id}/image")
-def saved_frame_image(saved_frame_id: int, session: SessionDep, actor: ActorDep, download: bool = False):
+def saved_frame_image(saved_frame_id: int, session: SessionDep, actor: ActorDep, download: bool = False,
+                      w: int | None = Query(None, description="Miniatura JPEG com esta largura (160 ou 360)")):
     sf = session.get(SavedFrame, saved_frame_id)
     if sf is None or not Path(sf.stored_path).exists():
         raise HTTPException(404, "Frame não encontrado.")
+    if w is not None and not download:
+        return FileResponse(_thumb(sf.stored_path, Path(sf.stored_path).parent / "thumbs", w),
+                            media_type="image/jpeg", headers=IMMUTABLE_CACHE)
     if not download:
-        return FileResponse(sf.stored_path, media_type="image/png", headers={"Cache-Control": "private, max-age=300"})
+        return FileResponse(sf.stored_path, media_type="image/png", headers=IMMUTABLE_CACHE)
     filename = f"faceai_caso{sf.case_id}_analise{sf.job_id}_frame_guardado{sf.id}.png"
     log_event(session, "frame.saved_downloaded", case_id=sf.case_id, actor=actor,
               details={"saved_frame_id": sf.id, "job_id": sf.job_id, "filename": filename, "sha256": sf.sha256})

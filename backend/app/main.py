@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 import cv2
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session
@@ -158,6 +159,8 @@ app.add_middleware(
     expose_headers=["Content-Disposition"],
 )
 app.add_middleware(SecurityMiddleware)
+# JSON (deteções, tracks, auditoria) comprime 5–10×. Respostas parciais (206), vídeo e imagens não são comprimidos.
+app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 app.include_router(auth_api.router)
 app.include_router(users.router)
 app.include_router(activity.router)
@@ -169,8 +172,18 @@ app.include_router(imports.router)
 app.include_router(clock.router)
 
 # Em produção, o build do frontend (frontend/dist) é servido pelo próprio backend.
+class ImmutableAssets(StaticFiles):
+    """Os ficheiros de /assets têm o hash do conteúdo no nome (build do Vite): podem ficar em cache para sempre."""
+
+    async def get_response(self, path: str, scope: Scope):
+        response = await super().get_response(path, scope)
+        if response.status_code == 200:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        return response
+
+
 if settings.frontend_dist.is_dir():
-    app.mount("/assets", StaticFiles(directory=settings.frontend_dist / "assets"), name="assets")
+    app.mount("/assets", ImmutableAssets(directory=settings.frontend_dist / "assets"), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str) -> FileResponse:
@@ -179,4 +192,5 @@ if settings.frontend_dist.is_dir():
         candidate = (settings.frontend_dist / full_path).resolve()
         if full_path and candidate.is_file() and settings.frontend_dist.resolve() in candidate.parents:
             return FileResponse(candidate)
-        return FileResponse(settings.frontend_dist / "index.html")
+        # index.html sempre revalidado: aponta para os assets da versão atual
+        return FileResponse(settings.frontend_dist / "index.html", headers={"Cache-Control": "no-cache"})
