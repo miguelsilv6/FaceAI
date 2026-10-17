@@ -295,24 +295,29 @@ class OnnxEngine:
 
     def detect(
         self, image_bgr: np.ndarray, *, model: str, detector: str, upscale: float = 1.0,
-        min_confidence: float | None = None,
+        min_confidence: float | None = None, prefilter=None,
     ) -> list[FaceObservation]:
         thresh = DET_THRESHOLD if min_confidence is None else max(0.05, float(min_confidence))
         dets, kps = self._detector(detector).detect(image_bgr, self._input_size(upscale), thresh)
         if len(dets) == 0 or kps is None:
             return []
-        aligned = [align_face(image_bgr, k) for k in kps]
-        embeddings = self._recognizer(model).embed(aligned)
         h, w = image_bgr.shape[:2]
-        faces = []
-        for det, k, emb in zip(dets, kps, embeddings, strict=True):
+        boxes = []
+        for det, k in zip(dets, kps, strict=True):
             x1, y1 = max(0, int(det[0])), max(0, int(det[1]))
             x2, y2 = min(w, int(round(det[2]))), min(h, int(round(det[3])))
             if x2 <= x1 or y2 <= y1:
                 continue
-            faces.append(FaceObservation(x=x1, y=y1, w=x2 - x1, h=y2 - y1, confidence=float(det[4]),
-                                         embedding=emb, landmarks=k.astype(np.float32)))
-        return faces
+            lm = k.astype(np.float32)
+            # Faces que seriam descartadas (tamanho/qualidade) não passam pelo alinhamento nem pelo ArcFace.
+            if prefilter is not None and not prefilter(x1, y1, x2 - x1, y2 - y1, lm):
+                continue
+            boxes.append((x1, y1, x2 - x1, y2 - y1, float(det[4]), k, lm))
+        if not boxes:
+            return []
+        embeddings = self._recognizer(model).embed([align_face(image_bgr, b[5]) for b in boxes])
+        return [FaceObservation(x=x, y=y, w=bw, h=bh, confidence=conf, embedding=emb, landmarks=lm)
+                for (x, y, bw, bh, conf, _, lm), emb in zip(boxes, embeddings, strict=True)]
 
     def count_faces(self, image_bgr: np.ndarray, *, detector: str, upscale: float = 1.0) -> int:
         dets, _ = self._detector(detector).detect(image_bgr, self._input_size(upscale), FAST_DET_THRESHOLD)

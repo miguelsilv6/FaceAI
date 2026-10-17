@@ -23,19 +23,34 @@ class MotionDecision:
     reason: str  # "first" | "motion" | "keyframe" | "static"
 
 
+MASK_MARGIN = 0.25  # alarga a região do relógio (fração do seu tamanho) para cobrir dígitos que variam de largura
+
+
 class MotionGate:
-    def __init__(self, threshold: float, keyframe_interval_s: float):
+    """`mask_roi` ([x, y, w, h] em frações do frame, ex.: a região da hora do DVR lida por OCR) é ignorada na
+    comparação: um relógio grande sobreposto à imagem muda a cada segundo e faria todos os frames parecer ter
+    movimento."""
+
+    def __init__(self, threshold: float, keyframe_interval_s: float, mask_roi: list[float] | None = None):
         self.threshold = threshold
         self.keyframe_interval_s = keyframe_interval_s
+        self.mask_roi = mask_roi
         self._reference: np.ndarray | None = None
         self._last_analyzed_s: float | None = None
 
-    @staticmethod
-    def _small(frame: np.ndarray) -> np.ndarray:
+    def _small(self, frame: np.ndarray) -> np.ndarray:
         h, w = frame.shape[:2]
         small = cv2.resize(frame, (WORK_WIDTH, max(1, int(h * WORK_WIDTH / w))), interpolation=cv2.INTER_AREA)
         gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY) if small.ndim == 3 else small
-        return cv2.GaussianBlur(gray, (5, 5), 0)
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        if self.mask_roi:
+            sh, sw = gray.shape[:2]
+            x, y, rw, rh = self.mask_roi
+            mx, my = rw * MASK_MARGIN, rh * MASK_MARGIN
+            x0, y0 = max(0, int((x - mx) * sw)), max(0, int((y - my) * sh))
+            x1, y1 = min(sw, int(np.ceil((x + rw + mx) * sw))), min(sh, int(np.ceil((y + rh + my) * sh)))
+            gray[y0:y1, x0:x1] = 0
+        return gray
 
     def check(self, frame: np.ndarray, timestamp_s: float) -> MotionDecision:
         small = self._small(frame)

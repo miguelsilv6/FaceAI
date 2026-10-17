@@ -33,6 +33,7 @@ class DeepFaceEngine:
     def detect(
         self, image_bgr: np.ndarray, *, model: str, detector: str, upscale: float = 1.0,
         min_confidence: float | None = None,  # o DeepFace não expõe o limiar do detetor; filtrado depois
+        prefilter=None,  # o DeepFace calcula deteção e embedding juntos: o filtro é aplicado depois, em jobs.py
     ) -> list[FaceObservation]:
         from deepface import DeepFace
 
