@@ -274,6 +274,13 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                                 f"{clothing.get('clothing_matches', 0)} aparição(ões) só pelo vestuário")
                     if clothing.get("note"):
                         summary += f" ({clothing['note']})"
+            from .alerts import compute_alerts  # import local: alerts → linking → jobs
+
+            alerts = compute_alerts(s, job, engine)
+            if alerts:
+                top = sum(1 for a in alerts if a.highlighted)
+                summary += (f"; {len(alerts)} alerta(s) de pessoas do processo"
+                            + (f" ({top} em vários locais)" if top else ""))
             job.progress = 1.0
             _finish(s, job, JobStatus.completed, (job.message + " " if job.message else "") + summary + ".")
         except JobCancelled:

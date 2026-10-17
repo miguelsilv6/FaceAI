@@ -153,7 +153,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
    - Os vídeos importam-se na **página do local** (clicar no cartão ou em "Abrir local"): os vídeos largados aí ficam nesse local. O nome do local pode ser mudado aí (✏️); um local só pode ser eliminado quando estiver vazio.
    - Cada vídeo tem um **nome** editável na tabela (por omissão, o nome do ficheiro). Em toda a aplicação (resultados, percurso, painel, relatórios, CSV/JSON e ZIP de frames) o vídeo é identificado como **"Local · Vídeo"**, e o nome do ficheiro original continua visível.
    - O menu ⋯ de cada vídeo permite **movê-lo para outro local** ou eliminá-lo. As mudanças ficam na auditoria (`location.*`, `video.updated`).
-   - **Vídeos duplicados:** o mesmo ficheiro (mesmo conteúdo, qualquer nome ou local) não pode ser importado duas vezes no mesmo processo. Antes de enviar, o browser calcula uma impressão rápida (SHA-256 do tamanho, do 1.º e do último MiB) e o servidor recusa logo se o vídeo já existir; no fim do envio, o **SHA-256** completo confirma. O aviso indica o vídeo existente ("Local · Vídeo (#id)") e a recusa fica na auditoria (`video.duplicate_rejected`). Noutro processo, o mesmo ficheiro é aceite.
+   - **Vídeos duplicados:** o mesmo ficheiro (mesmo conteúdo, qualquer nome ou local) não pode ser importado duas vezes no mesmo processo. Antes de enviar, o browser calcula uma impressão rápida (SHA-256 do tamanho, do 1.º e do último MiB) e o servidor recusa logo se o vídeo já existir; no fim do envio, o **SHA-256** completo confirma. Ao importar **vários vídeos** de uma vez, todos são validados primeiro (`POST /cases/{id}/videos/check`) e só se enviam os que ainda não existem; os repetidos dentro do próprio lote também são detetados. O aviso indica o vídeo existente ("Local · Vídeo (#id)") e a recusa fica na auditoria (`video.duplicate_rejected`). Noutro processo, o mesmo ficheiro é aceite.
    - Cada vídeo fica com o seu **SHA-256** (auditoria `video.uploaded`, relatório e JSON). Os vídeos de versões anteriores recebem-no em segundo plano no arranque.
    - Os processos de versões anteriores ganham, no arranque, um local **"Geral"** com todos os vídeos existentes. Os vídeos importados sem local (API antiga) também vão para o "Geral".
 
@@ -270,6 +270,26 @@ Quando não há nenhuma fotografia da pessoa (por exemplo, para saber *quem* pas
 Os embeddings dos tracks ficam em `jobs/job_NNNNN/track_embeddings.npz`. O relatório, o CSV (`person_id`) e o JSON (`persons`, com as aparições e a hora real) incluem as pessoas.
 
 > O agrupamento é uma ferramenta de **triagem**. A mesma pessoa pode surgir em mais de um grupo (ângulos, iluminação, oclusões) e pessoas parecidas podem ficar juntas. Um limiar mais baixo separa mais.
+
+### Alertas: pessoas do processo em vários locais
+
+Em *Nova análise*, a opção **Alertar se aparecerem pessoas do processo** está ligada por omissão quando há pessoas com fotos válidas. Pode escolher **Destacar a partir de N locais** (por omissão 2) e, na descoberta, as **pessoas a vigiar** (por omissão, todas).
+
+- **Modo descoberta:** no fim, cada pessoa descoberta é comparada com as fotos de cada pessoa do processo. Usa o mesmo modelo e detetor da análise e conta a menor de duas distâncias: ao centro da pessoa e à média dos 3 tracks mais próximos. O limiar é o de **correspondência do modelo**, não o de agrupamento. Abaixo dele, cria-se um alerta "Pessoa A pode ser a Pessoa #3".
+- **Modo procurar:** cria-se um alerta quando uma pessoa do processo tem correspondências em ≥ N locais.
+- Um alerta é **destacado** quando a pessoa aparece em ≥ N locais. Indica os locais, o n.º de aparições e a hora real da primeira e da última.
+- **Onde aparecem:**
+  - numa notificação, quando a análise termina;
+  - no cartão **Alertas** no topo dos resultados, com a foto da pessoa do processo ao lado da melhor face da análise;
+  - no *Painel* do processo, em "Alertas por rever";
+  - num badge na lista de processos;
+  - numa secção do relatório.
+- **Revisão:**
+  - **Confirmar** confirma todos os tracks da pessoa descoberta;
+  - também se pode **descartar** ou **reabrir**;
+  - tudo fica na auditoria (`alert.created`, `alert.confirmed`, `alert.dismissed`, `alert.reopened`).
+
+> Um alerta é um **indício para revisão**, não uma identificação.
 
 ### Complemento por vestuário (re-identificação pelo corpo)
 

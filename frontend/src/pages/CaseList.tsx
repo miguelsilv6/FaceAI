@@ -1,6 +1,6 @@
-import { ActionIcon, Button, Card, Group, Modal, Stack, Table, Text, TextInput, Textarea, Title, Tooltip } from "@mantine/core";
+import { ActionIcon, Badge, Button, Card, Group, Modal, Stack, Table, Text, TextInput, Textarea, Title, Tooltip } from "@mantine/core";
 import { useDisclosure } from "@mantine/hooks";
-import { IconFolderPlus, IconTrash } from "@tabler/icons-react";
+import { IconBellRinging, IconFolderPlus, IconTrash } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -52,7 +52,15 @@ export default function CaseList() {
                 {cases.map((c) => (
                   <Table.Tr key={c.id} style={{ cursor: "pointer" }} onClick={() => navigate(`/cases/${c.id}`)}>
                     <Table.Td>{c.id}</Table.Td>
-                    <Table.Td fw={600}>{c.name}</Table.Td>
+                    <Table.Td fw={600}>
+                      <Group gap="xs" wrap="nowrap">{c.name}
+                        {!!c.alerts_new && (
+                          <Tooltip label="Alertas de pessoas do processo por rever">
+                            <Badge size="sm" color="orange" leftSection={<IconBellRinging size={10} />}>{c.alerts_new}</Badge>
+                          </Tooltip>
+                        )}
+                      </Group>
+                    </Table.Td>
                     <Table.Td>{c.description}</Table.Td>
                     <Table.Td>{c.analyst}</Table.Td>
                     <Table.Td>{formatDate(c.created_at)}</Table.Td>

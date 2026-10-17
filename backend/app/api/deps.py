@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 from ..config import settings
 from ..db import get_session
 from ..models import (
+    Alert,
     Case,
     CaseMember,
     CasePerson,
@@ -161,6 +162,9 @@ def _case_of(session: Session, params: dict) -> int | None:
     if "location_id" in params:
         loc = session.get(Location, int(params["location_id"]))
         return loc.case_id if loc else -1
+    if "alert_id" in params:
+        al = session.get(Alert, int(params["alert_id"]))
+        return al.case_id if al else -1
     if "saved_frame_id" in params:
         sf = session.get(SavedFrame, int(params["saved_frame_id"]))
         return sf.case_id if sf else -1

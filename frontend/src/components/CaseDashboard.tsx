@@ -2,14 +2,14 @@ import {
   Alert, Anchor, Badge, Box, Button, Card, Group, Loader, MultiSelect, Paper, Progress, SimpleGrid, Stack, Table, Text,
   Title, Tooltip,
 } from "@mantine/core";
-import { IconCheck, IconClock, IconX } from "@tabler/icons-react";
+import { IconBellRinging, IconCheck, IconClock, IconMapPin, IconX } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
 import { api, formatBytes, formatDate, formatDuration, formatTime } from "../api";
 import { notifyError } from "../notify";
 import { personColor } from "../personColors";
-import type { CaseDashboard as Dashboard, Job } from "../types";
+import type { CaseDashboard as Dashboard, Job, PersonAlert } from "../types";
 
 // Estado da revisão: cores de estado reservadas, sempre acompanhadas de ícone e texto (nunca só a cor).
 const STATUS = {
@@ -123,6 +123,8 @@ const ACTIONS: Record<string, string> = {
   "video.playback_copy_ready": "cópia de reprodução pronta", "video.clock_ocr_failed": "OCR da hora sem resultado",
   "case.created": "processo criado", "case.updated": "processo alterado", "person.linked_search": "pesquisa noutras análises",
   "frames.validated_downloaded": "frames validados descarregados",
+  "alert.created": "alerta criado", "alert.confirmed": "alerta confirmado", "alert.dismissed": "alerta descartado",
+  "alert.reopened": "alerta reaberto",
 };
 
 /** Painel do caso: material, análises, progresso da revisão, correspondências por câmara, hora e pessoa. */
@@ -135,8 +137,11 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
   const [data, setData] = useState<Dashboard | null>(null);
   const jobsKey = jobs.map((j) => `${j.id}:${j.status}`).join(",");
 
+  const [alerts, setAlerts] = useState<PersonAlert[]>([]);
+
   useEffect(() => {
     api.caseDashboard(caseId, jobIds.map(Number)).then(setData).catch(notifyError);
+    api.caseAlerts(caseId, "new").then(setAlerts).catch(() => setAlerts([]));
   }, [caseId, jobIds, jobsKey]);
 
   if (!data) return <Loader size="sm" />;
@@ -174,6 +179,31 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
           sub={`${r.tracks} track(s)${r.clothing ? ` · ${r.clothing} só pelo vestuário` : ""}`} />
         <Kpi label="Revisão" value={`${pct}%`} sub={`${reviewed} de ${r.matches} deteções revistas`} />
       </SimpleGrid>
+
+      {alerts.length > 0 && (
+        <Card withBorder style={{ borderColor: "var(--mantine-color-orange-5)" }}>
+          <Group gap="xs" mb="xs">
+            <IconBellRinging size={18} color="var(--mantine-color-orange-6)" />
+            <Text fw={600}>Alertas por rever ({alerts.length}
+              {data.alerts?.new_highlighted ? `, ${data.alerts.new_highlighted} em vários locais` : ""})</Text>
+          </Group>
+          <Stack gap={4}>
+            {alerts.slice(0, 8).map((a) => (
+              <Group key={a.id} gap="xs" wrap="nowrap" style={{ cursor: "pointer" }} onClick={() => navigate(`/jobs/${a.job_id}`)}>
+                <Text size="sm" fw={600}>{a.case_person_name}</Text>
+                <Text size="sm" c="dimmed">
+                  {a.discovered_person_id != null ? `pode ser a Pessoa #${a.discovered_person_id}` : "correspondências"}
+                  {" "}· análise #{a.job_id} · {(a.similarity * 100).toFixed(0)}%
+                </Text>
+                {a.highlighted && <Badge size="xs" color="red" leftSection={<IconMapPin size={9} />}>
+                  {a.location_ids.length} locais</Badge>}
+                <Text size="xs" c="dimmed" lineClamp={1}>{a.location_names.join(" · ")}</Text>
+              </Group>
+            ))}
+            {alerts.length > 8 && <Text size="xs" c="dimmed">… e mais {alerts.length - 8}.</Text>}
+          </Stack>
+        </Card>
+      )}
 
       {!completed.length ? (
         <Alert color="blue">Ainda não há análises concluídas neste processo.</Alert>

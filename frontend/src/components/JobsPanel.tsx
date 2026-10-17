@@ -1,8 +1,8 @@
 import {
-  Accordion, ActionIcon, Alert, Badge, Button, Card, Checkbox, Chip, Group, Input, NumberInput, Progress, SegmentedControl, Select, SimpleGrid, Stack,
+  Accordion, ActionIcon, Alert, Badge, Button, Card, Checkbox, Chip, Group, Input, MultiSelect, NumberInput, Progress, SegmentedControl, Select, SimpleGrid, Stack,
   Menu, Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconDownload, IconInfoCircle, IconMapPin, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
+import { IconBellRinging, IconDownload, IconInfoCircle, IconMapPin, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -76,6 +76,9 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
     if (!modeTouched) setParams((p) => (p ? { ...p, mode: validRefs.length ? "match" : "discover" } : p));
   }, [validRefs, modeTouched, system]);
   const discover = params?.mode === "discover";
+  // Pessoas do processo com fotos válidas: só estas podem gerar alertas.
+  const watchable = useMemo(() => persons.filter((p) => validRefs.some((r) => r.case_person_id === p.id)),
+    [persons, validRefs]);
 
   // Atualiza a lista enquanto houver análises a decorrer.
   const active = jobs.some((j) => j.status === "running" || j.status === "queued");
@@ -178,6 +181,30 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                   placeholder={validRefs.length ? "Selecione as referências" : "Sem amostras válidas — use o modo de descoberta"} />
               )}
             </SimpleGrid>
+            <Card withBorder padding="sm" bg="var(--mantine-color-default-hover)">
+              <Group gap="md" align="flex-end" wrap="wrap">
+                <Switch label={discover ? "Alertar se aparecerem pessoas do processo"
+                  : "Alertar se uma pessoa aparecer em vários locais"} miw={260} style={{ flex: 1 }}
+                  thumbIcon={<IconBellRinging size={10} />}
+                  description={!watchable.length ? "Sem pessoas do processo com fotos válidas"
+                    : discover ? "No fim, compara as pessoas descobertas com as fotos das pessoas do processo"
+                      : "No fim, cria um alerta destacado para cada pessoa com correspondências em vários locais"}
+                  disabled={!watchable.length} checked={!!watchable.length && params.watch_persons !== false}
+                  onChange={(e) => set("watch_persons", e.currentTarget.checked)} />
+                {!!watchable.length && params.watch_persons !== false && (
+                  <>
+                    <NumberInput label="Destacar a partir de N locais" w={200} min={1} max={50}
+                      value={params.alert_min_locations ?? 2} onChange={(v) => set("alert_min_locations", num(v, 2))} />
+                    {discover && (
+                      <MultiSelect label="Pessoas a vigiar" placeholder={params.watch_person_ids?.length ? undefined : "Todas"}
+                        w={320} clearable searchable data={watchable.map((p) => ({ value: String(p.id), label: p.name }))}
+                        value={(params.watch_person_ids ?? []).map(String)}
+                        onChange={(v) => set("watch_person_ids", v.length ? v.map(Number) : null)} />
+                    )}
+                  </>
+                )}
+              </Group>
+            </Card>
             <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }}>
               <Select label="Modelo de reconhecimento" value={params.model} allowDeselect={false}
                 data={system.models.map((m) => ({ value: m.name, label: m.description ? `${m.name} — ${m.description}` : m.name }))}

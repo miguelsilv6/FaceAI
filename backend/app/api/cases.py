@@ -12,6 +12,7 @@ from sqlmodel import select
 
 from ..config import settings
 from ..models import (
+    Alert,
     AuditEvent,
     Case,
     CaseMember,
@@ -37,6 +38,7 @@ from ..schemas import (
     LocationCreate,
     MemberAdd,
     ReferenceUpdate,
+    VideoCheck,
     VideoDelete,
     VideoUpdate,
 )
@@ -202,7 +204,13 @@ def list_cases(session: SessionDep, user: CurrentUser) -> list[CaseOut]:
     q = select(Case).order_by(Case.id.desc())
     if allowed is not None:
         q = q.where(Case.id.in_(allowed or [-1]))
-    return [CaseOut(**c.model_dump(), size_bytes=disk.case_size(session, c.id)) for c in session.exec(q)]
+    cases = list(session.exec(q))
+    new_alerts: dict[int, int] = {}
+    ids = [c.id for c in cases] or [-1]
+    for cid in session.exec(select(Alert.case_id).where(Alert.status == "new", Alert.case_id.in_(ids))):
+        new_alerts[cid] = new_alerts.get(cid, 0) + 1
+    return [CaseOut(**c.model_dump(), size_bytes=disk.case_size(session, c.id), alerts_new=new_alerts.get(c.id, 0))
+            for c in cases]
 
 
 @router.get("/cases/{case_id}", response_model=Case)
@@ -276,6 +284,7 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
     locations = list(session.exec(select(Location).where(Location.case_id == case_id)))
     summary["locations"] = [loc.name for loc in locations]
     saved = list(session.exec(select(SavedFrame).where(SavedFrame.case_id == case_id)))
+    saved += list(session.exec(select(Alert).where(Alert.case_id == case_id)))
     summary["saved_frames"] = len(saved)
     for rows in (detections, tracks, saved, jobs, uploads, refs, persons, videos, locations, members):
         for row in rows:
@@ -515,10 +524,15 @@ def delete_case_person(case_person_id: int, session: SessionDep, actor: ActorDep
     for r in refs:
         r.case_person_id = None
         session.add(r)
+    alerts = session.exec(select(Alert).where(Alert.case_person_id == p.id)).all()
+    for al in alerts:
+        session.delete(al)
+    session.flush()
     session.delete(p)
     session.commit()
     log_event(session, "person.deleted", case_id=p.case_id, actor=actor,
-              details={"case_person_id": case_person_id, "name": p.name, "references_released": [r.id for r in refs]})
+              details={"case_person_id": case_person_id, "name": p.name, "references_released": [r.id for r in refs],
+                       "alerts_removed": [al.id for al in alerts]})
 
 
 @router.delete("/references/{ref_id}", status_code=204)
@@ -547,6 +561,29 @@ def upload_videos(case_id: int, files: list[UploadFile], session: SessionDep, ac
         created.append(register_video(session, case_id, path, Path(upload.filename or "").name, size, actor,
                                       location_id))
     return created
+
+
+@router.post("/cases/{case_id}/videos/check")
+def check_videos(case_id: int, body: VideoCheck, session: SessionDep) -> list[dict]:
+    """Antes de importar vários vídeos: para cada ficheiro (tamanho + impressão rápida), indica se já existe no
+    processo ou se repete outro ficheiro do mesmo lote. Só lê; a confirmação final é o SHA-256 na conclusão."""
+    get_case_or_404(session, case_id)
+    locs = locations_by_id(session, case_id)
+    seen: dict[tuple[str, int], str] = {}
+    out = []
+    for f in body.files:
+        existing = find_duplicate(session, case_id, quick=f.quick_hash, size=f.size)
+        if existing is not None:
+            label = video_place(existing, locs)["camera_label"]
+            out.append({"name": f.name, "duplicate_of": existing.id, "camera_label": label,
+                        "message": f"{f.name}: vídeo já importado neste processo como {label} (#{existing.id})."})
+        elif (f.quick_hash, f.size) in seen:
+            out.append({"name": f.name, "duplicate_of": None, "same_as": seen[(f.quick_hash, f.size)],
+                        "message": f"{f.name}: ficheiro repetido neste lote (igual a {seen[(f.quick_hash, f.size)]})."})
+        else:
+            seen[(f.quick_hash, f.size)] = f.name
+            out.append({"name": f.name, "duplicate_of": None})
+    return out
 
 
 @router.patch("/videos/{video_id}", response_model=Video)

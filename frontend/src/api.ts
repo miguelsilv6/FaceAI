@@ -1,6 +1,6 @@
 import type {
   CaseDashboard,
-  Activity, CasePerson, Location, ValidatedItem, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
+  Activity, CasePerson, Location, PersonAlert, ValidatedItem, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
 
@@ -160,14 +160,33 @@ export async function quickHash(file: File): Promise<string | null> {
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-/** Vídeos: envia um a um; os duplicados (já no caso) são ignorados e devolvidos à parte. */
+/**
+ * Vídeos: primeiro valida o lote inteiro (impressão rápida de cada ficheiro → o servidor diz quais já existem no
+ * processo e quais se repetem dentro do lote) e só depois envia, um a um, os que não existem. O SHA-256 completo
+ * no servidor continua a confirmar no fim de cada envio (e cobre browsers sem crypto.subtle).
+ */
 async function uploadVideoFiles(caseId: number, files: File[], onProgress?: (fraction: number) => void,
   locationId?: number | null): Promise<{ created: Video[]; duplicates: { file: string; message: string }[] }> {
-  const total = files.reduce((n, f) => n + f.size, 0) || 1;
+  const duplicates: { file: string; message: string }[] = [];
+  let todo = files;
+  const hashes = await Promise.all(files.map((f) => quickHash(f).catch(() => null)));
+  if (hashes.every((h) => h)) {
+    const check = await request<{ name: string; duplicate_of: number | null; same_as?: string; message?: string }[]>(
+      "POST", `/api/cases/${caseId}/videos/check`,
+      { files: files.map((f, i) => ({ name: f.name, size: f.size, quick_hash: hashes[i] })) });
+    todo = files.filter((f, i) => {
+      const r = check[i];
+      if (r && (r.duplicate_of != null || r.same_as)) {
+        duplicates.push({ file: f.name, message: r.message ?? `${f.name}: já existe.` });
+        return false;
+      }
+      return true;
+    });
+  }
+  const total = todo.reduce((n, f) => n + f.size, 0) || 1;
   let done = 0;
   const created: Video[] = [];
-  const duplicates: { file: string; message: string }[] = [];
-  for (const f of files) {
+  for (const f of todo) {
     try {
       created.push(await uploadChunked<Video>(caseId, "video", f, (sent) => onProgress?.((done + sent) / total),
         locationId));
@@ -252,6 +271,11 @@ export const api = {
   validatedFramesUrl: (scope: "jobs" | "cases", id: number, sel?: { detections: number[]; frames: number[] }) =>
     `/api/${scope}/${id}/frames/validated.zip`
     + (sel ? `?detection_ids=${sel.detections.join(",")}&frame_ids=${sel.frames.join(",")}` : ""),
+  jobAlerts: (jobId: number) => request<PersonAlert[]>("GET", `/api/jobs/${jobId}/alerts`),
+  caseAlerts: (caseId: number, status?: string) =>
+    request<PersonAlert[]>("GET", `/api/cases/${caseId}/alerts${status ? `?status=${status}` : ""}`),
+  reviewAlert: (id: number, status: PersonAlert["status"], note = "") =>
+    request<PersonAlert>("PATCH", `/api/alerts/${id}`, { status, note }),
   saveFrame: (jobId: number, videoId: number, t: number, note = "") =>
     request<{ id: number; frame_index: number; timestamp_s: number }>("POST", `/api/jobs/${jobId}/saved-frames`,
       { video_id: videoId, t, note }),

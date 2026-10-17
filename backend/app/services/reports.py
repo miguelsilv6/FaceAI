@@ -16,7 +16,7 @@ from sqlmodel import Session, select
 
 from .. import __version__
 from ..config import settings
-from ..models import AuditEvent, Case, Detection, Job, ReferenceImage, ReviewStatus, Track, Video
+from ..models import Alert, AuditEvent, Case, CasePerson, Detection, Job, ReferenceImage, ReviewStatus, Track, Video
 from .clock import format_real, real_time
 from .locations import locations_by_id, video_place
 from .persons import person_segments, summarize_persons
@@ -92,8 +92,12 @@ def load_job_data(s: Session, job: Job) -> dict[str, Any]:
     tracks = {t.id: t for t in s.exec(select(Track).where(Track.job_id == job.id).order_by(Track.video_id,
                                                                                            Track.start_s))}
     audit = list(s.exec(select(AuditEvent).where(AuditEvent.case_id == job.case_id).order_by(AuditEvent.id)))
+    alerts = []
+    for a in s.exec(select(Alert).where(Alert.job_id == job.id).order_by(Alert.highlighted.desc(), Alert.distance)):
+        cp = s.get(CasePerson, a.case_person_id)
+        alerts.append({"alert": a, "person": cp.name if cp else f"#{a.case_person_id}"})
     return {"case": case, "job": job, "videos": videos, "references": refs, "detections": detections,
-            "tracks": tracks, "audit": audit, "locations": locations_by_id(s, job.case_id)}
+            "tracks": tracks, "audit": audit, "locations": locations_by_id(s, job.case_id), "alerts": alerts}
 
 
 def place_of(v: Video | None, data: dict[str, Any]) -> dict[str, Any]:
@@ -308,6 +312,8 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
         tracks=tracks,
         candidates=0 if discover else sum(1 for d in face_dets if not effective_match(d, data)),
         clothing=clothing,
+        alerts=data.get("alerts") or [],
+        locations=data.get("locations") or {},
         discover=discover,
         persons=persons,
         review_counts=review_counts,

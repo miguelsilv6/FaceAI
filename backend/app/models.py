@@ -200,6 +200,31 @@ class SavedFrame(SQLModel, table=True):
     created_at: datetime = Field(default_factory=utcnow)
 
 
+class Alert(SQLModel, table=True):
+    """Alerta de uma análise: uma pessoa do processo (com fotos) pode ter aparecido — no modo descoberta, numa das
+    pessoas descobertas; no modo procurar, em vários locais. É um indício para revisão, não uma identificação."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    case_id: int = Field(foreign_key="case.id", index=True)
+    job_id: int = Field(foreign_key="job.id", index=True)
+    case_person_id: int = Field(foreign_key="caseperson.id", index=True)
+    discovered_person_id: int | None = None  # modo descoberta: n.º da pessoa descoberta na análise
+    distance: float = 2.0
+    similarity: float = 0.0
+    location_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    video_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON))
+    n_tracks: int = 0
+    first_real: str | None = None
+    last_real: str | None = None
+    best_detection_id: int | None = None
+    highlighted: bool = False  # aparece em ≥ N locais (params.alert_min_locations)
+    status: str = "new"  # new | confirmed | dismissed
+    note: str = ""
+    reviewed_by: str = ""
+    reviewed_at: datetime | None = None
+    created_at: datetime = Field(default_factory=utcnow)
+
+
 class Track(SQLModel, table=True):
     """Sequência de deteções da mesma face ao longo do vídeo (tracking)."""
 

@@ -4,7 +4,8 @@ export interface Case {
   description: string;
   analyst: string;
   created_at: string;
-  size_bytes?: number; // só na lista de casos
+  size_bytes?: number; // só na lista de processos
+  alerts_new?: number; // só na lista de processos: alertas por rever
 }
 
 export interface ReferenceImage {
@@ -133,6 +134,9 @@ export interface JobParams {
   fast_detector: string | null;
   tracking: boolean;
   clothing: boolean;
+  watch_persons?: boolean; // alertas: comparar com as pessoas do processo
+  watch_person_ids?: number[] | null;
+  alert_min_locations?: number;
   clothing_window_h: number;
   reid_threshold: number | null;
   color_threshold: number;
@@ -507,6 +511,7 @@ export interface CaseDashboard {
   per_person: { label: string; matches: number; confirmed: number }[];
   pending_by_job: { job_id: number; pending: number }[];
   discover: { jobs: number; faces: number; persons: number };
+  alerts?: { new: number; new_highlighted: number; total: number };
   recent: { id: number; timestamp: string; actor: string; action: string }[];
 }
 
@@ -534,4 +539,30 @@ export interface ValidatedItem {
   reviewed_by: string;
   reviewed_at: string | null;
   review_note: string;
+}
+
+/** Alerta: uma pessoa do processo pode ter aparecido na análise (descoberta) ou aparece em vários locais. */
+export interface PersonAlert {
+  id: number;
+  case_id: number;
+  job_id: number;
+  case_person_id: number;
+  case_person_name: string;
+  reference_id: number | null;
+  reference_has_crop: boolean;
+  discovered_person_id: number | null;
+  distance: number;
+  similarity: number;
+  location_ids: number[];
+  location_names: string[];
+  video_ids: number[];
+  n_tracks: number;
+  first_real: string | null;
+  last_real: string | null;
+  best_detection_id: number | null;
+  highlighted: boolean;
+  status: "new" | "confirmed" | "dismissed";
+  note: string;
+  reviewed_by: string;
+  reviewed_at: string | null;
 }
