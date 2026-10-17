@@ -10,11 +10,13 @@ import shutil
 import threading
 import time
 import traceback
-from collections import deque
+from collections import defaultdict, deque
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from ..config import settings
@@ -25,7 +27,7 @@ from .body_analysis import BodyCollector, ClothingParams, FaceLink
 from .body_engine import get_body_engine
 from .clustering import centroids_of, cluster_embeddings
 from .face_engine import FaceEngine, get_engine
-from .imageio import write_jpeg
+from .imageio import AsyncJpegWriter
 from .matcher import MultiReferenceSet, is_match, l2_normalize
 from .motion import MotionGate
 from .quality import face_quality
@@ -35,11 +37,30 @@ from .video_processor import SampledFrame, annotate, crop_with_margin, format_ti
 
 log = logging.getLogger(__name__)
 
-PROGRESS_COMMIT_EVERY = 10  # frames
+COMMIT_EVERY_S = 1.5  # progresso e deteções gravados por tempo (não a cada N frames: frames estáticos são rápidos)
+DECODE_PREFETCH = 4  # frames descodificados à frente, numa thread própria
 
 
 class JobCancelled(Exception):
     pass
+
+
+class _Timings:
+    """Tempo acumulado por fase da análise (diagnóstico; fica em job.environment["timings"])."""
+
+    def __init__(self) -> None:
+        self.seconds: dict[str, float] = defaultdict(float)
+
+    @contextmanager
+    def __call__(self, phase: str):
+        t0 = time.perf_counter()
+        try:
+            yield
+        finally:
+            self.seconds[phase] += time.perf_counter() - t0
+
+    def as_dict(self) -> dict[str, float]:
+        return {k: round(v, 3) for k, v in sorted(self.seconds.items(), key=lambda kv: -kv[1])}
 
 
 class JobInterrupted(Exception):
@@ -295,23 +316,46 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
             total = sum(frames_for(v) for v in videos)
             done = 0
             eta = EtaEstimator(total)
+            timings = ctx.timings
+            started = time.perf_counter()
+
+            def commit() -> None:
+                with timings("save"):
+                    ctx.writer.flush()  # nenhuma deteção é gravada sem os seus ficheiros
+                with timings("db"):
+                    s.commit()
 
             for video in videos:
                 job.current_video_id = video.id
                 if body is not None:
                     body.start_video(video, ctx.track_gap_s)
                 analyzer = _VideoAnalyzer(ctx, s, job, video, body)
-                for frame in sample_frames(video.stored_path, ctx.sample_fps, fps=video.fps or None):
-                    if cancel.is_set():
-                        raise JobInterrupted() if getattr(cancel, "shutdown", False) else JobCancelled()
-                    analyzer.process(frame)
-                    done += 1
-                    if done % PROGRESS_COMMIT_EVERY == 0:
-                        job.progress = min(0.999, done / total)
-                        job.eta_s = eta.update(done)
-                        s.add(job)
-                        s.commit()
-                s.commit()
+                frames_iter = sample_frames(video.stored_path, ctx.sample_fps, fps=video.fps or None,
+                                            prefetch=DECODE_PREFETCH)
+                last_commit = time.monotonic()
+                try:
+                    while True:
+                        with timings("decode"):
+                            frame = next(frames_iter, None)
+                        if frame is None:
+                            break
+                        if cancel.is_set():
+                            raise JobInterrupted() if getattr(cancel, "shutdown", False) else JobCancelled()
+                        analyzer.process(frame)
+                        done += 1
+                        if time.monotonic() - last_commit >= COMMIT_EVERY_S:
+                            job.progress = min(0.999, done / total)
+                            job.eta_s = eta.update(done)
+                            s.add(job)
+                            commit()
+                            last_commit = time.monotonic()
+                finally:
+                    frames_iter.close()  # pára a thread de descodificação (fim, cancelamento ou erro)
+                commit()
+            ctx.writer.close()
+            job.environment = {**job.environment, "timings": {
+                "total_s": round(time.perf_counter() - started, 3), "frames_per_s":
+                    round(job.frames_sampled / max(1e-6, time.perf_counter() - started), 1), **timings.as_dict()}}
             frames = (f"{job.frames_processed} frames analisados ({job.frames_sampled} amostrados;"
                       f" {job.frames_skipped_motion} sem movimento, {job.frames_skipped_noface} sem faces na"
                       " 1.ª passagem)")
@@ -347,12 +391,25 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
             job.progress = 1.0
             _finish(s, job, JobStatus.completed, (job.message + " " if job.message else "") + summary + ".")
         except JobCancelled:
+            _close_writer(locals().get("ctx"))
             _finish_safely(s, job_id, JobStatus.cancelled, "Cancelada pelo utilizador.")
         except JobInterrupted:
+            _close_writer(locals().get("ctx"))
             _requeue_after_shutdown(s, job_id)
         except Exception as exc:
+            _close_writer(locals().get("ctx"))
             log.error("Job %s falhou: %s", job_id, traceback.format_exc())
             _finish_safely(s, job_id, JobStatus.failed, f"Erro: {exc}")
+
+
+def _close_writer(ctx) -> None:
+    """Depois de um erro ou cancelamento: termina as escritas pendentes sem esconder o erro original."""
+    if ctx is None:
+        return
+    try:
+        ctx.writer.close()
+    except Exception:  # pragma: no cover - o erro principal já é registado pelo chamador
+        log.exception("Escritas pendentes da análise falharam")
 
 
 def _requeue_after_shutdown(s: Session, job_id: int) -> None:
@@ -468,7 +525,9 @@ class _AnalysisContext:
     discovered: list[_TrackState] = field(default_factory=list)  # modo descoberta: tracks de todos os vídeos
     tracked: list[_TrackState] = field(default_factory=list)  # modo procurar: tracks de todos os vídeos
     person_ids: list[int] = field(default_factory=list)  # n.º de cada pessoa (pela ordem do reference_set)
-    det_embeddings: list[tuple[Detection, np.ndarray]] = field(default_factory=list)
+    det_embeddings: list[tuple[int, int | None, np.ndarray]] = field(default_factory=list)  # (id, track, emb)
+    writer: AsyncJpegWriter = field(default_factory=AsyncJpegWriter)  # recortes e frames gravados em paralelo
+    timings: _Timings = field(default_factory=_Timings)
 
     @property
     def discover(self) -> bool:
@@ -532,20 +591,42 @@ class _VideoAnalyzer:
                  body: BodyCollector | None = None):
         self.ctx, self.s, self.job, self.video = ctx, s, job, video
         self.body = body
-        self.gate = MotionGate(ctx.motion_threshold, ctx.keyframe_interval_s) if ctx.motion_filter else None
+        # A região da hora do DVR (lida por OCR ou indicada à mão) não conta como movimento.
+        roi = (video.time_calibration or {}).get("roi")
+        self.gate = (MotionGate(ctx.motion_threshold, ctx.keyframe_interval_s, mask_roi=roi)
+                     if ctx.motion_filter else None)
         self.tracker = FaceTracker(max_gap_s=ctx.track_gap_s) if ctx.tracking else None
         self.tracks: dict[int, _TrackState] = {}
         self.visible_tids: list[int] = []  # tracks vistos no último frame analisado
 
     def process(self, frame: SampledFrame) -> None:
         self.job.frames_sampled += 1
-        if self.gate is not None and not self.gate.check(frame.image, frame.timestamp_s).analyze:
-            self._skip_static(frame)
-            return
+        timings = self.ctx.timings
+        if self.gate is not None:
+            with timings("motion"):
+                moving = self.gate.check(frame.image, frame.timestamp_s).analyze
+            if not moving:
+                self._skip_static(frame)
+                return
         faces: list[FaceLink] = []
         self._process_faces(frame, faces)
         if self.body is not None:  # também nos frames sem faces (pessoa de costas): é aí que o vestuário ajuda
-            self.body.process(frame, faces)
+            with timings("clothing"):
+                self.body.process(frame, faces)
+
+    def _prefilter(self, frame: SampledFrame):
+        """Filtro aplicado pelo motor antes do embedding (o passo caro): as faces abaixo do tamanho mínimo ou da
+        qualidade mínima seriam descartadas a seguir de qualquer forma."""
+        ctx = self.ctx
+        if ctx.min_size <= 0 and ctx.min_quality <= 0:
+            return None
+
+        def keep(x: int, y: int, w: int, h: int, landmarks) -> bool:
+            if min(w, h) < ctx.min_size:
+                return False
+            return ctx.min_quality <= 0 or face_quality(frame.image, x, y, w, h, landmarks).score >= ctx.min_quality
+
+        return keep
 
     def _skip_static(self, frame: SampledFrame) -> None:
         self.job.frames_skipped_motion += 1
@@ -563,13 +644,16 @@ class _VideoAnalyzer:
     def _process_faces(self, frame: SampledFrame, links: list[FaceLink]) -> None:
         ctx, job = self.ctx, self.job
         self.visible_tids = []
-        if ctx.fast_detector and ctx.engine.count_faces(frame.image, detector=ctx.fast_detector,
-                                                        upscale=ctx.upscale) == 0:
-            job.frames_skipped_noface += 1
-            return
+        if ctx.fast_detector:
+            with ctx.timings("cascade"):
+                n = ctx.engine.count_faces(frame.image, detector=ctx.fast_detector, upscale=ctx.upscale)
+            if n == 0:
+                job.frames_skipped_noface += 1
+                return
 
-        faces = ctx.engine.detect(frame.image, model=ctx.model, detector=ctx.detector, upscale=ctx.upscale,
-                                  min_confidence=ctx.min_conf)
+        with ctx.timings("detect"):
+            faces = ctx.engine.detect(frame.image, model=ctx.model, detector=ctx.detector, upscale=ctx.upscale,
+                                      min_confidence=ctx.min_conf, prefilter=self._prefilter(frame))
         job.frames_processed += 1
         kept = []
         for face in faces:
@@ -623,8 +707,9 @@ class _VideoAnalyzer:
             if (st.row is None or q.score >= st.best_saved_quality + DISCOVER_QUALITY_STEP
                     or frame.timestamp_s - st.last_saved_s >= DISCOVER_SAVE_EVERY_S):
                 det = self._save_detection(frame, k, face, q, None, None)
-                self.ctx.det_embeddings.append((det, emb))
-                self._attach_discovered(st, det, q.score)
+                self._attach_discovered(st, det, q.score)  # flush: a deteção já tem id e track
+                # Só (id, track, embedding): manter os objetos ORM faria crescer a memória numa análise longa.
+                self.ctx.det_embeddings.append((det.id, det.track_id, emb))
                 st.last_saved_s = frame.timestamp_s
             elif st.row is not None:
                 self._refresh_track_row(st)
@@ -674,7 +759,8 @@ class _VideoAnalyzer:
         stem = f"v{self.video.id:04d}_f{frame.index:07d}_{k}"
         crop_path = ctx.out_dir / "crops" / f"{stem}.jpg"
         frame_path = ctx.out_dir / "frames" / f"{stem}.jpg"
-        write_jpeg(crop_path, crop_with_margin(frame.image, face.x, face.y, face.w, face.h))
+        with ctx.timings("save"):
+            ctx.writer.submit(crop_path, crop_with_margin(frame.image, face.x, face.y, face.w, face.h))
         if distance is None:
             label = f"{format_timestamp(frame.timestamp_s)} q={q.score:.2f}"
             color = (255, 160, 0)
@@ -682,7 +768,8 @@ class _VideoAnalyzer:
         else:
             label = f"{format_timestamp(frame.timestamp_s)} sim={1 - distance:.2f} q={q.score:.2f}"
             color = (0, 0, 255) if matched else (0, 165, 255)
-        write_jpeg(frame_path, annotate(frame.image, face.x, face.y, face.w, face.h, label, color))
+        with ctx.timings("save"):
+            ctx.writer.submit(frame_path, annotate(frame.image, face.x, face.y, face.w, face.h, label, color))
         det = Detection(
             job_id=self.job.id, video_id=self.video.id, reference_id=ref_id,
             frame_index=frame.index, timestamp_s=round(frame.timestamp_s, 3),
@@ -758,13 +845,19 @@ def _group_persons(ctx: _AnalysisContext, s: Session, job: Job) -> None:
         st.row.is_match = False
         s.add(st.row)
     person_of_track = {st.row.id: int(label) for st, label in zip(states, labels, strict=True)}
-    for det, emb in ctx.det_embeddings:
-        label = person_of_track.get(det.track_id)
+    rows = []
+    for det_id, track_id, emb in ctx.det_embeddings:
+        label = person_of_track.get(track_id)
         if label is None:
             continue
         dist = float(1.0 - centroids[label] @ emb)
-        det.distance, det.similarity = round(dist, 4), round(1.0 - dist, 4)
-        s.add(det)
+        rows.append({"id": det_id, "distance": round(dist, 4), "similarity": round(1.0 - dist, 4)})
+    if rows:
+        s.flush()
+        s.execute(update(Detection), rows)  # atualização em massa pela chave primária
+        for obj in list(s.identity_map.values()):  # objetos ainda em memória: voltam a ler os valores novos
+            if isinstance(obj, Detection):
+                s.expire(obj, ["distance", "similarity"])
     job.persons = int(labels.max()) + 1
     _save_track_embeddings(ctx, job, states, lambda st: st.row.person_id, embs)
 

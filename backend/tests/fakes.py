@@ -37,10 +37,13 @@ class FakeEngine:
     def default_fast_detector(self):
         return "fake_fast"
 
-    def detect(self, image_bgr, *, model, detector, upscale=1.0, min_confidence=None):
+    def detect(self, image_bgr, *, model, detector, upscale=1.0, min_confidence=None, prefilter=None):
         self.last_min_confidence = min_confidence
         self.calls += 1
-        return self._find(image_bgr)
+        faces = self._find(image_bgr)
+        if prefilter is not None:
+            faces = [f for f in faces if prefilter(f.x, f.y, f.w, f.h, f.landmarks)]
+        return faces
 
     def _find(self, image_bgr):
         mask = (image_bgr.max(axis=2) > 40).astype(np.uint8)

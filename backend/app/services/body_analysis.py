@@ -191,7 +191,7 @@ class BodyCollector:
         tids = self._tracker.update(frame.timestamp_s, [(p.x, p.y, p.w, p.h) for p in persons], list(embs))
         self._visible = list(tids)
         links = link_faces(persons, faces)
-        gain = frame_gain(img)
+        gain = None  # calculado só se alguma assinatura de cor for precisa neste frame
         for i, (p, crop, emb, tid) in enumerate(zip(persons, crops, embs, tids, strict=True)):
             st = self._by_tid.get(tid)
             if st is None:
@@ -210,13 +210,19 @@ class BodyCollector:
             q = body_quality(img, p)
             if q < MIN_BODY_QUALITY:
                 continue
+            sample = len(st.samples) < TOP_K or q > st.samples[-1].quality
+            save = (not st.saved or q >= st.best_saved_quality + SAVE_QUALITY_STEP
+                    or frame.timestamp_s - st.last_saved_s >= SAVE_EVERY_S)
+            if not (sample or save):  # a assinatura de cor (conversões HSV) só se calcula quando é usada
+                continue
+            if gain is None:
+                gain = frame_gain(img)
             sig = color_signature(crop, gain)
-            if len(st.samples) < TOP_K or q > st.samples[-1].quality:
+            if sample:
                 st.samples.append(_Obs(q, emb, sig, frame.timestamp_s))
                 st.samples.sort(key=lambda o: -o.quality)
                 del st.samples[TOP_K:]
-            if (not st.saved or q >= st.best_saved_quality + SAVE_QUALITY_STEP
-                    or frame.timestamp_s - st.last_saved_s >= SAVE_EVERY_S):
+            if save:
                 st.saved.append(self._save(frame, i, p, q, emb, sig))
                 st.best_saved_quality = max(st.best_saved_quality, q)
                 st.last_saved_s = frame.timestamp_s

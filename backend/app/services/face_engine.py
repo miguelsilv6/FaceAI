@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -47,10 +48,13 @@ class FaceEngine(Protocol):
     def detect(
         self, image_bgr: np.ndarray, *, model: str, detector: str, upscale: float = 1.0,
         min_confidence: float | None = None,
+        prefilter: Callable[[int, int, int, int, np.ndarray | None], bool] | None = None,
     ) -> list[FaceObservation]:
         """Deteta todas as faces e calcula o embedding de cada uma.
 
         `min_confidence` (se dado) é o limiar de confiança do próprio detetor; `None` = valor por omissão do motor.
+        `prefilter(x, y, w, h, landmarks)` (opcional): as faces recusadas não são devolvidas e, se o motor o
+        permitir, nem chegam a ter embedding calculado (o passo mais caro).
         """
 
     def count_faces(self, image_bgr: np.ndarray, *, detector: str, upscale: float = 1.0) -> int:

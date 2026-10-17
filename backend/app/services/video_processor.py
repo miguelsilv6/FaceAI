@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import queue
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,8 +48,62 @@ class SampledFrame:
     image: np.ndarray
 
 
-def sample_frames(path: str | Path, sample_fps: float, fps: float | None = None) -> Iterator[SampledFrame]:
-    """Devolve frames a ~`sample_fps` por segundo. Os frames intermédios são só descodificados com grab()."""
+def sample_frames(path: str | Path, sample_fps: float, fps: float | None = None, *,
+                  prefetch: int = 0) -> Iterator[SampledFrame]:
+    """Devolve frames a ~`sample_fps` por segundo. Os frames intermédios são só descodificados com grab().
+
+    Com `prefetch` > 0, a descodificação corre numa thread própria, com até `prefetch` frames à espera: a
+    descodificação (o OpenCV liberta o GIL) sobrepõe-se à deteção. A sequência de frames é exatamente a mesma."""
+    if prefetch > 0:
+        yield from _prefetched(path, sample_fps, fps, prefetch)
+        return
+    yield from _sample_frames(path, sample_fps, fps)
+
+
+_END = object()
+
+
+def _prefetched(path, sample_fps, fps, size: int) -> Iterator[SampledFrame]:
+    q: queue.Queue = queue.Queue(maxsize=size)
+    stop = threading.Event()
+
+    def produce() -> None:
+        try:
+            for frame in _sample_frames(path, sample_fps, fps):
+                while not stop.is_set():
+                    try:
+                        q.put(frame, timeout=0.2)
+                        break
+                    except queue.Full:
+                        continue
+                if stop.is_set():
+                    return
+            item = _END
+        except BaseException as exc:  # erro de leitura: é levantado no consumidor
+            item = exc
+        while not stop.is_set():
+            try:
+                q.put(item, timeout=0.2)
+                return
+            except queue.Full:
+                continue
+
+    t = threading.Thread(target=produce, name="faceai-decode", daemon=True)
+    t.start()
+    try:
+        while True:
+            item = q.get()
+            if item is _END:
+                return
+            if isinstance(item, BaseException):
+                raise item
+            yield item
+    finally:  # consumidor terminou (fim, cancelamento ou erro): a thread pára e liberta o vídeo
+        stop.set()
+        t.join(timeout=5)
+
+
+def _sample_frames(path: str | Path, sample_fps: float, fps: float | None = None) -> Iterator[SampledFrame]:
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise ValueError(f"Não foi possível abrir o vídeo: {path}")

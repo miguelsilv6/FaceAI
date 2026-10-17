@@ -66,6 +66,16 @@ Vídeo ─► frames a N fps ─► [1] filtro de movimento ─► [2] SCRFD-500
 
 Em CCTV real, o ganho do pré-filtro depende do movimento na cena: quanto mais estática a câmara, maior.
 
+**Análise (pipeline):**
+- **Medição por fase:** cada análise guarda o tempo de cada fase em `job.environment["timings"]` (descodificação, movimento, cascata, deteção, gravação, base de dados), com o total e os frames/s. O benchmark `tools/bench_pipeline.py` usa um vídeo sintético tipo CCTV com relógio sobreposto e confirma que uma otimização não muda os resultados (`--compare`).
+- **Descodificação:** corre numa thread própria, com 4 frames de avanço e exatamente os mesmos frames. Com o SCRFD real num vídeo de 640×360, a análise passou de 11,8 para 12,5 frames/s; em resoluções maiores, onde descodificar custa mais, o ganho cresce.
+- **Recortes e frames anotados:** gravados num pool de 2 threads. Antes de cada commit espera-se que estejam no disco, por isso nenhuma deteção fica registada sem os seus ficheiros.
+- **Faces abaixo do tamanho ou da qualidade mínimos:** são descartadas **antes** do alinhamento e do ArcFace, o passo mais caro.
+- **Relógio do DVR:** a região da hora (lida por OCR ou indicada à mão) é ignorada pelo filtro de movimento. Um relógio pequeno quase não afeta o filtro; um relógio grande (texto com cerca de 8% da altura) fazia contar como movimento um frame por segundo.
+- **Base de dados:** os commits são feitos por tempo (a cada 1,5 s), em vez de a cada 10 frames. No modo descoberta, as distâncias finais são gravadas numa atualização em massa, sem manter os objetos de todas as deteções em memória.
+- **Vestuário:** a assinatura de cor só é calculada quando vai ser usada.
+- Em todos os casos, as correspondências, os segmentos e as pessoas são **iguais** aos da versão anterior (benchmark e testes).
+
 **Interface com análises grandes** (teste de carga com 50 000 deteções e 2 000 tracks):
 - **Lista de deteções:** demora 0,76 s em vez de 1,5 s e transfere 1,2 MB com gzip, em vez de 24 MB. Já não inclui os caminhos dos ficheiros no servidor.
 - **Durante uma análise,** os resultados pedem só as deteções novas (`after_id`). Tracks, segmentos e pessoas são atualizados no máximo de 10 em 10 s, e a lista completa só é pedida uma vez, no fim. Todas as sondagens esperam pela resposta anterior e param com o separador oculto.
