@@ -50,6 +50,15 @@ export default function RouteTimeline({ caseId, jobs, videos, locations }: {
   const [route, setRoute] = useState<CaseRoute | null>(null);
   const [seek, setSeek] = useState<SeekRequest | null>(null);
   const [onlyLoc, setOnlyLoc] = useState<string | null>(null); // "Só este local"
+  // Informação "sem hora real" escondida (preferência deste caso, guardada no browser)
+  const hideKey = `faceai.route.hideUnsynced.${caseId}`;
+  const [hideUnsynced, setHideUnsyncedState] = useState(() => {
+    try { return localStorage.getItem(hideKey) === "1"; } catch { return false; }
+  });
+  const setHideUnsynced = (v: boolean) => {
+    setHideUnsyncedState(v);
+    try { if (v) localStorage.setItem(hideKey, "1"); else localStorage.removeItem(hideKey); } catch { /* sem storage */ }
+  };
   const playerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -141,8 +150,8 @@ export default function RouteTimeline({ caseId, jobs, videos, locations }: {
       </Group>
       <Text size="sm" c="dimmed">Cada linha é um vídeo, agrupados por local; os blocos são as aparições, pela hora real do DVR.
         Blocos tracejados vêm só do vestuário. Clique num bloco para ver todos os vídeos nesse instante (leitor abaixo).</Text>
-      {unsyncedVideos.length > 0 && (
-        <Alert color="yellow">
+      {unsyncedVideos.length > 0 && !hideUnsynced && (
+        <Alert color="yellow" withCloseButton closeButtonLabel="Esconder" onClose={() => setHideUnsynced(true)}>
           {unsyncedVideos.length} vídeo(s) com aparições mas sem hora real acertada ({unsyncedVideos.map((v) => v.camera_label).join(", ")}):
           ficam fora da linha temporal. Acerte o relógio no separador <b>Locais e vídeos</b> (botão "Acertar hora").
         </Alert>
@@ -238,10 +247,17 @@ export default function RouteTimeline({ caseId, jobs, videos, locations }: {
           </Table.ScrollContainer>
         </Card>
       )}
-      {route && route.unsynced.length > 0 && (
-        <Text size="xs" c="dimmed">Sem hora real: {route.unsynced.filter(inLoc).map((s) => `${s.camera_label} ${formatTime(s.start_s)}`).join(" · ")}.{" "}
-          <Anchor component={Link} size="xs" to={`/jobs/${route.unsynced[0].job_id}`}>Ver resultados</Anchor></Text>
-      )}
+      {route && route.unsynced.filter(inLoc).length > 0 && (hideUnsynced ? (
+        <Anchor size="xs" component="button" c="dimmed" onClick={() => setHideUnsynced(false)}>
+          Mostrar aparições sem hora real ({route.unsynced.filter(inLoc).length})
+        </Anchor>
+      ) : (
+        <Group gap={6} wrap="nowrap" align="flex-start">
+          <Text size="xs" c="dimmed">Sem hora real: {route.unsynced.filter(inLoc).map((s) => `${s.camera_label} ${formatTime(s.start_s)}`).join(" · ")}.{" "}
+            <Anchor component={Link} size="xs" to={`/jobs/${route.unsynced[0].job_id}`}>Ver resultados</Anchor></Text>
+          <Anchor size="xs" component="button" onClick={() => setHideUnsynced(true)}>Esconder</Anchor>
+        </Group>
+      ))}
     </Stack>
   );
 }

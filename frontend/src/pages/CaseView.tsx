@@ -162,7 +162,7 @@ export default function CaseView() {
             onChange={reloadJobs} />
         </Tabs.Panel>
         <Tabs.Panel value="results" pt="md">
-          <ValidatedFramesPanel caseId={caseId} />
+          <ValidatedFramesPanel caseId={caseId} jobs={jobs} locations={locations} onOpenTab={setTab} />
         </Tabs.Panel>
         <Tabs.Panel value="route" pt="md">
           <RouteTimeline caseId={caseId} jobs={jobs} videos={videos} locations={locations} />

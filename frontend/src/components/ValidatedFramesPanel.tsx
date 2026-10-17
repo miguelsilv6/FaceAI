@@ -1,17 +1,18 @@
 import {
   ActionIcon, Alert, Anchor, Badge, Box, Button, Card, Checkbox, Chip, Group, Image, Loader, Modal, SegmentedControl,
-  Select, SimpleGrid, Stack, Text, Tooltip,
+  Select, SimpleGrid, Stack, Table, Text, Title, Tooltip,
 } from "@mantine/core";
 import {
   IconChevronLeft, IconChevronRight, IconDownload, IconExternalLink, IconInfoCircle, IconMaximize, IconPhotoDown,
   IconTrash,
 } from "@tabler/icons-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { api, formatTime } from "../api";
+import { api, formatDate, formatTime } from "../api";
 import { notifyError, notifyOk } from "../notify";
-import type { ValidatedItem } from "../types";
+import { jobLocations } from "../places";
+import type { Job, Location, ValidatedItem } from "../types";
 
 /** Chave única de um item: deteção confirmada ("d:…") ou frame guardado no leitor ("f:…"). */
 const keyOf = (i: ValidatedItem) => (i.type === "saved_frame" ? `f:${i.saved_frame_id}` : `d:${i.detection_id}`);
@@ -92,9 +93,94 @@ function PhotoViewer({ items, index, onIndex, onClose }: {
   );
 }
 
-/** Frames validados do caso (deteções confirmadas e frames guardados no leitor), para ver e descarregar. */
-export default function ValidatedFramesPanel({ caseId }: { caseId: number }) {
+/** Análises concluídas do caso: resumo de cada uma e acesso aos resultados. */
+function CompletedJobs({ caseId, jobs, locations, onShowImages, onOpenTab }: {
+  caseId: number; jobs: Job[]; locations: Location[]; onShowImages: (jobId: number) => void;
+  onOpenTab: (tab: string) => void;
+}) {
   const navigate = useNavigate();
+  const completed = jobs.filter((j) => j.status === "completed").sort((a, b) => b.id - a.id);
+  const running = jobs.filter((j) => j.status === "running" || j.status === "queued").length;
+  const [pending, setPending] = useState<Record<number, number>>({});
+  const key = jobs.map((j) => `${j.id}:${j.status}`).join(",");
+  useEffect(() => {
+    api.caseDashboard(caseId, [])
+      .then((d) => setPending(Object.fromEntries(d.pending_by_job.map((p) => [p.job_id, p.pending]))))
+      .catch(() => setPending({}));
+  }, [caseId, key]);
+  return (
+    <Card withBorder>
+      <Group justify="space-between" mb="xs">
+        <Title order={5}>Análises concluídas ({completed.length})</Title>
+        {running > 0 && (
+          <Text size="xs" c="dimmed">
+            {running} análise(s) a decorrer — aparecem aqui quando terminarem.{" "}
+            <Anchor size="xs" component="button" onClick={() => onOpenTab("jobs")}>Ver progresso</Anchor>
+          </Text>
+        )}
+      </Group>
+      {completed.length === 0 ? (
+        <Text size="sm" c="dimmed">Ainda não há análises concluídas neste caso.</Text>
+      ) : (
+        <Table.ScrollContainer minWidth={760}>
+          <Table highlightOnHover verticalSpacing={6}>
+            <Table.Thead>
+              <Table.Tr><Table.Th>#</Table.Th><Table.Th>Procura</Table.Th><Table.Th>Locais</Table.Th>
+                <Table.Th>Resultado</Table.Th><Table.Th>Por rever</Table.Th><Table.Th>Concluída</Table.Th><Table.Th /></Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {completed.map((j) => {
+                const discover = j.params.mode === "discover";
+                const who = discover ? "Descoberta (todas as faces)"
+                  : (j.params.persons ?? []).map((p) => p.label).join(", ") || "Procurar";
+                const n = pending[j.id] ?? 0;
+                return (
+                  <Table.Tr key={j.id}>
+                    <Table.Td>{j.id}</Table.Td>
+                    <Table.Td>
+                      <Text size="sm" maw={260} truncate title={who}>{who}</Text>
+                      {j.params.clothing && <Badge size="xs" color="grape" variant="light">vestuário</Badge>}
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm" maw={220} truncate>{jobLocations(j, locations) || "—"}</Text>
+                      <Text size="xs" c="dimmed">{j.video_ids.length} vídeo{j.video_ids.length === 1 ? "" : "s"}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="sm">{discover ? `${j.persons} pessoa(s) distinta(s)` : `${j.matches} correspondência(s)`}</Text>
+                      <Text size="xs" c="dimmed">{j.tracks} track(s)</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      {n ? <Badge color="gray" variant="light">{n} por rever</Badge>
+                        : <Text size="xs" c="dimmed">—</Text>}
+                    </Table.Td>
+                    <Table.Td>
+                      <Text size="xs">{j.finished_at ? formatDate(j.finished_at) : "—"}</Text>
+                      <Text size="xs" c="dimmed">{j.created_by}</Text>
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap="xs" wrap="nowrap" justify="flex-end">
+                        <Button size="xs" rightSection={<IconExternalLink size={14} />}
+                          onClick={() => navigate(`/jobs/${j.id}`)}>Abrir resultados</Button>
+                        <Anchor size="xs" component="button" onClick={() => onShowImages(j.id)}>Ver imagens</Anchor>
+                      </Group>
+                    </Table.Td>
+                  </Table.Tr>
+                );
+              })}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
+      )}
+    </Card>
+  );
+}
+
+/** Separador Resultados: análises concluídas e imagens validadas (deteções confirmadas e frames guardados). */
+export default function ValidatedFramesPanel({ caseId, jobs, locations: caseLocations, onOpenTab }: {
+  caseId: number; jobs: Job[]; locations: Location[]; onOpenTab: (tab: string) => void;
+}) {
+  const navigate = useNavigate();
+  const imagesRef = useRef<HTMLDivElement>(null);
   const [items, setItems] = useState<ValidatedItem[] | null>(null);
   const [selected, setSelected] = useState<string[]>([]);
   const [loc, setLoc] = useState("all");
@@ -107,11 +193,25 @@ export default function ValidatedFramesPanel({ caseId }: { caseId: number }) {
     api.validatedItems(caseId).then((xs) => { setItems(xs); setSelected(xs.map(keyOf)); }).catch(notifyError);
   }, [caseId]);
   useEffect(load, [load]);
+  const doneKey = jobs.filter((j) => j.status === "completed").map((j) => j.id).join(",");
+  useEffect(() => {
+    if (items) load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doneKey]);
+  const showImages = (jobId: number) => {
+    setJob(String(jobId)); setLoc("all"); setPerson(null); setKind("all");
+    imagesRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+  const header = (
+    <CompletedJobs caseId={caseId} jobs={jobs} locations={caseLocations} onShowImages={showImages}
+      onOpenTab={onOpenTab} />
+  );
 
   const locations = useMemo(() => [...new Map((items ?? []).filter((i) => i.location_id != null)
     .map((i) => [i.location_id!, i.location_name])).entries()], [items]);
   const persons = useMemo(() => [...new Set((items ?? []).map((i) => i.person_label).filter(Boolean))].sort(), [items]);
-  const jobs = useMemo(() => [...new Set((items ?? []).map((i) => i.job_id))].sort((a, b) => a - b), [items]);
+  const itemJobs = useMemo(() => [...new Set([...(items ?? []).map((i) => i.job_id), ...(job ? [Number(job)] : [])])]
+    .sort((a, b) => a - b), [items, job]);
   const hasSaved = (items ?? []).some((i) => i.type === "saved_frame");
   const visible = (items ?? []).filter((i) => (loc === "all" || String(i.location_id) === loc)
     && (!person || i.person_label === person) && (!job || String(i.job_id) === job)
@@ -140,17 +240,23 @@ export default function ValidatedFramesPanel({ caseId }: { caseId: number }) {
     }
   };
 
-  if (!items) return <Loader size="sm" />;
+  if (!items) return <Stack>{header}<Loader size="sm" /></Stack>;
   if (!items.length) {
     return (
-      <Alert color="blue" icon={<IconInfoCircle size={18} />}>
-        Ainda não há imagens validadas neste caso. Confirme as deteções (✓) nos resultados das análises, ou use
-        "Guardar frame" no leitor da análise: aparecem aqui para ver e descarregar os frames originais.
-      </Alert>
+      <Stack>
+        {header}
+        <Title order={5}>Imagens validadas</Title>
+        <Alert color="blue" icon={<IconInfoCircle size={18} />}>
+          Ainda não há imagens validadas neste caso. Confirme as deteções (✓) nos resultados das análises, ou use
+          "Guardar frame" no leitor da análise: aparecem aqui para ver e descarregar os frames originais.
+        </Alert>
+      </Stack>
     );
   }
   return (
     <Stack>
+      {header}
+      <div ref={imagesRef}><Title order={5}>Imagens validadas ({items.length})</Title></div>
       <Group justify="space-between" align="flex-end" wrap="wrap">
         <Group align="flex-end" wrap="wrap">
           {locations.length > 1 && (
@@ -170,9 +276,9 @@ export default function ValidatedFramesPanel({ caseId }: { caseId: number }) {
             <Select size="xs" w={200} label="Pessoa" placeholder="Todas" clearable value={person} onChange={setPerson}
               data={persons} />
           )}
-          {jobs.length > 1 && (
+          {(itemJobs.length > 1 || job) && (
             <Select size="xs" w={150} label="Análise" placeholder="Todas" clearable value={job} onChange={setJob}
-              data={jobs.map((j) => ({ value: String(j), label: `#${j}` }))} />
+              data={itemJobs.map((j) => ({ value: String(j), label: `#${j}` }))} />
           )}
         </Group>
         <Group gap="xs">
@@ -241,6 +347,7 @@ export default function ValidatedFramesPanel({ caseId }: { caseId: number }) {
           );
         })}
       </SimpleGrid>
+      {!visible.length && <Text size="sm" c="dimmed">Sem imagens validadas com estes filtros.</Text>}
       <PhotoViewer items={visible} index={viewing} onIndex={setViewing} onClose={() => setViewing(null)} />
     </Stack>
   );
