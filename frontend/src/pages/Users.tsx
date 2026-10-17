@@ -56,7 +56,7 @@ export default function Users() {
               <Table striped>
                 <Table.Thead>
                   <Table.Tr><Table.Th>Utilizador</Table.Th><Table.Th>Papel</Table.Th><Table.Th>Estado</Table.Th>
-                    <Table.Th>Casos</Table.Th><Table.Th>Último login</Table.Th><Table.Th /></Table.Tr>
+                    <Table.Th>Processos</Table.Th><Table.Th>Último login</Table.Th><Table.Th /></Table.Tr>
                 </Table.Thead>
                 <Table.Tbody>
                   {users.map((u) => (
@@ -179,8 +179,8 @@ function CreateUserModal({ opened, onClose, onCreated }: {
             value={username} onChange={(e) => setUsername(e.currentTarget.value.toLowerCase())} />
           <TextInput label="Nome a apresentar" value={displayName} onChange={(e) => setDisplayName(e.currentTarget.value)} />
           <Select label="Papel" value={role} allowDeselect={false} onChange={(v) => setRole((v as UserRole) ?? "analyst")}
-            data={[{ value: "analyst", label: "Analista (só os casos atribuídos)" },
-              { value: "admin", label: "Administrador (todos os casos e utilizadores)" }]} />
+            data={[{ value: "analyst", label: "Analista (só os processos atribuídos)" },
+              { value: "admin", label: "Administrador (todos os processos e utilizadores)" }]} />
           <PasswordInput label="Password temporária" description="Mínimo 12 caracteres; o utilizador muda-a no
             primeiro login." autoComplete="new-password" required value={password}
             onChange={(e) => setPassword(e.currentTarget.value)} />

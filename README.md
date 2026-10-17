@@ -101,7 +101,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 
 | Variável | Por omissão | Descrição |
 |---|---|---|
-| `FACEAI_DATA_DIR` | `./data` | Casos, evidências, base de dados, `audit.jsonl` |
+| `FACEAI_DATA_DIR` | `./data` | Processos, evidências, base de dados, `audit.jsonl` |
 | `FACEAI_ENGINE` | `onnx` | `onnx` ou `deepface` (este exige o extra `deepface`) |
 | `FACEAI_MODELS_DIR` | `~/.faceai/models` | Pesos ONNX |
 | `FACEAI_UPLOAD_CHUNK_MB` | `8` | Tamanho de cada bloco do upload (o Cloudflare limita os pedidos a 100 MB) |
@@ -132,35 +132,37 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
   - **CSRF:** os pedidos que alteram dados exigem o cabeçalho `X-CSRF-Token` e uma origem permitida.
 - **Força bruta:** a conta é bloqueada 1, 5 e 15 min após 5, 10 e 15 falhas seguidas, e há um limite de 30 falhas por IP a cada 15 min. A mensagem de erro é sempre genérica.
 - **Papéis:**
-  - **Administrador:** gere utilizadores (menu do utilizador → *Utilizadores*), vê todos os casos e a auditoria do sistema (logins, falhas, bloqueios, contas);
-  - **Analista:** só vê os casos que criou ou que lhe foram atribuídos.
-- **Equipa do caso (need-to-know)** (o separador *Equipa* está desativado nesta fase; o controlo de acesso por caso mantém-se e a gestão faz-se pela API `/api/cases/{id}/members`):
-  - quem cria o caso fica **responsável**;
+  - **Administrador:** gere utilizadores (menu do utilizador → *Utilizadores*), vê todos os processos e a auditoria do sistema (logins, falhas, bloqueios, contas);
+  - **Analista:** só vê os processos que criou ou que lhe foram atribuídos.
+- **Equipa do processo (need-to-know)** (o separador *Equipa* está desativado nesta fase; o controlo de acesso por processo mantém-se e a gestão faz-se pela API `/api/cases/{id}/members`):
+  - quem cria o processo fica **responsável**;
   - o responsável, ou um administrador, dá acesso a outros utilizadores como **membro** ou responsável;
-  - só o responsável e o administrador editam ou eliminam o caso; uma análise pode ser eliminada também por quem a criou;
-  - o acesso a qualquer objeto (vídeo, referência, análise, deteção, track, upload) é verificado pelo caso a que pertence. Sem acesso, a resposta é sempre **404**.
-- **Auditoria:** o utilizador registado é a conta autenticada, com o **IP** do pedido. Os casos criados antes das contas não têm equipa: só os administradores os veem, até lhes atribuírem um responsável.
+  - só o responsável e o administrador editam ou eliminam o processo; uma análise pode ser eliminada também por quem a criou;
+  - o acesso a qualquer objeto (vídeo, referência, análise, deteção, track, upload) é verificado pelo processo a que pertence. Sem acesso, a resposta é sempre **404**.
+- **Auditoria:** o utilizador registado é a conta autenticada, com o **IP** do pedido. Os processos criados antes das contas não têm equipa: só os administradores os veem, até lhes atribuírem um responsável.
 - **Cabeçalhos de segurança:** CSP restritiva, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy` e HSTS em HTTPS.
 
 ---
 
 ## Utilização
 
-1. **Novo caso:** indica o nome ou referência do processo. Ficas como responsável do caso. O nome e a descrição podem ser editados depois (✏️ ao lado do nome do caso). Os valores anteriores ficam na auditoria.
+1. **Novo processo:** indica o nome ou referência do processo. Ficas como responsável do processo. O nome e a descrição podem ser editados depois (✏️ ao lado do nome do processo). Os valores anteriores ficam na auditoria.
 2. **Referências/Pessoas:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
-3. **Locais e vídeos:** o caso organiza-se em **locais**: os estabelecimentos ou zonas de interesse para o caso (ex.: "Café Central", "Estação de Campanhã"), cada um com os seus **vídeos** (um por ângulo de CCTV desse local).
-   - O separador mostra um cartão por local (n.º de vídeos, duração, quantos têm hora real acertada). **Novo local** cria um local e abre a sua página.
+3. **Locais e vídeos:** o processo organiza-se em **locais**: os estabelecimentos ou zonas de interesse para o processo (ex.: "Café Central", "Estação de Campanhã"), cada um com os seus **vídeos** (um por ângulo de CCTV desse local).
+   - O separador mostra um cartão por local (n.º de vídeos, duração, **espaço em disco** — originais + cópias de reprodução —, quantos têm hora real acertada). **Novo local** cria um local e abre a sua página.
    - Os vídeos importam-se na **página do local** (clicar no cartão ou em "Abrir local"): os vídeos largados aí ficam nesse local. O nome do local pode ser mudado aí (✏️); um local só pode ser eliminado quando estiver vazio.
    - Cada vídeo tem um **nome** editável na tabela (por omissão, o nome do ficheiro). Em toda a aplicação (resultados, percurso, painel, relatórios, CSV/JSON e ZIP de frames) o vídeo é identificado como **"Local · Vídeo"**, e o nome do ficheiro original continua visível.
    - O menu ⋯ de cada vídeo permite **movê-lo para outro local** ou eliminá-lo. As mudanças ficam na auditoria (`location.*`, `video.updated`).
-   - Os casos de versões anteriores ganham, no arranque, um local **"Geral"** com todos os vídeos existentes. Os vídeos importados sem local (API antiga) também vão para o "Geral".
+   - **Vídeos duplicados:** o mesmo ficheiro (mesmo conteúdo, qualquer nome ou local) não pode ser importado duas vezes no mesmo processo. Antes de enviar, o browser calcula uma impressão rápida (SHA-256 do tamanho, do 1.º e do último MiB) e o servidor recusa logo se o vídeo já existir; no fim do envio, o **SHA-256** completo confirma. O aviso indica o vídeo existente ("Local · Vídeo (#id)") e a recusa fica na auditoria (`video.duplicate_rejected`). Noutro processo, o mesmo ficheiro é aceite.
+   - Cada vídeo fica com o seu **SHA-256** (auditoria `video.uploaded`, relatório e JSON). Os vídeos de versões anteriores recebem-no em segundo plano no arranque.
+   - Os processos de versões anteriores ganham, no arranque, um local **"Geral"** com todos os vídeos existentes. Os vídeos importados sem local (API antiga) também vão para o "Geral".
 
-   Importação: arrasta os ficheiros de CCTV. O envio é **em blocos e retomável**: se a ligação cair, volta a largar o mesmo ficheiro e o upload continua de onde parou, mesmo depois de recarregar a página. Os metadados são extraídos automaticamente. Se o browser não conseguir reproduzir o vídeo e houver `ffmpeg`, é criada uma **cópia H.264 só para visualização**. A análise usa sempre o original. Os casos típicos são H.265/HEVC, `.dav`, `.avi`/MPEG-4, H.264 a 10 bits ou 4:2:2/4:4:4, que dão a mensagem "nenhum vídeo com formato e tipo MIME suportado".
+   Importação: arrasta os ficheiros de CCTV. O envio é **em blocos e retomável**: se a ligação cair, volta a largar o mesmo ficheiro e o upload continua de onde parou, mesmo depois de recarregar a página. Os metadados são extraídos automaticamente. Se o browser não conseguir reproduzir o vídeo e houver `ffmpeg`, é criada uma **cópia H.264 só para visualização**. A análise usa sempre o original. Os processos típicos são H.265/HEVC, `.dav`, `.avi`/MPEG-4, H.264 a 10 bits ou 4:2:2/4:4:4, que dão a mensagem "nenhum vídeo com formato e tipo MIME suportado".
    - A decisão usa o `ffprobe` (codec e formato de cor), e não só a extensão.
    - As conversões correm numa fila, uma de cada vez. A coluna **Reprodução no browser** mostra o estado e o progresso: em fila, a converter, pronta ou falhou.
    - As conversões interrompidas por um reinício são retomadas no arranque. Os vídeos importados por versões anteriores são avaliados nessa altura.
-   - O botão ↻ cria ou recria a cópia de um vídeo. "Criar cópias de reprodução de todos os vídeos" faz o mesmo para o caso inteiro.
-   - Se o browser não reproduzir um vídeo, ficam logo em fila as cópias de **todos os vídeos do caso**, porque os vídeos do mesmo DVR têm o mesmo formato.
+   - O botão ↻ cria ou recria a cópia de um vídeo. "Criar cópias de reprodução de todos os vídeos" faz o mesmo para o processo inteiro.
+   - Se o browser não reproduzir um vídeo, ficam logo em fila as cópias de **todos os vídeos do processo**, porque os vídeos do mesmo DVR têm o mesmo formato.
    - Se, mesmo assim, o browser não reproduzir o vídeo nos resultados, a cópia certa é pedida **automaticamente**:
      - H.264/MP4 por omissão;
      - **VP9/WebM** se o browser não tiver H.264, como alguns Firefox/Chromium em Linux.
@@ -174,20 +176,20 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
    - **vista por tracks**: um cartão por pessoa ou trajetória, com revisão do track inteiro;
    - **vista por deteções**, ordenável por tempo, semelhança ou **qualidade**;
    - **frame completo** (botão 🔍): com marcação ou original, e download de qualquer um deles. Ver [Download do frame](#download-do-frame).
-6. **Eliminar um caso** (🗑 na lista de casos ou ao lado do nome do caso): pede o motivo e a confirmação, escrevendo o número do caso. Recusa se houver análises a decorrer. Cancela as conversões em curso e apaga do servidor os **vídeos originais e as cópias de reprodução**, as referências, as análises (deteções, recortes, frames) e os uploads por concluir. A auditoria mantém o histórico e regista um `case.deleted` com o motivo e a lista dos ficheiros apagados. Exporta antes os relatórios de que precises.
-7. **Eliminar uma análise** (🗑 na lista de análises ou "Eliminar" nos resultados): pede o motivo e a confirmação, escrevendo o número da análise. Apaga as deteções, os tracks, as revisões e os ficheiros gerados. Os vídeos e as referências do caso mantêm-se. A auditoria é *append-only*: guarda o histórico da análise e regista a eliminação (quem, quando, motivo, parâmetros e totais). Não é possível eliminar uma análise a decorrer; é preciso cancelá-la primeiro.
+6. **Eliminar um processo** (🗑 na lista de processos ou ao lado do nome do processo): pede o motivo e a confirmação, escrevendo o número do processo. Recusa se houver análises a decorrer. Cancela as conversões em curso e apaga do servidor os **vídeos originais e as cópias de reprodução**, as referências, as análises (deteções, recortes, frames) e os uploads por concluir. A auditoria mantém o histórico e regista um `case.deleted` com o motivo e a lista dos ficheiros apagados. Exporta antes os relatórios de que precises.
+7. **Eliminar uma análise** (🗑 na lista de análises ou "Eliminar" nos resultados): pede o motivo e a confirmação, escrevendo o número da análise. Apaga as deteções, os tracks, as revisões e os ficheiros gerados. Os vídeos e as referências do processo mantêm-se. A auditoria é *append-only*: guarda o histórico da análise e regista a eliminação (quem, quando, motivo, parâmetros e totais). Não é possível eliminar uma análise a decorrer; é preciso cancelá-la primeiro.
 8. **Exportar:** relatório PDF ou HTML, com estatísticas, parâmetros, tracks e qualidade; CSV; JSON; ou ZIP.
-   - **Guardar frame:** no leitor dos resultados de uma análise, **Guardar frame** guarda o frame original (PNG, sem marcações, com SHA-256) no instante atual. Fica como imagem validada no separador *Resultados* do caso (e na auditoria: `frame.saved`).
-   - **Separador *Resultados* do caso:** no topo, as **análises concluídas** (o que se procurou, locais, n.º de vídeos, correspondências ou pessoas distintas, quantas estão por rever, data e analista), com **Abrir resultados** e **Ver imagens** (filtra as imagens dessa análise); uma análise aparece aqui logo que termina. Abaixo, as imagens validadas de todas as análises: deteções confirmadas e frames guardados no leitor, com o local, o vídeo, a hora real, a pessoa e quem confirmou/guardou. Clicar numa imagem abre-a em tamanho grande (com marcação ou original; ← → para navegar). Filtra-se por local, tipo, pessoa e análise, escolhem-se as imagens e **Descarregar selecionados** gera o ZIP só com essas. Cada cartão tem também o PNG original e "Abrir na análise"; um frame guardado pode ser retirado (fica na auditoria).
-   - **Frames originais validados (ZIP):** no menu *Exportar* dos resultados, no separador *Resultados* (seleção) ou para o caso inteiro no separador *Análises*. Inclui o frame completo do vídeo original, sem anotações, de cada deteção **confirmada** (a revisão de um track aplica-se às suas deteções):
+   - **Guardar frame:** no leitor dos resultados de uma análise, **Guardar frame** guarda o frame original (PNG, sem marcações, com SHA-256) no instante atual. Fica como imagem validada no separador *Resultados* do processo (e na auditoria: `frame.saved`).
+   - **Separador *Resultados* do processo:** no topo, as **análises concluídas** (o que se procurou, locais, n.º de vídeos, correspondências ou pessoas distintas, quantas estão por rever, data e analista), com **Abrir resultados** e **Ver imagens** (filtra as imagens dessa análise); uma análise aparece aqui logo que termina. Abaixo, as imagens validadas de todas as análises: deteções confirmadas e frames guardados no leitor, com o local, o vídeo, a hora real, a pessoa e quem confirmou/guardou. Clicar numa imagem abre-a em tamanho grande (com marcação ou original; ← → para navegar). Filtra-se por local, tipo, pessoa e análise, escolhem-se as imagens e **Descarregar selecionados** gera o ZIP só com essas. Cada cartão tem também o PNG original e "Abrir na análise"; um frame guardado pode ser retirado (fica na auditoria).
+   - **Frames originais validados (ZIP):** no menu *Exportar* dos resultados, no separador *Resultados* (seleção) ou para o processo inteiro no separador *Análises*. Inclui o frame completo do vídeo original, sem anotações, de cada deteção **confirmada** (a revisão de um track aplica-se às suas deteções):
      - os frames com várias deteções aparecem uma só vez;
      - `manifesto.csv` com uma linha por deteção (análise, vídeo, frame, tempo e hora real, semelhança, revisor, método de extração e **SHA-256** do PNG);
      - `LEIAME.txt` com o critério, quem gerou e quando.
 
      O ZIP é gerado em streaming, porque com muitos frames a extração pode demorar. A exportação fica na auditoria com a lista das deteções.
-9. **Lista de casos:** mostra o **espaço ocupado em disco** por cada caso (vídeos, cópias de reprodução, referências, análises e uploads por concluir) e o total.
-10. **Tarefas em curso:** uma faixa no topo mostra as análises (progresso, tempo restante e posição na fila), as conversões para reprodução e os uploads a decorrer nos casos a que tens acesso, com ligação para cada um. No fim de uma análise aparece uma notificação. Também mostra um alerta quando o disco do servidor passa de 80% (amarelo) ou 90% (vermelho).
-11. **Fila de análises:** as análises correm uma de cada vez. Nas que estão em fila, quem as criou, o responsável do caso ou um admin pode mudar a prioridade (alta, normal ou baixa) e retê-las ou libertá-las. Uma análise a decorrer só pode ser cancelada. A fila sobrevive a um reinício do servidor: as análises em fila retomam e as que estavam a decorrer ficam marcadas como interrompidas.
+9. **Lista de processos:** mostra o **espaço ocupado em disco** por cada processo (vídeos, cópias de reprodução, referências, análises e uploads por concluir) e o total.
+10. **Tarefas em curso:** uma faixa no topo mostra as análises (progresso, tempo restante e posição na fila), as conversões para reprodução e os uploads a decorrer nos processos a que tens acesso, com ligação para cada um. No fim de uma análise aparece uma notificação. Também mostra um alerta quando o disco do servidor passa de 80% (amarelo) ou 90% (vermelho).
+11. **Fila de análises:** as análises correm uma de cada vez. Nas que estão em fila, quem as criou, o responsável do processo ou um admin pode mudar a prioridade (alta, normal ou baixa) e retê-las ou libertá-las. Uma análise a decorrer só pode ser cancelada. A fila sobrevive a um reinício do servidor: as análises em fila retomam e as que estavam a decorrer ficam marcadas como interrompidas.
 
 ### Pessoas e várias fotos (vários ângulos)
 No separador *Referências* podes trabalhar com **fotos soltas** ou com **pessoas**.
@@ -200,14 +202,14 @@ No separador *Referências* podes trabalhar com **fotos soltas** ou com **pessoa
 Os rótulos de texto da versão anterior são convertidos automaticamente em pessoas no arranque.
 
 ### Procurar a pessoa noutras análises
-O botão **Procurar noutras análises** (👥), num track ou numa pessoa, compara o seu embedding (média das melhores faces) com os tracks de todas as análises concluídas dos casos a que tens acesso, ou só do caso atual.
+O botão **Procurar noutras análises** (👥), num track ou numa pessoa, compara o seu embedding (média das melhores faces) com os tracks de todas as análises concluídas dos processos a que tens acesso, ou só do processo atual.
 - Só se comparam análises feitas com o **mesmo modelo**.
-- Os resultados são candidatos ordenados por semelhança, com caso, análise, vídeo e hora real: confirma-os sempre visualmente.
+- Os resultados são candidatos ordenados por semelhança, com processo, análise, vídeo e hora real: confirma-os sempre visualmente.
 - Cada pesquisa fica na auditoria.
 - As análises no modo "procurar" feitas antes desta versão não têm índice e aparecem contadas à parte.
 
-### Painel do caso
-O separador **Painel**, o primeiro de cada caso, resume o caso num relance. Por omissão considera todas as análises concluídas; também se pode escolher só algumas.
+### Painel do processo
+O separador **Painel**, o primeiro de cada processo, resume o processo num relance. Por omissão considera todas as análises concluídas; também se pode escolher só algumas.
 - **Indicadores:**
   - locais e vídeos (duração, quantos vídeos não têm hora real, espaço ocupado);
   - análises concluídas e em curso;
@@ -222,20 +224,20 @@ O separador **Painel**, o primeiro de cada caso, resume o caso num relance. Por 
 
 A contagem segue o mesmo critério do relatório: uma deteção conta como correspondência se estiver abaixo do limiar ou num track com correspondência. As aparições só pelo vestuário e o modo descoberta contam à parte.
 
-### Pesquisa por foto noutros casos
-Para identificar a mesma pessoa em vários casos, em **Referências/Pessoas** abre o menu da pessoa (ou de uma foto solta) e escolhe **Procurar noutros casos**.
-- As fotos da pessoa são comparadas com os *tracks* de **todas as análises já feitas** nos casos a que o utilizador tem acesso. Os vídeos não são reprocessados.
+### Pesquisa por foto noutros processos
+Para identificar a mesma pessoa em vários processos, em **Referências/Pessoas** abre o menu da pessoa (ou de uma foto solta) e escolhe **Procurar noutros processos**.
+- As fotos da pessoa são comparadas com os *tracks* de **todas as análises já feitas** nos processos a que o utilizador tem acesso. Os vídeos não são reprocessados.
 - Os embeddings das fotos são calculados com o modelo de cada análise, e conta a foto mais parecida. Por omissão usa o limiar de cada análise.
-- Os resultados mostram o caso, a análise, o vídeo, a hora real, a semelhança e o estado de revisão, com ligação para o instante exato.
+- Os resultados mostram o processo, a análise, o vídeo, a hora real, a semelhança e o estado de revisão, com ligação para o instante exato.
 - **Limitação:** só entram as análises com índice. São todas as do modo descoberta e as do modo procurar feitas desde a versão com ligação entre análises.
-- Os resultados são candidatos: confirma sempre visualmente. Cada pesquisa fica na auditoria (`person.photo_search`), com as fotos usadas e os casos onde houve resultados.
+- Os resultados são candidatos: confirma sempre visualmente. Cada pesquisa fica na auditoria (`person.photo_search`), com as fotos usadas e os processos onde houve resultados.
 
 ### Percurso multi-vídeo
-O separador **Percurso/Multi View** do caso junta as aparições das análises escolhidas e ordena-as pela **hora real do DVR**.
+O separador **Percurso/Multi View** do processo junta as aparições das análises escolhidas e ordena-as pela **hora real do DVR**.
 - Por omissão escolhe todas as análises "procurar" concluídas, para juntar vídeos analisados à parte.
 - Mostra uma linha por vídeo (mesmo os que não têm aparições), **agrupados por local**, com blocos coloridos por pessoa (tracejados se a aparição vier só do vestuário), e a lista cronológica, exportável em CSV (colunas `local`, `camara` e `ficheiro`).
 - O campo **Local** limita o percurso e o leitor a um só local.
-- Os vídeos sem hora acertada ficam fora do eixo e são assinalados. Essa informação ("Sem hora real: …" e o aviso) pode ser escondida com **Esconder** (a escolha fica guardada no browser, por caso) e volta com "Mostrar aparições sem hora real".
+- Os vídeos sem hora acertada ficam fora do eixo e são assinalados. Essa informação ("Sem hora real: …" e o aviso) pode ser escondida com **Esconder** (a escolha fica guardada no browser, por processo) e volta com "Mostrar aparições sem hora real".
 - **Leitor multi-vídeo:** os vídeos com hora acertada aparecem lado a lado e são comandados por um relógio comum, na hora real do DVR. Inclui play/pausa, ±10 s, velocidade de 0,5× a 8×, "Próxima aparição", escolha dos vídeos visíveis (agrupados por local, com "Só <local>") e ampliação de um vídeo.
   - O vídeo onde a pessoa aparece nesse instante fica com contorno vermelho e o nome da pessoa.
   - Clicar num bloco do percurso leva todos os vídeos para esse instante. "Resultados", na lista, abre a análise.
@@ -253,7 +255,7 @@ No frame de uma deteção, **Melhorar (revisão)** aplica operações clássicas
 
 ### Modo descoberta (sem amostra)
 
-Quando não há nenhuma fotografia da pessoa (por exemplo, para saber *quem* passou por uma câmara), escolhe-se **Descobrir todas as faces** em *Nova análise*. Se o caso não tiver amostras válidas, este é o modo por omissão.
+Quando não há nenhuma fotografia da pessoa (por exemplo, para saber *quem* passou por uma câmara), escolhe-se **Descobrir todas as faces** em *Nova análise*. Se o processo não tiver amostras válidas, este é o modo por omissão.
 
 1. Todas as faces que passam os filtros (tamanho, confiança, qualidade) são seguidas entre frames (o **tracking é obrigatório** neste modo). De cada track guarda-se a primeira face, as que melhoram a qualidade e uma a cada 10 s.
 2. Cada track é representado pela média, ponderada pela qualidade, das suas 5 melhores faces.
@@ -263,7 +265,7 @@ Quando não há nenhuma fotografia da pessoa (por exemplo, para saber *quem* pas
    - **juntar** duas pessoas que são a mesma;
    - **mover** um track para outra pessoa ou para uma pessoa nova;
    - **confirmar** ou **rejeitar** uma pessoa inteira (por exemplo, uma falsa deteção).
-6. **Amostra:** o recorte de qualquer face (ampliado se for pequeno) pode ser adicionado às imagens de referência do caso. A partir daí, uma análise normal procura essa pessoa noutros vídeos.
+6. **Amostra:** o recorte de qualquer face (ampliado se for pequeno) pode ser adicionado às imagens de referência do processo. A partir daí, uma análise normal procura essa pessoa noutros vídeos.
 
 Os embeddings dos tracks ficam em `jobs/job_NNNNN/track_embeddings.npz`. O relatório, o CSV (`person_id`) e o JSON (`persons`, com as aparições e a hora real) incluem as pessoas.
 
@@ -282,7 +284,7 @@ Quando a face só é boa numa ou noutra câmara (de costas, de lado, longe, com 
    - Um corpo cuja face foi vista e é claramente **de outra pessoa** nunca conta: a face prevalece.
    - Só se comparam corpos dentro da **janela temporal** (por omissão ±12 h em torno das amostras, pela hora real do DVR). Se algum vídeo não tiver a hora acertada, a janela não é verificada e isso fica escrito na aparição.
    - Duas pessoas com a mesma roupa ao mesmo tempo no mesmo vídeo (fardas) são marcadas como **ambíguas**.
-5. **Calibração no próprio caso:** os corpos cuja face é de outra pessoa são negativos conhecidos. O limiar ReID baixa até ficar abaixo das distâncias deles (≤ 5 % de falsos positivos nesses negativos). O relatório mostra o limiar usado e as distâncias.
+5. **Calibração no próprio processo:** os corpos cuja face é de outra pessoa são negativos conhecidos. O limiar ReID baixa até ficar abaixo das distâncias deles (≤ 5 % de falsos positivos nesses negativos). O relatório mostra o limiar usado e as distâncias.
 6. **Resultados:**
    - os segmentos e a linha temporal passam a indicar a evidência: face (vermelho), face + vestuário (laranja) ou só vestuário (roxo);
    - a vista **Vestuário** mostra as amostras e as aparições só pela roupa, com o recorte do corpo, as cores, as distâncias e a revisão;
@@ -310,7 +312,7 @@ No frame completo de uma deteção (🔍) há dois downloads:
   - senão, procura-se um vizinho que seja o único a coincidir;
   - senão, o vídeo é lido sequencialmente até ao frame N, como na análise. É exato, mas mais lento em vídeos longos.
 
-O nome do ficheiro identifica o caso, a análise, o vídeo, o frame, o tempo e a deteção. Cada download fica na auditoria com o **SHA-256** do ficheiro entregue e o método de extração.
+O nome do ficheiro identifica o processo, a análise, o vídeo, o frame, o tempo e a deteção. Cada download fica na auditoria com o **SHA-256** do ficheiro entregue e o método de extração.
 
 ### Hora real do CCTV
 
@@ -340,11 +342,11 @@ A hora real aparece nos resultados, nos tracks e nos segmentos, e é exportada n
 
 ## Considerações forenses e legais
 
-- **Auditoria:** todas as ações ficam registadas com o utilizador autenticado, o IP e a hora UTC, na base de dados e em `data/audit.jsonl` (append-only). Inclui criação do caso, uploads (incluindo blocos iniciados ou cancelados), parâmetros, início e fim de análise, revisões de deteções e de tracks, e exportações. O registo é incluído no relatório e no ZIP.
+- **Auditoria:** todas as ações ficam registadas com o utilizador autenticado, o IP e a hora UTC, na base de dados e em `data/audit.jsonl` (append-only). Inclui criação do processo, uploads (incluindo blocos iniciados ou cancelados), parâmetros, início e fim de análise, revisões de deteções e de tracks, e exportações. O registo é incluído no relatório e no ZIP.
 - **Reprodutibilidade:** o relatório inclui os parâmetros completos (filtro de movimento, cascata, tracking, limiares) e as versões do Python, ONNX Runtime, OpenCV e NumPy. Inclui também o **SHA-256 de cada modelo** usado e o dispositivo.
 - **Evidências:** os ficheiros originais são guardados sem alterações. A cópia de reprodução é um ficheiro separado.
 - **Transparência dos filtros:** o relatório indica quantos frames foram saltados por falta de movimento e por não terem faces na 1.ª passagem. Um frame saltado não foi analisado pelo modelo completo. Se for preciso, repete a análise com os filtros desligados.
-- **Limitações:** a precisão cai muito com baixa resolução, compressão forte, perfil, oclusões, iluminação infravermelha e *motion blur*. O score de qualidade ajuda a identificar estes casos. Os modelos têm enviesamentos demográficos documentados. Um "não encontrado" **não prova ausência**.
+- **Limitações:** a precisão cai muito com baixa resolução, compressão forte, perfil, oclusões, iluminação infravermelha e *motion blur*. O score de qualidade ajuda a identificar estes processos. Os modelos têm enviesamentos demográficos documentados. Um "não encontrado" **não prova ausência**.
 - **Proteção de dados:** a análise biométrica é tratamento de dados de categoria especial (RGPD art. 9.º; Lei n.º 59/2019 no contexto de investigação criminal). Os dados ficam locais. A app tem contas próprias com MFA. Se a publicares (por exemplo, com Cloudflare Tunnel), põe também o **Cloudflare Access** à frente, como defesa em profundidade.
 - **Licenças:** o código desta aplicação e o pós-processamento SCRFD e ArcFace (adaptado do InsightFace) são MIT. Os **pesos pré-treinados do InsightFace** (`buffalo_l`, `buffalo_sc`) são disponibilizados **apenas para investigação e uso não comercial**. Para uso comercial, usa o motor DeepFace ou modelos com licença adequada.
 

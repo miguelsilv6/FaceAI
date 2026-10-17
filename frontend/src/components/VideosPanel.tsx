@@ -1,9 +1,9 @@
-import { Badge, Button, Card, Group, Loader, SimpleGrid, Stack, Text, TextInput, Title } from "@mantine/core";
-import { IconChevronRight, IconClock, IconMapPin, IconMapPinPlus, IconRefresh } from "@tabler/icons-react";
+import { Badge, Button, Card, Group, Loader, SimpleGrid, Stack, Text, TextInput, Title, Tooltip } from "@mantine/core";
+import { IconChevronRight, IconClock, IconDatabase, IconMapPin, IconMapPinPlus, IconRefresh } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import { api, formatTime } from "../api";
+import { api, formatBytes, formatTime } from "../api";
 import { notifyError, notifyOk } from "../notify";
 import { cameraName } from "../places";
 import type { Location, Video } from "../types";
@@ -74,7 +74,7 @@ export default function VideosPanel({ caseId, videos, locations, onChange }: Pro
         )}
       </Group>
       <Text size="sm" c="dimmed">
-        Cada local é um estabelecimento ou zona de interesse para o caso, com os seus vídeos. Abra um local para
+        Cada local é um estabelecimento ou zona de interesse para o processo, com os seus vídeos. Abra um local para
         importar os vídeos, dar-lhes nome e acertar a hora.
       </Text>
       {locations.length === 0 ? (
@@ -103,6 +103,11 @@ export default function VideosPanel({ caseId, videos, locations, onChange }: Pro
                   <Group gap="xs">
                     <Badge variant="light">{vs.length} vídeo{vs.length === 1 ? "" : "s"}</Badge>
                     {vs.length > 0 && <Text size="xs" c="dimmed">{formatTime(l.duration_s)} de vídeo</Text>}
+                    {vs.length > 0 && (
+                      <Tooltip label={`Originais ${formatBytes(l.originals_bytes)} · cópias de reprodução ${formatBytes(l.playback_bytes)}`}>
+                        <Badge size="sm" variant="default" leftSection={<IconDatabase size={10} />}>{formatBytes(l.size_bytes)}</Badge>
+                      </Tooltip>
+                    )}
                   </Group>
                   {vs.length > 0 ? (
                     <>

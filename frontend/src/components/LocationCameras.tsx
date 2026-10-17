@@ -1,8 +1,8 @@
 import {
-  ActionIcon, Badge, Button, Card, Group, Loader, Menu, Stack, Table, Text, TextInput, Title, Tooltip,
+  ActionIcon, Alert, Badge, Button, Card, Group, Loader, Menu, Stack, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconArrowsExchange, IconCheck, IconClock, IconDots, IconMapPin, IconMovie, IconPencil, IconPlayerPlay, IconTrash, IconX,
+  IconArrowsExchange, IconCheck, IconClock, IconDatabase, IconDots, IconMapPin, IconMovie, IconPencil, IconPlayerPlay, IconTrash, IconX,
 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 
@@ -107,6 +107,11 @@ function LocationHeader({ location, cameras, duration, onChange, onDeleted }: {
         )}
         <Badge variant="light">{cameras} vídeo{cameras === 1 ? "" : "s"}</Badge>
         {cameras > 0 && <Text size="xs" c="dimmed">{formatTime(duration)} de vídeo</Text>}
+        {cameras > 0 && (
+          <Tooltip label={`Originais ${formatBytes(location.originals_bytes)} · cópias de reprodução ${formatBytes(location.playback_bytes)}`}>
+            <Badge variant="default" leftSection={<IconDatabase size={12} />}>{formatBytes(location.size_bytes)} em disco</Badge>
+          </Tooltip>
+        )}
       </Group>
       <Tooltip label={cameras ? "Mova ou elimine os vídeos para poder eliminar o local" : "Eliminar o local"}>
         <span>
@@ -124,6 +129,7 @@ export default function LocationCameras({ caseId, location, videos, locations, j
   const [clockVideo, setClockVideo] = useState<Video | null>(null);
   const [playId, setPlayId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [duplicates, setDuplicates] = useState<{ file: string; message: string }[]>([]);
   const vs = videos.filter((v) => v.location_id === location.id);
 
   // Atualiza o estado das conversões para o browser (e da leitura da hora por OCR) enquanto decorrem.
@@ -149,8 +155,9 @@ export default function LocationCameras({ caseId, location, videos, locations, j
     if (!files.length) return;
     setProgress(0);
     try {
-      const created = await api.uploadVideos(caseId, files, setProgress, location.id);
-      notifyOk(`${created.length} vídeo(s) importado(s) para "${location.name}".`);
+      const { created, duplicates: dups } = await api.uploadVideos(caseId, files, setProgress, location.id);
+      setDuplicates(dups);
+      if (created.length) notifyOk(`${created.length} vídeo(s) importado(s) para "${location.name}".`);
     } catch (e) {
       notifyError(e, "Falha ao importar vídeo");
     } finally {
@@ -177,6 +184,15 @@ export default function LocationCameras({ caseId, location, videos, locations, j
         icon={<IconMovie size={40} stroke={1.5} />}
         title={`Importar vídeos de CCTV para "${location.name}"`}
         hint="Um ficheiro por ângulo de CCTV. Envio em blocos: se a ligação falhar, volte a largar o mesmo ficheiro para continuar de onde parou." />
+      {duplicates.length > 0 && (
+        <Alert color="yellow" title={`${duplicates.length} ficheiro(s) não importado(s): já existem neste processo`}
+          withCloseButton closeButtonLabel="Fechar" onClose={() => setDuplicates([])}>
+          <Stack gap={2}>
+            {duplicates.map((d) => <Text key={d.file} size="sm">{d.message}</Text>)}
+            <Text size="xs" c="dimmed">A comparação é feita pelo conteúdo (SHA-256), não pelo nome do ficheiro.</Text>
+          </Stack>
+        </Alert>
+      )}
       <Card withBorder p={0}>
         {vs.length === 0 ? (
           <Text c="dimmed" p="md">Sem vídeos neste local. Importe-os acima.</Text>
@@ -200,7 +216,10 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                         </Tooltip>
                         <Stack gap={0}>
                           <CameraNameInput video={v} onSaved={onChange} />
-                          <Text size="xs" c="dimmed" truncate maw={260} title={v.filename}>{v.filename}</Text>
+                          <Text size="xs" c="dimmed" truncate maw={260}
+                            title={v.sha256 ? `${v.filename}\nSHA-256 ${v.sha256}` : v.filename}>
+                            {v.filename}{v.sha256 ? ` · ${v.sha256.slice(0, 12)}…` : ""}
+                          </Text>
                         </Stack>
                       </Group>
                     </Table.Td><Table.Td>{formatBytes(v.size_bytes)}</Table.Td>

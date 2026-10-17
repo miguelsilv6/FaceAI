@@ -2,7 +2,7 @@
 <html lang="pt">
 <head>
 <meta charset="utf-8">
-<title>Relatório FaceAI — {{ case.name if case else "Caso" }} — Análise #{{ job.id }}</title>
+<title>Relatório FaceAI — {{ case.name if case else "Processo" }} — Análise #{{ job.id }}</title>
 <style>
   @page { size: A4; margin: 16mm 14mm; @bottom-right { content: "Página " counter(page) " de " counter(pages); font-size: 8pt; color: #666; } }
   body { font-family: "DejaVu Sans", Arial, sans-serif; font-size: 9.5pt; color: #1b1b1b; line-height: 1.4; max-width: 1100px; margin: 0 auto; padding: 16px; }
@@ -38,9 +38,9 @@
 e são <em>indicativos</em>. Não constituem, por si só, uma identificação conclusiva e têm de ser validados por um
 perito, tendo em conta a qualidade das imagens, a iluminação, o ângulo, as oclusões e a possibilidade de falsos positivos e negativos.</div>
 
-{{ h("Caso") }}
+{{ h("Processo") }}
 <table class="kv">
-  <tr><th>Caso</th><td>#{{ case.id }} — {{ case.name }}</td></tr>
+  <tr><th>Processo</th><td>#{{ case.id }} — {{ case.name }}</td></tr>
   <tr><th>Descrição</th><td>{{ case.description or "—" }}</td></tr>
   <tr><th>Analista</th><td>{{ job.created_by or case.analyst or "—" }}</td></tr>
   <tr><th>Análise</th><td>#{{ job.id }} · estado: {{ {"completed": "concluída", "failed": "falhou", "cancelled": "cancelada", "running": "a decorrer", "queued": "em fila"}.get(job.status.value, job.status.value) }}</td></tr>
@@ -70,7 +70,7 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
   <tr><th>#</th><th>Local</th><th>Vídeo</th><th>Ficheiro</th><th>Tamanho</th><th>Duração</th><th>FPS</th><th>Resolução</th><th>Codec</th></tr>
   {% set frozen = {} %}{% for l in job.params.get("locations") or [] %}{% set _ = frozen.update({l.id: l.name}) %}{% endfor %}
   {% for v in videos %}{% set pl = place(v) %}
-  <tr><td>{{ v.id }}</td><td>{{ pl.location_name or "—" }}{% if v.location_id in frozen and frozen[v.location_id] != pl.location_name %}<br><span class="muted">na análise: {{ frozen[v.location_id] }}</span>{% endif %}</td><td>{{ pl.camera_name }}</td><td>{{ v.filename }}</td><td>{{ "{:,}".format(v.size_bytes) }} B</td>
+  <tr><td>{{ v.id }}</td><td>{{ pl.location_name or "—" }}{% if v.location_id in frozen and frozen[v.location_id] != pl.location_name %}<br><span class="muted">na análise: {{ frozen[v.location_id] }}</span>{% endif %}</td><td>{{ pl.camera_name }}</td><td>{{ v.filename }}{% if v.sha256 %}<br><span class="muted" style="font-family: monospace; font-size: 7pt; word-break: break-all">SHA-256 {{ v.sha256 }}</span>{% endif %}</td><td>{{ "{:,}".format(v.size_bytes) }} B</td>
       <td>{{ v.duration_s | ts }}</td><td>{{ "%.2f"|format(v.fps) }}</td><td>{{ v.width }}×{{ v.height }}</td><td>{{ v.codec or "—" }}</td></tr>
   {% endfor %}
 </table>
@@ -189,7 +189,7 @@ pertencer a outra pessoa, e a roupa pode mudar (casaco, mochila). Cada apariçã
 <p>{{ job.clothing_samples }} amostra(s) de vestuário{% if cs.get("gallery_colors") %} — tronco <strong>{{ cs.gallery_colors.tronco }}</strong>, pernas <strong>{{ cs.gallery_colors.pernas }}</strong>{% endif %} ·
 {{ cs.get("body_tracks", 0) }} tracks de corpo analisados · {{ cs.get("known_negatives", 0) }} corpos com face de outra pessoa (negativos conhecidos) ·
 {{ cs.get("excluded_by_window", 0) }} excluídos pela janela temporal.
-{% if cs.get("calibration") %}Calibração no caso: limiar usado {{ cs.calibration.threshold_used }}{% if cs.calibration.get("negatives_min") is not none %} · distância mínima dos negativos {{ cs.calibration.negatives_min }}{% endif %}{% if cs.calibration.get("positives_median") is not none %} · mediana entre amostras {{ cs.calibration.positives_median }}{% endif %}.{% endif %}
+{% if cs.get("calibration") %}Calibração no processo: limiar usado {{ cs.calibration.threshold_used }}{% if cs.calibration.get("negatives_min") is not none %} · distância mínima dos negativos {{ cs.calibration.negatives_min }}{% endif %}{% if cs.calibration.get("positives_median") is not none %} · mediana entre amostras {{ cs.calibration.positives_median }}{% endif %}.{% endif %}
 {% if cs.get("note") %}<br><strong>{{ cs.note }}</strong>{% endif %}</p>
 {% if clothing %}
 <table class="det">
@@ -208,7 +208,7 @@ pertencer a outra pessoa, e a roupa pode mudar (casaco, mochila). Cada apariçã
 {% endif %}
 {% endif %}
 
-{{ h("Registo de auditoria do caso") }}
+{{ h("Registo de auditoria do processo") }}
 <p class="muted">O utilizador é a conta autenticada (login com password e MFA). Eventos anteriores à introdução das contas registam o nome indicado livremente no navegador, sem IP.</p>
 <table>
   <tr><th>#</th><th>Data/hora (UTC)</th><th>Utilizador</th><th>IP</th><th>Ação</th><th>Detalhes</th></tr>

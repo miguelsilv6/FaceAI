@@ -197,7 +197,7 @@ function DiskAlert({ disk, onClose }: { disk: DiskStatus; onClose: () => void })
         Ocupado {disk.percent.toFixed(1)}% · livres {formatBytes(disk.free)}
         {isAdmin && disk.total ? ` de ${formatBytes(disk.total)}` : ""}.{" "}
         {critical ? "Novos uploads e análises podem ser recusados. " : ""}
-        {isAdmin ? "Liberte espaço eliminando análises ou casos antigos (ver a coluna \"Espaço\" na lista de casos)."
+        {isAdmin ? "Liberte espaço eliminando análises ou processos antigos (ver a coluna \"Espaço\" na lista de processos)."
           : "Avise o administrador."}
       </Text>
     </Alert>

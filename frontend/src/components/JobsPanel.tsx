@@ -30,7 +30,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
     try {
       const sum = await api.validatedSummary(caseId);
       if (!sum.detections && !sum.saved_frames) {
-        notifyError(new Error("Ainda não há deteções confirmadas nem frames guardados neste caso."));
+        notifyError(new Error("Ainda não há deteções confirmadas nem frames guardados neste processo."));
         return;
       }
       notifyOk(`A preparar ${sum.frames} frame(s) de ${sum.detections} deteção(ões) confirmada(s)`
@@ -212,7 +212,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                     <NumberInput label="Janela temporal (± h)" description="Em torno das amostras (hora real); 0 = sem"
                       min={0} step={1} decimalScale={1} value={params.clothing_window_h}
                       onChange={(v) => set("clothing_window_h", num(v, 12))} />
-                    <NumberInput label="Limiar ReID (corpo)" description="Menor = mais restritivo; ajustado no caso"
+                    <NumberInput label="Limiar ReID (corpo)" description="Menor = mais restritivo; ajustado no processo"
                       min={0.05} max={0.9} step={0.01} decimalScale={3} value={params.reid_threshold ?? ""}
                       onChange={(v) => set("reid_threshold", num(v, 0.27))} />
                     <NumberInput label="Limiar de cor" description="Tronco/pernas: veto de roupa diferente"
@@ -279,13 +279,13 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
       {jobs.length > 0 && (
         <Group justify="flex-end">
           <Button variant="light" size="xs" leftSection={<IconDownload size={16} />} onClick={downloadValidated}>
-            Descarregar frames originais validados do caso (ZIP)
+            Descarregar frames originais validados do processo (ZIP)
           </Button>
         </Group>
       )}
       <Card withBorder p={0}>
         {jobs.length === 0 ? (
-          <Text c="dimmed" p="md">Ainda não foram feitas análises neste caso.</Text>
+          <Text c="dimmed" p="md">Ainda não foram feitas análises neste processo.</Text>
         ) : (
           <Table.ScrollContainer minWidth={840}>
             <Table highlightOnHover>

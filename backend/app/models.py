@@ -84,6 +84,8 @@ class Video(SQLModel, table=True):
     location_id: int | None = Field(default=None, foreign_key="location.id", index=True)
     camera_name: str = ""
     filename: str
+    sha256: str = Field(default="", index=True)  # integridade e deteção de duplicados no processo
+    quick_hash: str = Field(default="", index=True)  # SHA-256(tamanho ‖ 1.º MiB ‖ último MiB) — pré-verificação
     stored_path: str
     size_bytes: int
     duration_s: float = 0.0
@@ -236,6 +238,7 @@ class Upload(SQLModel, table=True):
     case_id: int = Field(foreign_key="case.id", index=True)
     kind: str  # "video" | "reference"
     location_id: int | None = None  # vídeo: local de destino (None → "Geral")
+    quick_hash: str = ""  # vídeo: impressão rápida enviada pelo browser (deteção de duplicados)
     filename: str
     size_bytes: int
     received_bytes: int = 0

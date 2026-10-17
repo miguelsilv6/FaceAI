@@ -34,12 +34,12 @@ export default function CaseList() {
   return (
     <Stack maw={1100} mx="auto">
       <Group justify="space-between">
-        <Title order={2}>Casos</Title>
-        <Button leftSection={<IconFolderPlus size={18} />} onClick={open}>Novo caso</Button>
+        <Title order={2}>Processos</Title>
+        <Button leftSection={<IconFolderPlus size={18} />} onClick={open}>Novo processo</Button>
       </Group>
       <Card withBorder p={0}>
         {cases.length === 0 ? (
-          <Text c="dimmed" p="lg">Ainda não existem casos. Crie um para importar imagens de referência e vídeos.</Text>
+          <Text c="dimmed" p="lg">Ainda não existem processos. Crie um para importar imagens de referência e vídeos.</Text>
         ) : (
           <Table.ScrollContainer minWidth={600}>
             <Table highlightOnHover>
@@ -59,8 +59,8 @@ export default function CaseList() {
                     <Table.Td ta="right" style={{ whiteSpace: "nowrap" }}>
                       {c.size_bytes !== undefined ? formatBytes(c.size_bytes) : "—"}</Table.Td>
                     <Table.Td w={40} onClick={(e) => e.stopPropagation()}>
-                      <Tooltip label="Eliminar caso">
-                        <ActionIcon variant="subtle" color="red" aria-label={`Eliminar caso ${c.id}`} onClick={() => setToDelete(c)}>
+                      <Tooltip label="Eliminar processo">
+                        <ActionIcon variant="subtle" color="red" aria-label={`Eliminar processo ${c.id}`} onClick={() => setToDelete(c)}>
                           <IconTrash size={16} />
                         </ActionIcon>
                       </Tooltip>
@@ -70,7 +70,7 @@ export default function CaseList() {
               </Table.Tbody>
               <Table.Tfoot>
                 <Table.Tr>
-                  <Table.Td colSpan={5}><Text size="sm" c="dimmed">{cases.length} caso(s)</Text></Table.Td>
+                  <Table.Td colSpan={5}><Text size="sm" c="dimmed">{cases.length} processo(s)</Text></Table.Td>
                   <Table.Td ta="right" style={{ whiteSpace: "nowrap" }}>
                     <Text size="sm" fw={600}>{formatBytes(cases.reduce((t, c) => t + (c.size_bytes ?? 0), 0))}</Text>
                   </Table.Td>
@@ -83,7 +83,7 @@ export default function CaseList() {
       </Card>
       <DeleteCaseModal kase={toDelete} onClose={() => setToDelete(null)}
         onDeleted={(c) => { setToDelete(null); setCases((cs) => cs.filter((x) => x.id !== c.id)); }} />
-      <Modal opened={opened} onClose={close} title="Novo caso">
+      <Modal opened={opened} onClose={close} title="Novo processo">
         <Stack>
           <TextInput label="Nome / referência do processo" required value={name}
             onChange={(e) => setName(e.currentTarget.value)} data-autofocus />

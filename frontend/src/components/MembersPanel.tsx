@@ -19,7 +19,7 @@ export default function MembersPanel({ caseId, members, canManage, onChange }: {
     e.preventDefault();
     try {
       await api.addMember(caseId, username.trim().toLowerCase(), role);
-      notifyOk(`${username} tem agora acesso ao caso.`);
+      notifyOk(`${username} tem agora acesso ao processo.`);
       setUsername("");
       onChange();
     } catch (err) {
@@ -29,7 +29,7 @@ export default function MembersPanel({ caseId, members, canManage, onChange }: {
 
   const remove = async (m: CaseMember) => {
     const self = m.user_id === user.id;
-    if (!window.confirm(self ? "Remover o seu próprio acesso a este caso?" : `Remover o acesso de ${m.username}?`)) return;
+    if (!window.confirm(self ? "Remover o seu próprio acesso a este processo?" : `Remover o acesso de ${m.username}?`)) return;
     try {
       await api.removeMember(caseId, m.user_id);
       onChange();
@@ -40,8 +40,8 @@ export default function MembersPanel({ caseId, members, canManage, onChange }: {
 
   return (
     <Stack>
-      <Text size="sm" c="dimmed">Só os utilizadores desta lista (e os administradores) veem o caso. O responsável
-        pode editar e eliminar o caso e gerir a equipa; os membros trabalham nas análises.</Text>
+      <Text size="sm" c="dimmed">Só os utilizadores desta lista (e os administradores) veem o processo. O responsável
+        pode editar e eliminar o processo e gerir a equipa; os membros trabalham nas análises.</Text>
       <Card withBorder p={0}>
         <Table>
           <Table.Thead>
@@ -80,7 +80,7 @@ export default function MembersPanel({ caseId, members, canManage, onChange }: {
           </Table.Tbody>
         </Table>
       </Card>
-      {!members.length && <Text c="dimmed" size="sm">Caso sem equipa (anterior às contas): só os administradores
+      {!members.length && <Text c="dimmed" size="sm">Processo sem equipa (anterior às contas): só os administradores
         o veem até lhe atribuírem um responsável.</Text>}
       {canManage && (
         <form onSubmit={add}>

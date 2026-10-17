@@ -94,7 +94,7 @@ def test_discover_groups_all_faces_without_reference(client, tmp_path):
     # Exportações do modo descoberta
     html = client.get(f"/api/jobs/{job['id']}/export/html").text
     assert "Pessoas distintas" in html and "Pessoa #1" in html and "descoberta" in html
-    assert "1. Caso" in html and "Registo de auditoria" in html
+    assert "1. Processo" in html and "Registo de auditoria" in html
     rows = list(csv.DictReader(io.StringIO(client.get(f"/api/jobs/{job['id']}/export/csv").text.lstrip("﻿"))))
     assert {r["person_id"] for r in rows} == {"1", "2"}
     data = client.get(f"/api/jobs/{job['id']}/export/json").json()

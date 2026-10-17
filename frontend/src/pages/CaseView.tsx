@@ -85,7 +85,7 @@ export default function CaseView() {
       const updated = await api.updateCase(caseId, { name: name.trim(), description });
       setCase(updated);
       setEditing(false);
-      notifyOk("Caso atualizado. A alteração fica registada na auditoria.");
+      notifyOk("Processo atualizado. A alteração fica registada na auditoria.");
       if (tab === "audit") api.audit(caseId).then(setAudit);
     } catch (e) {
       notifyError(e, "Não foi possível guardar");
@@ -98,18 +98,18 @@ export default function CaseView() {
   return (
     <Stack maw={1300} mx="auto">
       <Breadcrumbs>
-        <Anchor component={Link} to="/">Casos</Anchor>
+        <Anchor component={Link} to="/">Processos</Anchor>
         <Text>#{kase.id} {kase.name}</Text>
       </Breadcrumbs>
       <div>
         <Group gap="xs" wrap="nowrap">
           <Title order={2}>{kase.name}</Title>
           {canManage && <>
-          <Tooltip label="Editar nome e descrição do caso">
-            <ActionIcon variant="subtle" onClick={startEdit} aria-label="Editar caso"><IconPencil size={18} /></ActionIcon>
+          <Tooltip label="Editar nome e descrição do processo">
+            <ActionIcon variant="subtle" onClick={startEdit} aria-label="Editar processo"><IconPencil size={18} /></ActionIcon>
           </Tooltip>
-          <Tooltip label="Eliminar o caso (vídeos, cópias, referências e análises)">
-            <ActionIcon variant="subtle" color="red" onClick={() => setDeleting(true)} aria-label="Eliminar caso">
+          <Tooltip label="Eliminar o processo (vídeos, cópias, referências e análises)">
+            <ActionIcon variant="subtle" color="red" onClick={() => setDeleting(true)} aria-label="Eliminar processo">
               <IconTrash size={18} />
             </ActionIcon>
           </Tooltip>
@@ -119,13 +119,13 @@ export default function CaseView() {
           {kase.analyst ? ` por ${kase.analyst}` : ""}</Text>
       </div>
       <DeleteCaseModal kase={deleting ? kase : null} onClose={() => setDeleting(false)} onDeleted={() => navigate("/")} />
-      <Modal opened={editing} onClose={() => setEditing(false)} title={`Editar caso #${kase.id}`}>
+      <Modal opened={editing} onClose={() => setEditing(false)} title={`Editar processo #${kase.id}`}>
         <Stack>
           <TextInput label="Nome / referência do processo" required value={name} data-autofocus
             onChange={(e) => setName(e.currentTarget.value)} error={!name.trim() ? "Obrigatório" : undefined} />
           <Textarea label="Descrição" autosize minRows={2} value={description}
             onChange={(e) => setDescription(e.currentTarget.value)} />
-          <Text size="xs" c="dimmed">Os valores anteriores ficam registados na auditoria do caso.</Text>
+          <Text size="xs" c="dimmed">Os valores anteriores ficam registados na auditoria do processo.</Text>
           <Group justify="flex-end">
             <Button variant="default" onClick={() => setEditing(false)}>Cancelar</Button>
             <Button onClick={save} loading={saving} disabled={!name.trim()}>Guardar</Button>

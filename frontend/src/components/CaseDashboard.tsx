@@ -121,7 +121,7 @@ const ACTIONS: Record<string, string> = {
   "job.deleted": "análise eliminada", "report.generated": "relatório gerado", "job.started": "análise iniciada",
   "job.failed": "análise falhou", "job.cancelled": "análise cancelada", "video.playback_copy_requested": "cópia de reprodução pedida",
   "video.playback_copy_ready": "cópia de reprodução pronta", "video.clock_ocr_failed": "OCR da hora sem resultado",
-  "case.created": "caso criado", "case.updated": "caso alterado", "person.linked_search": "pesquisa noutras análises",
+  "case.created": "processo criado", "case.updated": "processo alterado", "person.linked_search": "pesquisa noutras análises",
   "frames.validated_downloaded": "frames validados descarregados",
 };
 
@@ -176,7 +176,7 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
       </SimpleGrid>
 
       {!completed.length ? (
-        <Alert color="blue">Ainda não há análises concluídas neste caso.</Alert>
+        <Alert color="blue">Ainda não há análises concluídas neste processo.</Alert>
       ) : (
         <>
           <Card withBorder>

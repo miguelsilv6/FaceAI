@@ -6,8 +6,8 @@ from .conftest import wait_for_job
 from .fakes import RED, make_image, make_video
 
 
-def _video(client, case_id, tmp_path, name, timeline):
-    path = make_video(tmp_path / name, timeline, duration_s=4, fps=10)
+def _video(client, case_id, tmp_path, name, timeline, duration_s=4.0):
+    path = make_video(tmp_path / name, timeline, duration_s=duration_s, fps=10)
     with path.open("rb") as fh:
         r = client.post(f"/api/cases/{case_id}/videos", files=[("files", (name, fh, "video/mp4"))])
     return r.json()[0]
@@ -19,8 +19,9 @@ def test_route_orders_by_real_time(client, tmp_path):
     with img.open("rb") as fh:
         client.post(f"/api/cases/{case['id']}/references", files=[("files", ("ref.jpg", fh, "image/jpeg"))])
     entrada = _video(client, case["id"], tmp_path, "entrada.mp4", [(1.0, 2.0, RED)])
-    caixa = _video(client, case["id"], tmp_path, "caixa.mp4", [(1.0, 2.0, RED)])
-    sem_hora = _video(client, case["id"], tmp_path, "armazem.mp4", [(1.0, 2.0, RED)])
+    # durações diferentes: ficheiros distintos (o mesmo ficheiro duas vezes no caso é recusado como duplicado)
+    caixa = _video(client, case["id"], tmp_path, "caixa.mp4", [(1.0, 2.0, RED)], duration_s=4.1)
+    sem_hora = _video(client, case["id"], tmp_path, "armazem.mp4", [(1.0, 2.0, RED)], duration_s=4.2)
     # A câmara da entrada começa às 10:00:00 e a da caixa às 09:59:00 → a caixa aparece primeiro na hora real
     assert client.put(f"/api/videos/{entrada['id']}/clock",
                       json={"video_s": 0, "dvr_time": "2026-10-01T10:00:00"}).status_code == 200

@@ -41,13 +41,13 @@ export default function LocationView() {
   return (
     <Stack maw={1300} mx="auto">
       <Breadcrumbs>
-        <Anchor component={Link} to="/">Casos</Anchor>
+        <Anchor component={Link} to="/">Processos</Anchor>
         <Anchor component={Link} to={back}>#{kase.id} {kase.name}</Anchor>
         <Text>{location?.name ?? "Local"}</Text>
       </Breadcrumbs>
       <Group>
         <Button variant="subtle" size="xs" leftSection={<IconArrowLeft size={14} />} component={Link} to={back}>
-          Voltar aos locais do caso
+          Voltar aos locais do processo
         </Button>
       </Group>
       {location ? (

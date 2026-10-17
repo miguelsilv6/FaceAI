@@ -32,6 +32,9 @@ export interface Location {
   created_at: string;
   video_ids: number[];
   duration_s: number;
+  size_bytes: number; // espaço em disco: vídeos originais + cópias de reprodução
+  originals_bytes: number;
+  playback_bytes: number;
 }
 
 export interface Video {
@@ -40,6 +43,7 @@ export interface Video {
   location_id: number | null;
   camera_name: string;
   filename: string;
+  sha256: string; // integridade e deteção de duplicados ("" em vídeos antigos até ser calculado)
   size_bytes: number;
   duration_s: number;
   fps: number;

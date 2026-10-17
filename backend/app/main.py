@@ -27,6 +27,7 @@ from .services import auth
 from .services.audit import request_ip
 from .services.clock_auto import resume_pending_auto_clock
 from .services.face_engine import preload_models
+from .services.hashing import start_backfill
 from .services.jobs import recover_interrupted_jobs, runner
 from .services.locations import migrate_locations
 from .services.references import migrate_person_labels
@@ -49,6 +50,7 @@ async def lifespan(_: FastAPI):
     cleanup_stale_uploads()
     resume_pending_copies()
     resume_pending_auto_clock()
+    start_backfill()
     preload_models()
     if settings.cpu_threads > 0:
         cv2.setNumThreads(settings.cpu_threads)

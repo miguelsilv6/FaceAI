@@ -116,7 +116,7 @@ export default function ReferencesPanel({ caseId, references, persons, onChange 
                 <Menu.Dropdown>
                   <Menu.Item leftSection={<IconUsersGroup size={14} />} disabled={!p.valid_references}
                     onClick={() => setSearch({ kind: "casePerson", id: p.id, name: p.name, photos: p.valid_references })}>
-                    Procurar noutros casos
+                    Procurar noutros processos
                   </Menu.Item>
                   <Menu.Divider />
                   <Menu.Item onClick={() => setEditing(p)}>Mudar nome / notas</Menu.Item>
@@ -193,7 +193,7 @@ function RefThumb({ reference: r, persons, onMove, onSearch, onDelete }: {
             {r.case_person_id != null && <Menu.Item onClick={() => onMove(r.id, null)}>Fotos soltas (tirar da pessoa)</Menu.Item>}
             <Menu.Divider />
             <Menu.Item leftSection={<IconUsersGroup size={14} />} disabled={!r.valid} onClick={() => onSearch(r)}>
-              Procurar esta foto noutros casos
+              Procurar esta foto noutros processos
             </Menu.Item>
             <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={() => onDelete(r)}>Eliminar foto</Menu.Item>
           </Menu.Dropdown>
