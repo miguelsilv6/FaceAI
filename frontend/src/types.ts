@@ -40,6 +40,7 @@ export interface Video {
   location_id: number | null;
   camera_name: string;
   filename: string;
+  sha256: string; // integridade e deteção de duplicados ("" em vídeos antigos até ser calculado)
   size_bytes: number;
   duration_s: number;
   fps: number;

@@ -44,7 +44,8 @@ from ..services import disk
 from ..services.audit import log_event
 from ..services.clock_auto import request_auto_clock
 from ..services.face_engine import get_engine
-from ..services.locations import default_location
+from ..services.hashing import file_sha256, quick_hash
+from ..services.locations import default_location, locations_by_id, video_place
 from ..services.references import validate_reference
 from ..services.transcode import (
     FORMATS,
@@ -121,18 +122,50 @@ def location_of_case(session, case_id: int, location_id: int | None, actor: str 
     return loc
 
 
+DUPLICATE_HEADER = "X-FaceAI-Duplicate-Of"
+
+
+def duplicate_error(session, existing: Video, filename: str) -> HTTPException:
+    """409 para um vídeo que já existe no caso (o cabeçalho identifica o vídeo existente)."""
+    place = video_place(existing, locations_by_id(session, existing.case_id))
+    return HTTPException(
+        409, f"{filename}: vídeo já importado neste caso como {place['camera_label']} (#{existing.id}).",
+        headers={DUPLICATE_HEADER: str(existing.id)})
+
+
+def find_duplicate(session, case_id: int, *, sha256: str | None = None, quick: str | None = None,
+                   size: int | None = None) -> Video | None:
+    q = select(Video).where(Video.case_id == case_id)
+    if sha256:
+        return session.exec(q.where(Video.sha256 == sha256)).first()
+    if quick and size is not None:
+        return session.exec(q.where(Video.quick_hash == quick, Video.size_bytes == size)).first()
+    return None
+
+
 def register_video(session, case_id: int, path: Path, filename: str, size: int, actor: str,
                    location_id: int | None = None) -> Video:
-    """Regista um vídeo já gravado em disco (metadados via OpenCV) e pede a cópia de reprodução, se útil."""
+    """Regista um vídeo já gravado em disco (metadados via OpenCV) e pede a cópia de reprodução, se útil.
+
+    Um ficheiro igual (SHA-256) a um vídeo já existente no caso é recusado (409) e apagado."""
     try:
         loc = location_of_case(session, case_id, location_id, actor)
+        digest = file_sha256(path)
+        existing = find_duplicate(session, case_id, sha256=digest)
+        if existing is not None:
+            log_event(session, "video.duplicate_rejected", case_id=case_id, actor=actor,
+                      details={"filename": filename, "size_bytes": size, "sha256": digest,
+                               "duplicate_of": existing.id, "existing_filename": existing.filename})
+            raise duplicate_error(session, existing, filename)
+        quick = quick_hash(path)
         info = probe(path)
     except (ValueError, HTTPException) as exc:
         path.unlink(missing_ok=True)
         if isinstance(exc, HTTPException):
             raise
         raise HTTPException(422, f"{filename}: {exc}") from exc
-    video = Video(case_id=case_id, location_id=loc.id, filename=filename, stored_path=str(path), size_bytes=size,
+    video = Video(case_id=case_id, location_id=loc.id, filename=filename, sha256=digest, quick_hash=quick,
+                  stored_path=str(path), size_bytes=size,
                   duration_s=round(info.duration_s, 3), fps=round(info.fps, 3), frame_count=info.frame_count,
                   width=info.width, height=info.height, codec=info.codec)
     session.add(video)

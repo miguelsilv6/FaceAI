@@ -37,9 +37,9 @@ def _upload(client, path, name):
     return r.json()[0]
 
 
-def _h264(path, pix_fmt="yuv420p"):
+def _h264(path, pix_fmt="yuv420p", duration_s=2.0):
     import subprocess
-    src = make_video(path.with_suffix(".src.mp4"), [(0.0, 2.0, RED)], duration_s=2, fps=10)
+    src = make_video(path.with_suffix(".src.mp4"), [(0.0, 2.0, RED)], duration_s=duration_s, fps=10)
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-c:v", "libx264", "-pix_fmt", pix_fmt,
                     str(path)], check=True)
     return path
@@ -168,7 +168,7 @@ def test_case_wide_copies_and_delete_while_converting(client, tmp_path, with_ffm
     """O browser não reproduz um vídeo → cópias de todos os vídeos do caso; eliminar o caso cancela as conversões."""
     client.post("/api/cases", json={"name": "c"})
     a = _upload(client, _h264(tmp_path / "a.mp4"), "a.mp4")
-    b = _upload(client, _h264(tmp_path / "b.mp4"), "b.mp4")
+    b = _upload(client, _h264(tmp_path / "b.mp4", duration_s=2.5), "b.mp4")  # ficheiro distinto do "a"
     assert a["playback_status"] == b["playback_status"] == "not_needed"
     r = client.post("/api/cases/1/playback", params={"format": "mp4"})
     assert r.status_code == 200 and {v["playback_status"] for v in r.json()} <= {"pending", "running", "ready"}

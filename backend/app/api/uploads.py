@@ -26,7 +26,16 @@ from ..models import ReferenceImage, Upload, Video, utcnow
 from ..schemas import UploadCreate
 from ..services import disk
 from ..services.audit import log_event
-from .cases import IMAGE_EXT, VIDEO_EXT, location_of_case, register_reference, register_video
+from .cases import (
+    DUPLICATE_HEADER,
+    IMAGE_EXT,
+    VIDEO_EXT,
+    duplicate_error,
+    find_duplicate,
+    location_of_case,
+    register_reference,
+    register_video,
+)
 from .deps import ActorDep, SessionDep, authorize_objects, get_case_or_404
 
 # Todas as rotas exigem sessão; os objetos do caminho têm de pertencer a um caso acessível (ver deps).
@@ -94,13 +103,30 @@ def create_upload(case_id: int, body: UploadCreate, session: SessionDep, actor: 
     location_id = None
     if body.kind == "video" and body.location_id is not None:
         location_id = location_of_case(session, case_id, body.location_id).id
+    quick = body.quick_hash if body.kind == "video" else None
+    if quick:  # pré-verificação de duplicados (o SHA-256 completo confirma na conclusão)
+        existing = find_duplicate(session, case_id, quick=quick, size=body.size_bytes)
+        if existing is not None:
+            log_event(session, "video.duplicate_rejected", case_id=case_id, actor=actor,
+                      details={"filename": filename, "size_bytes": body.size_bytes, "quick_hash": quick,
+                               "duplicate_of": existing.id, "existing_filename": existing.filename,
+                               "stage": "antes do envio"})
+            raise duplicate_error(session, existing, filename)
+        busy = session.exec(select(Upload).where(Upload.case_id == case_id, Upload.quick_hash == quick,
+                                                 Upload.size_bytes == body.size_bytes,
+                                                 Upload.completed_at == None)).first()  # noqa: E711
+        if busy is not None:
+            raise HTTPException(409, f"{filename}: este ficheiro já está a ser importado neste caso "
+                                     f"({busy.filename}). Para retomar, largue o mesmo ficheiro no mesmo local.",
+                                headers={DUPLICATE_HEADER: "upload"})
     disk.check_space(body.size_bytes)
     tmp_dir = settings.data_dir / "uploads"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     upload_id = uuid.uuid4().hex
     tmp = tmp_dir / f"{upload_id}.part"
     tmp.touch()
-    u = Upload(id=upload_id, case_id=case_id, kind=body.kind, location_id=location_id, filename=filename,
+    u = Upload(id=upload_id, case_id=case_id, kind=body.kind, location_id=location_id, quick_hash=quick or "",
+               filename=filename,
                size_bytes=body.size_bytes,
                temp_path=str(tmp), created_by=actor)
     session.add(u)

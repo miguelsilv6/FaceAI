@@ -23,15 +23,17 @@ function headers(extra?: Record<string, string>): Record<string, string> {
 
 /** Erro da API; `detail` guarda o corpo estruturado quando existe (ex.: amostras de uma calibração falhada). */
 export class ApiError extends Error {
-  constructor(message: string, public detail?: unknown) {
+  /** duplicateOf: vídeo do caso igual ao enviado (id) ou "upload" (o mesmo ficheiro já está a ser importado). */
+  constructor(message: string, public detail?: unknown, public duplicateOf?: string | null) {
     super(message);
   }
 }
 
 async function parseError(res: Response): Promise<ApiError> {
+  const dup = res.headers.get("X-FaceAI-Duplicate-Of");
   try {
     const body = await res.json();
-    if (typeof body.detail === "string") return new ApiError(body.detail);
+    if (typeof body.detail === "string") return new ApiError(body.detail, undefined, dup);
     if (Array.isArray(body.detail)) return new ApiError(body.detail.map((d: { msg: string }) => d.msg).join("; "));
     if (body.detail && typeof body.detail.message === "string") return new ApiError(body.detail.message, body.detail);
   } catch {
@@ -106,7 +108,8 @@ async function uploadChunked<T>(caseId: number, kind: "video" | "reference", fil
   }
   if (!status) {
     status = await request<UploadStatus>("POST", `/api/cases/${caseId}/uploads`,
-      { kind, filename: file.name, size_bytes: file.size, location_id: locationId ?? null });
+      { kind, filename: file.name, size_bytes: file.size, location_id: locationId ?? null,
+        quick_hash: kind === "video" ? await quickHash(file).catch(() => null) : null });
     storage("set", key, status.id);
   }
   let offset = status.received_bytes;
@@ -135,6 +138,46 @@ async function uploadChunked<T>(caseId: number, kind: "video" | "reference", fil
   const result = await request<T>("POST", `/api/uploads/${status.id}/complete`);
   storage("remove", key);
   return result;
+}
+
+/**
+ * Impressão rápida do ficheiro (igual à do servidor): SHA-256(tamanho em 8 bytes LE ‖ 1.º MiB ‖ último MiB).
+ * Permite ao servidor recusar um vídeo já importado sem o enviar. Sem crypto.subtle (HTTP fora de localhost)
+ * devolve null — o SHA-256 completo no servidor continua a impedir o duplicado no fim do envio.
+ */
+export async function quickHash(file: File): Promise<string | null> {
+  if (!globalThis.crypto?.subtle) return null;
+  const MIB = 1024 * 1024;
+  const size = new Uint8Array(8);
+  new DataView(size.buffer).setBigUint64(0, BigInt(file.size), true);
+  const head = new Uint8Array(await file.slice(0, Math.min(MIB, file.size)).arrayBuffer());
+  const tail = new Uint8Array(await file.slice(Math.max(0, file.size - MIB)).arrayBuffer());
+  const buf = new Uint8Array(8 + head.length + tail.length);
+  buf.set(size, 0);
+  buf.set(head, 8);
+  buf.set(tail, 8 + head.length);
+  const digest = await crypto.subtle.digest("SHA-256", buf);
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/** Vídeos: envia um a um; os duplicados (já no caso) são ignorados e devolvidos à parte. */
+async function uploadVideoFiles(caseId: number, files: File[], onProgress?: (fraction: number) => void,
+  locationId?: number | null): Promise<{ created: Video[]; duplicates: { file: string; message: string }[] }> {
+  const total = files.reduce((n, f) => n + f.size, 0) || 1;
+  let done = 0;
+  const created: Video[] = [];
+  const duplicates: { file: string; message: string }[] = [];
+  for (const f of files) {
+    try {
+      created.push(await uploadChunked<Video>(caseId, "video", f, (sent) => onProgress?.((done + sent) / total),
+        locationId));
+    } catch (e) {
+      if (e instanceof ApiError && e.duplicateOf) duplicates.push({ file: f.name, message: e.message });
+      else throw e;
+    }
+    done += f.size;
+  }
+  return { created, duplicates };
 }
 
 async function uploadMany<T>(caseId: number, kind: "video" | "reference", files: File[],
@@ -234,7 +277,7 @@ export const api = {
 
   videos: (caseId: number) => request<Video[]>("GET", `/api/cases/${caseId}/videos`),
   uploadVideos: (caseId: number, files: File[], onProgress?: (f: number) => void, locationId?: number | null) =>
-    uploadMany<Video>(caseId, "video", files, onProgress, locationId),
+    uploadVideoFiles(caseId, files, onProgress, locationId),
   updateVideo: (id: number, body: { location_id?: number; camera_name?: string }) =>
     request<Video>("PATCH", `/api/videos/${id}`, body),
   locations: (caseId: number) => request<Location[]>("GET", `/api/cases/${caseId}/locations`),

@@ -116,7 +116,7 @@ def test_migration_assigns_general_location(client, tmp_path):
 
     case = _case(client)
     v1 = _video(client, case["id"], tmp_path, "a.mp4", [(1, 2, RED)])
-    v2 = _video(client, case["id"], tmp_path, "b.mp4", [(1, 2, RED)])
+    v2 = _video(client, case["id"], tmp_path, "b.mp4", [(1, 2, BLUE)])
     with Session(get_engine()) as s:  # simula uma base de dados anterior aos locais
         for loc in s.exec(select(Location)).all():
             for v in s.exec(select(Video).where(Video.location_id == loc.id)).all():
@@ -141,7 +141,7 @@ def test_job_by_locations_two_persons(client, tmp_path):
     x1 = _video(client, cid, tmp_path, "x1.mp4", [(1, 2, RED)], x["id"])
     x2 = _video(client, cid, tmp_path, "x2.mp4", [(1, 2, BLUE)], x["id"])
     y1 = _video(client, cid, tmp_path, "y1.mp4", [(1, 2, RED), (2.5, 3.5, BLUE)], y["id"])
-    _video(client, cid, tmp_path, "z1.mp4", [(1, 2, RED)], z["id"])
+    _video(client, cid, tmp_path, "z1.mp4", [(1, 2.5, RED)], z["id"])
     client.patch(f"/api/videos/{x1['id']}", json={"camera_name": "Entrada"})
     # local de outro caso → 422
     other = _location(client, _case(client, "Outro")["id"], "W")

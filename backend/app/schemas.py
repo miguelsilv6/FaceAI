@@ -147,6 +147,7 @@ class UploadCreate(BaseModel):
     filename: str = Field(min_length=1, max_length=255)
     size_bytes: int = Field(gt=0)
     location_id: int | None = None  # vídeo: local de destino (por omissão, "Geral")
+    quick_hash: str | None = Field(None, pattern="^[0-9a-f]{64}$")  # vídeo: pré-verificação de duplicados
 
 
 class ClockManual(BaseModel):

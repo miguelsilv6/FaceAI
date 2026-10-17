@@ -70,7 +70,7 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
   <tr><th>#</th><th>Local</th><th>Vídeo</th><th>Ficheiro</th><th>Tamanho</th><th>Duração</th><th>FPS</th><th>Resolução</th><th>Codec</th></tr>
   {% set frozen = {} %}{% for l in job.params.get("locations") or [] %}{% set _ = frozen.update({l.id: l.name}) %}{% endfor %}
   {% for v in videos %}{% set pl = place(v) %}
-  <tr><td>{{ v.id }}</td><td>{{ pl.location_name or "—" }}{% if v.location_id in frozen and frozen[v.location_id] != pl.location_name %}<br><span class="muted">na análise: {{ frozen[v.location_id] }}</span>{% endif %}</td><td>{{ pl.camera_name }}</td><td>{{ v.filename }}</td><td>{{ "{:,}".format(v.size_bytes) }} B</td>
+  <tr><td>{{ v.id }}</td><td>{{ pl.location_name or "—" }}{% if v.location_id in frozen and frozen[v.location_id] != pl.location_name %}<br><span class="muted">na análise: {{ frozen[v.location_id] }}</span>{% endif %}</td><td>{{ pl.camera_name }}</td><td>{{ v.filename }}{% if v.sha256 %}<br><span class="muted" style="font-family: monospace; font-size: 7pt; word-break: break-all">SHA-256 {{ v.sha256 }}</span>{% endif %}</td><td>{{ "{:,}".format(v.size_bytes) }} B</td>
       <td>{{ v.duration_s | ts }}</td><td>{{ "%.2f"|format(v.fps) }}</td><td>{{ v.width }}×{{ v.height }}</td><td>{{ v.codec or "—" }}</td></tr>
   {% endfor %}
 </table>
