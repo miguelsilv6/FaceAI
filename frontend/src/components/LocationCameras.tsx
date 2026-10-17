@@ -185,7 +185,7 @@ export default function LocationCameras({ caseId, location, videos, locations, j
         title={`Importar vídeos de CCTV para "${location.name}"`}
         hint="Um ficheiro por ângulo de CCTV. Envio em blocos: se a ligação falhar, volte a largar o mesmo ficheiro para continuar de onde parou." />
       {duplicates.length > 0 && (
-        <Alert color="yellow" title={`${duplicates.length} ficheiro(s) não importado(s): já existem neste processo`}
+        <Alert color="yellow" title={`${duplicates.length} ficheiro(s) não importado(s): já existem neste processo ou repetem-se no lote`}
           withCloseButton closeButtonLabel="Fechar" onClose={() => setDuplicates([])}>
           <Stack gap={2}>
             {duplicates.map((d) => <Text key={d.file} size="sm">{d.message}</Text>)}

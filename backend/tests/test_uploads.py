@@ -187,3 +187,21 @@ def test_quick_hash_formula_and_backfill(client, tmp_path):
     with Session(get_engine()) as s:
         row = s.get(Video, vid)
         assert len(row.sha256) == 64 and len(row.quick_hash) == 64
+
+
+def test_batch_check_before_import(client, tmp_path):
+    from app.services.hashing import quick_hash
+
+    case = _case(client)
+    a = make_video(tmp_path / "a.mp4", [(1, 3, RED)], duration_s=4, fps=10)
+    b = make_video(tmp_path / "b.mp4", [(1, 2, RED)], duration_s=4, fps=10)
+    v = _multipart(client, case["id"], a, "a.mp4").json()[0]
+    files = [{"name": "a_copia.mp4", "size": a.stat().st_size, "quick_hash": quick_hash(a)},
+             {"name": "b.mp4", "size": b.stat().st_size, "quick_hash": quick_hash(b)},
+             {"name": "b_outra.mp4", "size": b.stat().st_size, "quick_hash": quick_hash(b)}]
+    r = client.post(f"/api/cases/{case['id']}/videos/check", json={"files": files}).json()
+    assert r[0]["duplicate_of"] == v["id"] and "já importado" in r[0]["message"]
+    assert r[1] == {"name": "b.mp4", "duplicate_of": None}
+    assert r[2]["same_as"] == "b.mp4" and "repetido neste lote" in r[2]["message"]
+    assert client.post(f"/api/cases/{case['id']}/videos/check",
+                       json={"files": [{"name": "x", "size": 1, "quick_hash": "zz"}]}).status_code == 422

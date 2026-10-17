@@ -24,6 +24,7 @@ class CaseOut(BaseModel):
     analyst: str
     created_at: datetime
     size_bytes: int
+    alerts_new: int = 0  # alertas de pessoas do processo por rever
 
 
 class ReferenceUpdate(BaseModel):
@@ -57,6 +58,21 @@ class LocationCreate(BaseModel):
 class VideoUpdate(BaseModel):
     location_id: int | None = Field(None, description="Mover o vídeo para outro local do mesmo processo")
     camera_name: str | None = Field(None, max_length=120, description="Nome da câmara (vazio = nome do ficheiro)")
+
+
+class VideoCheckItem(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    size: int = Field(ge=0)
+    quick_hash: str = Field(pattern="^[0-9a-f]{64}$")
+
+
+class VideoCheck(BaseModel):
+    files: list[VideoCheckItem] = Field(max_length=5000)
+
+
+class AlertUpdate(BaseModel):
+    status: str = Field(pattern="^(new|confirmed|dismissed)$")
+    note: str = Field("", max_length=1000)
 
 
 class VideoDelete(BaseModel):
@@ -110,6 +126,11 @@ class JobParams(BaseModel):
     cascade: bool = True
     fast_detector: str | None = None
     # Complemento por vestuário (re-identificação pelo corpo): amostras = corpos das correspondências faciais
+    # Alertas: comparar as pessoas descobertas com as pessoas do processo (com fotos) e destacar as que aparecem
+    # em ≥ alert_min_locations locais. watch_person_ids=None: todas as pessoas do processo.
+    watch_persons: bool = True
+    watch_person_ids: list[int] | None = None
+    alert_min_locations: int = Field(2, ge=1, le=50)
     clothing: bool = False
     clothing_window_h: float = Field(12.0, ge=0, description="Janela temporal em torno das amostras (h); 0 = sem")
     reid_threshold: float | None = Field(None, gt=0, lt=1, description="Distância ReID máxima (vazio = omissão)")

@@ -16,6 +16,7 @@ from sqlmodel import select
 
 from ..config import settings
 from ..models import (
+    Alert,
     AuditEvent,
     CasePerson,
     Detection,
@@ -28,7 +29,16 @@ from ..models import (
     Video,
     utcnow,
 )
-from ..schemas import JobCreate, JobDelete, PersonMerge, QueueUpdate, ReviewUpdate, SavedFrameCreate, TrackPerson
+from ..schemas import (
+    AlertUpdate,
+    JobCreate,
+    JobDelete,
+    PersonMerge,
+    QueueUpdate,
+    ReviewUpdate,
+    SavedFrameCreate,
+    TrackPerson,
+)
 from ..services import disk, enhance, linking, reports, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
@@ -206,8 +216,10 @@ def delete_job(job_id: int, body: JobDelete, session: SessionDep, user: CurrentU
     }
     saved = list(session.exec(select(SavedFrame).where(SavedFrame.job_id == job_id)))
     summary["saved_frames"] = [{"id": f.id, "sha256": f.sha256} for f in saved]
+    alerts = list(session.exec(select(Alert).where(Alert.job_id == job_id)))
+    summary["alerts"] = [{"id": a.id, "case_person_id": a.case_person_id, "status": a.status} for a in alerts]
     folder = job_dir(job)
-    for row in (*detections, *tracks, *saved):
+    for row in (*detections, *tracks, *saved, *alerts):
         session.delete(row)
     session.flush()
     session.delete(job)
@@ -434,6 +446,7 @@ def case_dashboard(case_id: int, session: SessionDep, job_ids: str | None = None
             for k in ("matches", "confirmed", "rejected", "pending", "clothing"):
                 pl[k] += c[k]
 
+    case_alerts_rows = list(session.exec(select(Alert).where(Alert.case_id == case_id)))
     status_counts: dict[str, int] = {}
     for j in all_jobs:
         status_counts[j.status.value] = status_counts.get(j.status.value, 0) + 1
@@ -455,6 +468,9 @@ def case_dashboard(case_id: int, session: SessionDep, job_ids: str | None = None
         "per_person": sorted(persons.values(), key=lambda p: -p["matches"]),
         "pending_by_job": [{"job_id": k, "pending": n} for k, n in sorted(pending_by_job.items(), key=lambda x: -x[1])],
         "discover": discover,
+        "alerts": {"new": sum(1 for a in case_alerts_rows if a.status == "new"),
+                   "new_highlighted": sum(1 for a in case_alerts_rows if a.status == "new" and a.highlighted),
+                   "total": len(case_alerts_rows)},
         "recent": [{"id": e.id, "timestamp": e.timestamp.isoformat(), "actor": e.actor, "action": e.action}
                    for e in recent],
     }
@@ -521,6 +537,63 @@ def review_person(job_id: int, person_id: int, body: ReviewUpdate, session: Sess
               details={"job_id": job_id, "person_id": person_id, "to": body.status.value, "note": body.note,
                        "tracks": [t.id for t in tracks], "detections": det_ids})
     return next(p for p in summarize_persons(tracks) if p["person_id"] == person_id)
+
+
+# ---------------------------------------------------------------- alertas (pessoas do processo)
+def _alert_out(session, a: Alert, locs: dict, persons: dict) -> dict:
+    cp = persons.get(a.case_person_id)
+    if cp is None:
+        cp = persons[a.case_person_id] = session.get(CasePerson, a.case_person_id)
+    ref = session.exec(select(ReferenceImage).where(ReferenceImage.case_person_id == a.case_person_id,
+                                                    ReferenceImage.valid == True)  # noqa: E712
+                       .order_by(ReferenceImage.id)).first()
+    return {**a.model_dump(mode="json"), "case_person_name": cp.name if cp else f"#{a.case_person_id}",
+            "reference_id": ref.id if ref else None, "reference_has_crop": bool(ref and ref.face_crop_path),
+            "location_names": [locs[i].name for i in a.location_ids if i in locs]}
+
+
+@router.get("/jobs/{job_id}/alerts")
+def job_alerts(job_id: int, session: SessionDep) -> list[dict]:
+    job = get_job_or_404(session, job_id)
+    locs, persons = locations_by_id(session, job.case_id), {}
+    rows = session.exec(select(Alert).where(Alert.job_id == job_id)
+                        .order_by(Alert.highlighted.desc(), Alert.distance))
+    return [_alert_out(session, a, locs, persons) for a in rows]
+
+
+@router.get("/cases/{case_id}/alerts")
+def case_alerts(case_id: int, session: SessionDep, status: str | None = None) -> list[dict]:
+    get_case_or_404(session, case_id)
+    q = select(Alert).where(Alert.case_id == case_id)
+    if status:
+        q = q.where(Alert.status == status)
+    locs, persons = locations_by_id(session, case_id), {}
+    return [_alert_out(session, a, locs, persons)
+            for a in session.exec(q.order_by(Alert.highlighted.desc(), Alert.id.desc()))]
+
+
+@router.patch("/alerts/{alert_id}")
+def review_alert(alert_id: int, body: AlertUpdate, session: SessionDep, actor: ActorDep) -> dict:
+    """Confirmar (no modo descoberta confirma também a pessoa descoberta: todos os seus tracks e deteções),
+    descartar ou voltar a "novo". Fica na auditoria."""
+    a = session.get(Alert, alert_id)
+    if a is None:
+        raise HTTPException(404, "Alerta não encontrado.")
+    old = a.status
+    tracks: list[Track] = []
+    if body.status == "confirmed" and a.discovered_person_id is not None:
+        tracks = _person_tracks(session, a.job_id, a.discovered_person_id)
+        _review_tracks(session, tracks, ReviewUpdate(status=ReviewStatus.confirmed,
+                                                     note=body.note or "confirmado pelo alerta"), actor)
+    a.status, a.note = body.status, body.note.strip()
+    a.reviewed_by, a.reviewed_at = actor, utcnow()
+    session.add(a)
+    session.commit()
+    log_event(session, f"alert.{body.status}" if body.status != "new" else "alert.reopened", case_id=a.case_id,
+              actor=actor, details={"alert_id": a.id, "job_id": a.job_id, "case_person_id": a.case_person_id,
+                                    "discovered_person_id": a.discovered_person_id, "from": old, "to": a.status,
+                                    "note": a.note, "tracks_confirmed": [t.id for t in tracks]})
+    return _alert_out(session, a, locations_by_id(session, a.case_id), {})
 
 
 @router.post("/jobs/{job_id}/persons/merge")

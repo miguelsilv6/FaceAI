@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
 import { api, browserCodecs, formatEta, formatTime, realTime } from "../api";
+import AlertsCard from "../components/AlertsCard";
 import DeleteJobModal from "../components/DeleteJobModal";
 import BodyTrackCard from "../components/BodyTrackCard";
 import DetectionCard from "../components/DetectionCard";
@@ -454,6 +455,13 @@ export default function Results() {
       {running && <Progress value={job.progress * 100} animated striped size="lg" />}
       {clothing && !running && job.clothing_summary?.note && (
         <Alert color="orange" icon={<IconAlertTriangle size={18} />}>{job.clothing_summary.note}</Alert>
+      )}
+      {!running && (
+        <AlertsCard jobId={job.id} caseId={job.case_id} reloadKey={job.status} onChange={loadResults}
+          onShowPerson={discover ? (pid) => {
+            const p = persons.find((x) => x.person_id === pid);
+            if (p && personFilter !== pid) selectPerson(p);
+          } : undefined} />
       )}
       {job.message && (
         <Alert color={job.status === "failed" ? "red" : "blue"}

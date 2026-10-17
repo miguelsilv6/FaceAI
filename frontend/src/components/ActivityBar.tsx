@@ -99,6 +99,21 @@ export default function ActivityBar() {
                     title: ok ? `Análise #${id} concluída` : `Análise #${id}: ${job.status === "cancelled" ? "cancelada" : "falhou"}`,
                     message: <Anchor component={Link} to={`/jobs/${id}`} size="sm">Ver resultados</Anchor>,
                   });
+                  if (ok) api.jobAlerts(id).then((alerts) => {
+                    if (!alerts.length) return;
+                    const top = [...alerts].sort((x, y) => y.location_ids.length - x.location_ids.length)[0];
+                    const many = alerts.filter((x) => x.highlighted).length;
+                    notifications.show({
+                      color: "orange", autoClose: false,
+                      title: `⚠ Análise #${id}: ${alerts.length} alerta(s)${many ? ` · ${many} em vários locais` : ""}`,
+                      message: (
+                        <Anchor component={Link} to={`/jobs/${id}`} size="sm">
+                          {top.case_person_name}{top.discovered_person_id != null ? ` pode ser a Pessoa #${top.discovered_person_id}` : ""}
+                          {" "}— {top.location_ids.length} local(is){top.location_names.length ? ` (${top.location_names.join(", ")})` : ""}
+                        </Anchor>
+                      ),
+                    });
+                  }).catch(() => undefined);
                 }).catch(() => undefined);
               }
             }
