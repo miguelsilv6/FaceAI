@@ -17,7 +17,7 @@ from starlette.requests import Request
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from . import __version__
-from .api import activity, cases, clock, jobs, system, uploads, users
+from .api import activity, cases, clock, imports, jobs, system, uploads, users
 from .api import auth as auth_api
 from .api.deps import UNSAFE_METHODS, client_ip, is_https
 from .api.uploads import cleanup_stale_uploads
@@ -165,6 +165,7 @@ app.include_router(system.router)
 app.include_router(cases.router)
 app.include_router(jobs.router)
 app.include_router(uploads.router)
+app.include_router(imports.router)
 app.include_router(clock.router)
 
 # Em produção, o build do frontend (frontend/dist) é servido pelo próprio backend.

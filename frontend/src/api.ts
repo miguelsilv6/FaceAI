@@ -1,6 +1,6 @@
 import type {
   CaseDashboard,
-  Activity, AuditChainCheck, EvidenceCheck, CasePerson, Location, PersonAlert, ValidatedItem, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
+  Activity, AuditChainCheck, EvidenceCheck, ServerImportScan, ServerImportState, CasePerson, Location, PersonAlert, ValidatedItem, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
 
@@ -86,7 +86,32 @@ function storage(op: "get" | "set" | "remove", key: string, value?: string): str
  * Falhas de rede são repetidas com espera crescente; ao voltar a largar o mesmo ficheiro (mesmo depois de
  * recarregar a página), o upload continua de onde ficou.
  */
+// Uploads em curso neste separador: sair da página (fechar, recarregar, outro site) interrompe-os. Ver uploadGuard.ts.
+let activeUploads = 0;
+const uploadListeners = new Set<(n: number) => void>();
+export function uploadsActive(): number {
+  return activeUploads;
+}
+export function onUploadsChange(fn: (n: number) => void): () => void {
+  uploadListeners.add(fn);
+  return () => uploadListeners.delete(fn);
+}
+function setActiveUploads(delta: number) {
+  activeUploads = Math.max(0, activeUploads + delta);
+  uploadListeners.forEach((fn) => fn(activeUploads));
+}
+
 async function uploadChunked<T>(caseId: number, kind: "video" | "reference", file: File,
+  onBytes: (sent: number) => void, locationId?: number | null): Promise<T> {
+  setActiveUploads(1);
+  try {
+    return await uploadChunkedInner<T>(caseId, kind, file, onBytes, locationId);
+  } finally {
+    setActiveUploads(-1);
+  }
+}
+
+async function uploadChunkedInner<T>(caseId: number, kind: "video" | "reference", file: File,
   onBytes: (sent: number) => void, locationId?: number | null): Promise<T> {
   const loc = locationId != null ? `.l${locationId}` : "";
   const key = `faceai.upload.${caseId}.${kind}${loc}.${file.name}.${file.size}.${file.lastModified}`;
@@ -305,6 +330,11 @@ export const api = {
   updateVideo: (id: number, body: { location_id?: number; camera_name?: string }) =>
     request<Video>("PATCH", `/api/videos/${id}`, body),
   locations: (caseId: number) => request<Location[]>("GET", `/api/cases/${caseId}/locations`),
+  serverImportBrowse: (caseId: number, path = "") =>
+    request<ServerImportScan>("GET", `/api/cases/${caseId}/import/server?path=${encodeURIComponent(path)}`),
+  startServerImport: (caseId: number, folders: { path: string; location_name: string; recursive: boolean }[]) =>
+    request<ServerImportState>("POST", `/api/cases/${caseId}/import/server`, { folders }),
+  serverImportStatus: (caseId: number) => request<ServerImportState>("GET", `/api/cases/${caseId}/import/server/status`),
   createLocation: (caseId: number, name: string) =>
     request<Location>("POST", `/api/cases/${caseId}/locations`, { name }),
   renameLocation: (id: number, name: string) => request<Location>("PATCH", `/api/locations/${id}`, { name }),

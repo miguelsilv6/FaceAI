@@ -1,6 +1,7 @@
 import { Alert, Badge, Button, Card, Group, Loader, SimpleGrid, Stack, Text, TextInput, Title, Tooltip } from "@mantine/core";
 import {
-  IconChevronRight, IconClock, IconDatabase, IconMapPin, IconMapPinPlus, IconRefresh, IconShieldCheck, IconShieldX,
+  IconChevronRight, IconClock, IconDatabase, IconFolders, IconMapPin, IconMapPinPlus, IconRefresh, IconShieldCheck,
+  IconShieldX,
 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -8,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { api, formatBytes, formatTime } from "../api";
 import { notifyError, notifyOk } from "../notify";
 import { cameraName } from "../places";
+import BulkImportModal from "./BulkImportModal";
 import type { EvidenceCheck, Location, Video } from "../types";
 
 interface Props {
@@ -21,6 +23,7 @@ interface Props {
 export default function VideosPanel({ caseId, videos, locations, onChange }: Props) {
   const navigate = useNavigate();
   const [newName, setNewName] = useState<string | null>(null);
+  const [bulk, setBulk] = useState(false);
   const open = (id: number) => navigate(`/cases/${caseId}/locations/${id}`);
 
   const busy = videos.some((v) => v.playback_status === "pending" || v.playback_status === "running"
@@ -81,9 +84,15 @@ export default function VideosPanel({ caseId, videos, locations, onChange }: Pro
 
   return (
     <Stack>
+      <BulkImportModal caseId={caseId} locations={locations} opened={bulk} onClose={() => setBulk(false)}
+        onChange={onChange} />
       <Group justify="space-between">
         {newName === null ? (
-          <Button leftSection={<IconMapPinPlus size={16} />} onClick={() => setNewName("")}>Novo local</Button>
+          <Group gap="xs">
+            <Button leftSection={<IconMapPinPlus size={16} />} onClick={() => setNewName("")}>Novo local</Button>
+            <Button variant="light" leftSection={<IconFolders size={16} />} onClick={() => setBulk(true)}>
+              Importar pastas</Button>
+          </Group>
         ) : (
           <Group gap="xs">
             <TextInput placeholder="Nome do local (ex.: Café Central, Estação de Campanhã)" w={360} value={newName}

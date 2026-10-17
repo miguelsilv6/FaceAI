@@ -221,6 +221,19 @@ docker compose exec faceai python -m app.cli create-admin chefe --name "Nome Ape
   consistente da base de dados (copiar o `faceai.db` à mão pode perder as últimas escritas) e copia os ficheiros de
   forma incremental. Junta o `secret.key` à cópia.
 - Os modelos ficam no volume `faceai-models` e são descarregados na primeira análise.
+- **Importação em bloco a partir do servidor (opcional).** Para importar diretamente de um disco USB ou de uma partilha
+  (cada pasta passa a ser um local), monta a pasta só de leitura e indica-a ao FaceAI no `docker-compose.yml`, no
+  serviço `faceai`:
+
+  ```yaml
+      volumes:
+        - /mnt/usb:/import:ro
+      environment:
+        FACEAI_IMPORT_DIR: /import
+  ```
+
+  Depois: `docker compose up -d`. Em *Locais e vídeos* → **Importar pastas** → *Da pasta do servidor*. Os ficheiros são
+  copiados para o processo e os originais não são alterados (o `:ro` garante-o).
 
 **GPU NVIDIA:** instala o driver NVIDIA e o [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), e depois:
 

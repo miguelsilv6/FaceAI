@@ -104,6 +104,8 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 | `FACEAI_DATA_DIR` | `./data` | Processos, evidências, base de dados, `audit.jsonl` |
 | `FACEAI_ENGINE` | `onnx` | `onnx` ou `deepface` (este exige o extra `deepface`) |
 | `FACEAI_MODELS_DIR` | `~/.faceai/models` | Pesos ONNX |
+| `FACEAI_IMPORT_DIR` | — | Pasta do servidor para a importação em bloco (ex.: disco USB montado). Vazio = desligada |
+| `FACEAI_SHUTDOWN_GRACE_S` | `20` | Ao desligar, tempo de espera para a análise em curso voltar à fila |
 | `FACEAI_UPLOAD_CHUNK_MB` | `8` | Tamanho de cada bloco do upload (o Cloudflare limita os pedidos a 100 MB) |
 | `FACEAI_PRELOAD_MODELS` | `1` | Descarregar/carregar os modelos em segundo plano no arranque |
 | `FACEAI_SECRET_KEY` | *(vazio)* | Chave que cifra os segredos MFA. Se ficar vazia, usa-se `data/secret.key`, gerado no 1.º arranque com permissões 0600. **Faz backup**: sem ela, quem tem MFA ativo tem de o reconfigurar. |
@@ -153,6 +155,13 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
    - Os vídeos importam-se na **página do local** (clicar no cartão ou em "Abrir local"): os vídeos largados aí ficam nesse local. O nome do local pode ser mudado aí (✏️); um local só pode ser eliminado quando estiver vazio.
    - Cada vídeo tem um **nome** editável na tabela (por omissão, o nome do ficheiro). Em toda a aplicação (resultados, percurso, painel, relatórios, CSV/JSON e ZIP de frames) o vídeo é identificado como **"Local · Vídeo"**, e o nome do ficheiro original continua visível.
    - O menu ⋯ de cada vídeo permite **movê-lo para outro local** ou eliminá-lo. As mudanças ficam na auditoria (`location.*`, `video.updated`).
+   - **Importação em bloco (cada pasta é um local):** em *Locais e vídeos* → **Importar pastas**. Os vídeos de cada subpasta (incluindo as subpastas dela) vão para um local com o nome da subpasta; os vídeos soltos na pasta escolhida vão para um local com o nome dessa pasta. Antes de importar, vê-se a lista de pastas: o nome de cada local pode ser alterado e cada pasta pode ser excluída. Um nome igual a um local que já existe junta os vídeos a esse local. Os duplicados são ignorados e listados no fim.
+     - **Do computador:** escolhe-se uma pasta no browser. Os vídeos sobem pelo upload em blocos, com retoma.
+     - **Da pasta do servidor:** o administrador define `FACEAI_IMPORT_DIR` (por exemplo, um disco USB ou uma partilha montada). Só o responsável do processo ou um administrador pode navegar nessa pasta e importar dela, porque pode conter material de outros processos. Fora dela não se lê nada (`..` e symlinks para fora são recusados).
+       - O servidor **copia** os ficheiros (os originais ficam intactos) e calcula o SHA-256 durante a cópia.
+       - Tudo corre em segundo plano, com progresso na janela.
+       - Na auditoria ficam `import.server_started` e `import.server_finished`, com o caminho de origem e o SHA-256 de cada vídeo.
+   - **Sair a meio de um upload:** fechar o separador, recarregar ou ir para outro site pede confirmação ao browser, que mostra a sua própria mensagem. Terminar sessão também pede confirmação. Navegar dentro da aplicação não interrompe os uploads: continuam e aparecem na barra "Em curso".
    - **Vídeos duplicados:** o mesmo ficheiro (mesmo conteúdo, qualquer nome ou local) não pode ser importado duas vezes no mesmo processo. Antes de enviar, o browser calcula uma impressão rápida (SHA-256 do tamanho, do 1.º e do último MiB) e o servidor recusa logo se o vídeo já existir; no fim do envio, o **SHA-256** completo confirma. Ao importar **vários vídeos** de uma vez, todos são validados primeiro (`POST /cases/{id}/videos/check`) e só se enviam os que ainda não existem; os repetidos dentro do próprio lote também são detetados. O aviso indica o vídeo existente ("Local · Vídeo (#id)") e a recusa fica na auditoria (`video.duplicate_rejected`). Noutro processo, o mesmo ficheiro é aceite.
    - Cada vídeo fica com o seu **SHA-256** (auditoria `video.uploaded`, relatório e JSON). Os vídeos de versões anteriores recebem-no em segundo plano no arranque.
    - Os processos de versões anteriores ganham, no arranque, um local **"Geral"** com todos os vídeos existentes. Os vídeos importados sem local (API antiga) também vão para o "Geral".

@@ -591,3 +591,37 @@ export interface PersonAlert {
   reviewed_by: string;
   reviewed_at: string | null;
 }
+
+/** Importação em bloco a partir da pasta do servidor (FACEAI_IMPORT_DIR): cada pasta → um local. */
+export interface ServerImportGroup {
+  path: string;
+  location_name: string;
+  existing_location_id: number | null;
+  videos: { name: string; path: string; size: number; subfolder: string }[];
+}
+
+export interface ServerImportScan {
+  enabled: boolean;
+  root?: string;
+  path?: string;
+  parent?: string | null;
+  dirs?: { name: string; path: string }[];
+  plan?: ServerImportGroup[];
+  total_bytes?: number;
+  truncated?: boolean;
+}
+
+export interface ServerImportState {
+  running: boolean;
+  done?: number;
+  total?: number;
+  bytes_done?: number;
+  bytes_total?: number;
+  current?: string;
+  imported?: number;
+  duplicates?: { path: string; message: string }[];
+  errors?: { path: string; message: string }[];
+  locations_created?: string[];
+  finished_at?: string;
+  error?: string;
+}
