@@ -7,6 +7,7 @@ alguns segundos para a lista não percorrer o disco a cada pedido.
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import threading
@@ -17,6 +18,8 @@ from sqlmodel import Session, select
 
 from ..config import settings
 from ..models import ReferenceImage, Upload, Video
+
+log = logging.getLogger(__name__)
 
 CACHE_SECONDS = 60
 _cache: dict[int, tuple[float, int]] = {}
@@ -123,3 +126,34 @@ def note_alert(s: Session, st: dict) -> None:
 
         log_event(s, "system.disk_alert", actor="sistema",
                   details={"level": level, "percent": st["percent"], "free_bytes": st["free"]})
+
+
+def report_orphan_folders(s: Session) -> list[str]:
+    """Pastas de processos/análises sem registo na base de dados (ex.: uma eliminação que não conseguiu apagar os
+    ficheiros). Não são apagadas automaticamente (podem ser evidência); ficam no log para o administrador. Como os
+    ids nunca são reutilizados, uma pasta destas nunca passa para um processo ou análise novo."""
+    from ..models import Case, Job
+
+    root = settings.data_dir / "cases"
+    if not root.exists():
+        return []
+    cases = set(s.exec(select(Case.id)).all())
+    jobs = set(s.exec(select(Job.id)).all())
+    orphans = []
+    for case_dir in root.glob("case_*"):
+        try:
+            cid = int(case_dir.name.split("_", 1)[1])
+        except ValueError:
+            continue
+        if cid not in cases:
+            orphans.append(str(case_dir))
+            continue
+        for jd in (case_dir / "jobs").glob("job_*"):
+            try:
+                if int(jd.name.split("_", 1)[1]) not in jobs:
+                    orphans.append(str(jd))
+            except ValueError:
+                continue
+    for path in orphans:
+        log.warning("Pasta sem registo na base de dados (eliminação incompleta?): %s", path)
+    return orphans

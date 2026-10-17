@@ -1,6 +1,6 @@
 import type {
   CaseDashboard,
-  Activity, CasePerson, Location, PersonAlert, ValidatedItem, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
+  Activity, AuditChainCheck, EvidenceCheck, CasePerson, Location, PersonAlert, ValidatedItem, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
 
@@ -337,6 +337,10 @@ export const api = {
       reference_ids: referenceIds,
     }),
   cancelJob: (id: number) => request<Job>("POST", `/api/jobs/${id}/cancel`),
+  retryJob: (id: number) => request<Job>("POST", `/api/jobs/${id}/retry`),
+  verifyAudit: (caseId: number) => request<AuditChainCheck>("GET", `/api/cases/${caseId}/audit/verify`),
+  verifyEvidence: (caseId: number) => request<EvidenceCheck>("POST", `/api/cases/${caseId}/evidence/verify`),
+  evidenceStatus: (caseId: number) => request<EvidenceCheck>("GET", `/api/cases/${caseId}/evidence/verify`),
   updateQueue: (id: number, body: { priority?: number; held?: boolean }) =>
     request<Job>("PATCH", `/api/jobs/${id}/queue`, body),
   deleteVideo: (id: number, reason: string) =>

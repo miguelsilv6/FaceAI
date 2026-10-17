@@ -4,7 +4,7 @@ import {
 } from "@mantine/core";
 import {
   IconAlertTriangle, IconChevronLeft, IconChevronRight, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhoto,
-  IconPlayerStop, IconTrash,
+  IconPlayerStop, IconRefresh, IconTrash,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -432,6 +432,12 @@ export default function Results() {
             <Button color="orange" variant="light" leftSection={<IconPlayerStop size={18} />}
               onClick={() => api.cancelJob(job.id).then(setJob).catch(notifyError)}>Cancelar</Button>
           )}
+          {(job.status === "failed" || job.status === "cancelled") && (
+            <Button variant="light" leftSection={<IconRefresh size={18} />} onClick={() => {
+              if (!window.confirm("Repetir a análise com os mesmos parâmetros e vídeos? Os resultados atuais e as revisões desta análise são substituídos.")) return;
+              api.retryJob(job.id).then((j) => { setJob(j); loadResults(); }).catch(notifyError);
+            }}>Repetir análise</Button>
+          )}
           <Button color="red" variant="subtle" leftSection={<IconTrash size={18} />} disabled={running}
             onClick={() => setDeleting(true)}>Eliminar</Button>
           <Menu position="bottom-end" withinPortal>
@@ -455,6 +461,12 @@ export default function Results() {
       {running && <Progress value={job.progress * 100} animated striped size="lg" />}
       {clothing && !running && job.clothing_summary?.note && (
         <Alert color="orange" icon={<IconAlertTriangle size={18} />}>{job.clothing_summary.note}</Alert>
+      )}
+      {job.partial && (
+        <Alert color="orange" icon={<IconAlertTriangle size={18} />} title="Resultados incompletos">
+          Esta análise foi interrompida a meio (servidor desligado ou reiniciado) e só cobre {Math.round(job.progress * 100)}%
+          {" "}dos frames. {running ? "Vai recomeçar do início; os resultados atuais são substituídos." : "Use \"Repetir análise\" para a correr de novo."}
+        </Alert>
       )}
       {!running && (
         <AlertsCard jobId={job.id} caseId={job.case_id} reloadKey={job.status} onChange={loadResults}

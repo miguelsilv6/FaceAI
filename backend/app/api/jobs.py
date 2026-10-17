@@ -39,7 +39,7 @@ from ..schemas import (
     SavedFrameCreate,
     TrackPerson,
 )
-from ..services import disk, enhance, linking, reports, validated_frames
+from ..services import disk, enhance, evidence, linking, reports, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.clock import real_time
@@ -158,6 +158,37 @@ def cancel_job(job_id: int, session: SessionDep, actor: ActorDep) -> Job:
         raise HTTPException(409, "A análise já terminou.")
     runner.cancel(job_id)
     log_event(session, "job.cancel_requested", case_id=job.case_id, actor=actor, details={"job_id": job_id})
+    session.refresh(job)
+    return job
+
+
+@router.post("/jobs/{job_id}/retry", response_model=Job)
+def retry_job(job_id: int, session: SessionDep, user: CurrentUser) -> Job:
+    """Volta a pôr na fila uma análise falhada, interrompida ou cancelada, com os mesmos parâmetros e vídeos.
+
+    Os resultados anteriores (incompletos) são apagados quando a análise recomeça; ficam resumidos na auditoria.
+    """
+    job = get_job_or_404(session, job_id)
+    if job.created_by != user.username and not can_manage_case(session, user, job.case_id):
+        raise HTTPException(403, "Só quem criou a análise, o responsável do processo ou um administrador a pode "
+                                 "repetir.")
+    if job.status not in (JobStatus.failed, JobStatus.cancelled):
+        raise HTTPException(409, "Só é possível repetir análises falhadas, interrompidas ou canceladas.")
+    reviewed = len(session.exec(select(Detection.id).where(
+        Detection.job_id == job_id, Detection.review_status != ReviewStatus.pending)).all())
+    previous = {"status": job.status.value, "message": job.message, "partial": job.partial,
+                "progress": job.progress, "matches": job.matches, "reviewed_detections": reviewed}
+    job.status = JobStatus.queued
+    job.partial = True  # os resultados que existirem são apagados no arranque da análise
+    job.message = "Em fila para repetir."
+    job.finished_at = None
+    job.started_at = None
+    job.held = False
+    session.add(job)
+    session.commit()
+    log_event(session, "job.retried", case_id=job.case_id, actor=user.username,
+              details={"job_id": job_id, "previous": previous})
+    runner.submit(job_id)
     session.refresh(job)
     return job
 
@@ -1122,6 +1153,9 @@ def export_job(job_id: int, fmt: str, session: SessionDep, actor: ActorDep) -> R
         raise HTTPException(409, "A análise ainda está a decorrer.")
     # O registo da exportação é feito antes de gerar o ficheiro, para que fique incluído na auditoria exportada.
     log_event(session, "job.exported", case_id=job.case_id, actor=actor, details={"job_id": job_id, "format": fmt})
+    if fmt != "csv":  # integridade dos originais: verifica na hora os vídeos sem verificação recente (pequenos)
+        videos = list(session.exec(select(Video).where(Video.id.in_(job.video_ids or [-1]))))
+        evidence.ensure_recent(session, videos, case_id=job.case_id, actor=actor)
     data = reports.load_job_data(session, job)
     if fmt == "html":
         body: bytes | str = reports.render_html(data)

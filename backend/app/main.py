@@ -23,7 +23,7 @@ from .api.deps import UNSAFE_METHODS, client_ip, is_https
 from .api.uploads import cleanup_stale_uploads
 from .config import settings
 from .db import get_engine, init_db
-from .services import auth
+from .services import auth, disk
 from .services.audit import request_ip
 from .services.clock_auto import resume_pending_auto_clock
 from .services.face_engine import preload_models
@@ -46,6 +46,7 @@ async def lifespan(_: FastAPI):
     with Session(get_engine()) as s:
         migrate_person_labels(s)
         migrate_locations(s)
+        disk.report_orphan_folders(s)
     recover_interrupted_jobs()
     cleanup_stale_uploads()
     resume_pending_copies()
@@ -56,7 +57,7 @@ async def lifespan(_: FastAPI):
         cv2.setNumThreads(settings.cpu_threads)
     runner.start()  # retoma as análises que ficaram em fila
     yield
-    runner.shutdown()
+    runner.shutdown(timeout=settings.shutdown_grace_s)
 
 
 CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; "

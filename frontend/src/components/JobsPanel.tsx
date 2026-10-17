@@ -2,7 +2,7 @@ import {
   Accordion, ActionIcon, Alert, Badge, Button, Card, Checkbox, Chip, Group, Input, MultiSelect, NumberInput, Progress, SegmentedControl, Select, SimpleGrid, Stack,
   Menu, Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconBellRinging, IconDownload, IconInfoCircle, IconMapPin, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
+import { IconBellRinging, IconDownload, IconInfoCircle, IconRefresh, IconMapPin, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -102,6 +102,17 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
       notifyError(e, "Não foi possível iniciar a análise");
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const retry = async (j: Job) => {
+    if (!window.confirm(`Repetir a análise #${j.id}? Os resultados atuais (incompletos) e as revisões feitas nesta análise são substituídos.`)) return;
+    try {
+      await api.retryJob(j.id);
+      notifyOk(`Análise #${j.id} em fila para repetir.`);
+      onChange();
+    } catch (e) {
+      notifyError(e);
     }
   };
 
@@ -328,6 +339,11 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                     <Table.Td onClick={(e) => j.status === "queued" && e.stopPropagation()}>
                       <Group gap={4} wrap="nowrap">
                         <JobStatusBadge status={j.status} />
+                        {j.partial && (
+                          <Tooltip label="Interrompida a meio (servidor desligado ou reiniciado): resultados incompletos">
+                            <Badge size="xs" color="orange" variant="light">incompleta</Badge>
+                          </Tooltip>
+                        )}
                         {j.status === "queued" && <QueueControls job={j} onChange={onChange} />}
                       </Group>
                     </Table.Td>
@@ -354,7 +370,14 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                     <Table.Td>{j.params.mode === "discover" ? `${j.persons} pessoas (descoberta)` : j.matches}</Table.Td>
                     <Table.Td>{formatDate(j.created_at)}</Table.Td>
                     <Table.Td>{j.created_by}</Table.Td>
-                    <Table.Td w={40} onClick={(e) => e.stopPropagation()}>
+                    <Table.Td w={76} onClick={(e) => e.stopPropagation()}>
+                      <Group gap={2} wrap="nowrap">
+                      {(j.status === "failed" || j.status === "cancelled") && (
+                        <Tooltip label="Repetir a análise (mesmos parâmetros e vídeos; substitui os resultados atuais)">
+                          <ActionIcon variant="subtle" aria-label={`Repetir análise ${j.id}`}
+                            onClick={() => retry(j)}><IconRefresh size={16} /></ActionIcon>
+                        </Tooltip>
+                      )}
                       <Tooltip label={j.status === "running" || j.status === "queued"
                         ? "Cancele a análise antes de a eliminar" : "Eliminar análise"}>
                         <ActionIcon variant="subtle" color="red" aria-label={`Eliminar análise ${j.id}`}
@@ -362,6 +385,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                           <IconTrash size={16} />
                         </ActionIcon>
                       </Tooltip>
+                      </Group>
                     </Table.Td>
                   </Table.Tr>
                 ))}

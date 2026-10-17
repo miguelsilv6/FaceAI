@@ -38,6 +38,13 @@
 e são <em>indicativos</em>. Não constituem, por si só, uma identificação conclusiva e têm de ser validados por um
 perito, tendo em conta a qualidade das imagens, a iluminação, o ângulo, as oclusões e a possibilidade de falsos positivos e negativos.</div>
 
+{% if job.partial %}<div class="warn"><strong>Resultados incompletos:</strong> esta análise foi interrompida antes do
+fim (servidor desligado ou reiniciado). Os resultados abaixo cobrem só a parte analisada ({{ (job.progress * 100) | round | int }}%);
+repita a análise para obter resultados completos.</div>{% endif %}
+{% set bad_videos = videos | selectattr("verified_ok", "false") | list %}
+{% if bad_videos %}<div class="warn"><strong>Integridade:</strong> {{ bad_videos | length }} vídeo(s) original(is) não
+corresponde(m) ao SHA-256 registado na importação (alterado, corrompido ou em falta). Ver "Vídeos analisados".</div>{% endif %}
+
 {{ h("Processo") }}
 <table class="kv">
   <tr><th>Processo</th><td>#{{ case.id }} — {{ case.name }}</td></tr>
@@ -70,7 +77,7 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
   <tr><th>#</th><th>Local</th><th>Vídeo</th><th>Ficheiro</th><th>Tamanho</th><th>Duração</th><th>FPS</th><th>Resolução</th><th>Codec</th></tr>
   {% set frozen = {} %}{% for l in job.params.get("locations") or [] %}{% set _ = frozen.update({l.id: l.name}) %}{% endfor %}
   {% for v in videos %}{% set pl = place(v) %}
-  <tr><td>{{ v.id }}</td><td>{{ pl.location_name or "—" }}{% if v.location_id in frozen and frozen[v.location_id] != pl.location_name %}<br><span class="muted">na análise: {{ frozen[v.location_id] }}</span>{% endif %}</td><td>{{ pl.camera_name }}</td><td>{{ v.filename }}{% if v.sha256 %}<br><span class="muted" style="font-family: monospace; font-size: 7pt; word-break: break-all">SHA-256 {{ v.sha256 }}</span>{% endif %}</td><td>{{ "{:,}".format(v.size_bytes) }} B</td>
+  <tr><td>{{ v.id }}</td><td>{{ pl.location_name or "—" }}{% if v.location_id in frozen and frozen[v.location_id] != pl.location_name %}<br><span class="muted">na análise: {{ frozen[v.location_id] }}</span>{% endif %}</td><td>{{ pl.camera_name }}</td><td>{{ v.filename }}{% if v.sha256 %}<br><span class="muted" style="font-family: monospace; font-size: 7pt; word-break: break-all">SHA-256 {{ v.sha256 }}</span>{% endif %}<br><span class="{{ 'ok' if v.verified_ok else ('bad' if v.verified_ok == false else 'muted') }}" style="font-size: 7pt">{% if v.verified_at %}{{ "integridade verificada" if v.verified_ok else "NÃO CORRESPONDE / EM FALTA" }} em {{ v.verified_at.strftime("%Y-%m-%d %H:%M") }} UTC{% else %}integridade não verificada desde a importação{% endif %}</span></td><td>{{ "{:,}".format(v.size_bytes) }} B</td>
       <td>{{ v.duration_s | ts }}</td><td>{{ "%.2f"|format(v.fps) }}</td><td>{{ v.width }}×{{ v.height }}</td><td>{{ v.codec or "—" }}</td></tr>
   {% endfor %}
 </table>
@@ -223,6 +230,10 @@ pertencer a outra pessoa, e a roupa pode mudar (casaco, mochila). Cada apariçã
 {% endif %}
 
 {{ h("Registo de auditoria do processo") }}
+{% if audit_chain %}<p><strong>Integridade da auditoria:</strong>
+{% if audit_chain.ok %}<span class="ok">cadeia de hashes íntegra</span> ({{ audit_chain.events }} evento(s) em toda a aplicação; último hash
+<code style="font-size: 7pt">{{ audit_chain.last_hash }}</code>).{% else %}<span class="bad">CADEIA QUEBRADA</span> no evento #{{ audit_chain.broken_at or "—" }}: {{ audit_chain.reason }}.{% endif %}
+Cada evento tem o SHA-256 do anterior e do seu conteúdo: alterar, apagar ou inserir um evento quebra a cadeia.</p>{% endif %}
 <p class="muted">O utilizador é a conta autenticada (login com password e MFA). Eventos anteriores à introdução das contas registam o nome indicado livremente no navegador, sem IP.</p>
 <table>
   <tr><th>#</th><th>Data/hora (UTC)</th><th>Utilizador</th><th>IP</th><th>Ação</th><th>Detalhes</th></tr>

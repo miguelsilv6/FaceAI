@@ -37,6 +37,9 @@ def init_db() -> None:
     SQLModel.metadata.create_all(engine)
     _add_missing_columns(engine)
     _relax_not_null(engine)
+    from .services.audit import seal_on_startup
+
+    seal_on_startup()
 
 
 def _add_missing_columns(engine) -> None:

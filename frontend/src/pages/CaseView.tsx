@@ -168,7 +168,7 @@ export default function CaseView() {
           <RouteTimeline caseId={caseId} jobs={jobs} videos={videos} locations={locations} />
         </Tabs.Panel>
         <Tabs.Panel value="audit" pt="md">
-          <AuditPanel events={audit} />
+          <AuditPanel caseId={caseId} events={audit} />
         </Tabs.Panel>
       </Tabs>
     </Stack>

@@ -363,6 +363,25 @@ A hora real aparece nos resultados, nos tracks e nos segmentos, e é exportada n
 ## Considerações forenses e legais
 
 - **Auditoria:** todas as ações ficam registadas com o utilizador autenticado, o IP e a hora UTC, na base de dados e em `data/audit.jsonl` (append-only). Inclui criação do processo, uploads (incluindo blocos iniciados ou cancelados), parâmetros, início e fim de análise, revisões de deteções e de tracks, e exportações. O registo é incluído no relatório e no ZIP.
+- **Cadeia de hashes da auditoria:** cada evento guarda `prev_hash` e `hash = SHA-256(prev_hash ‖ evento)`.
+  - Alterar, apagar ou inserir um evento fora da aplicação quebra a cadeia. O `audit.jsonl` também guarda os hashes, por isso apagar os últimos eventos da base de dados também é detetado.
+  - Para verificar: separador *Auditoria* → **Verificar integridade da auditoria**, ou `python -m app.cli verify-audit`.
+  - O relatório indica o estado da cadeia.
+  - Os eventos anteriores a esta versão são incluídos na cadeia no primeiro arranque.
+- **Integridade dos originais:** em *Locais e vídeos*, **Verificar integridade** recalcula em segundo plano o SHA-256 de cada vídeo e compara-o com o da importação.
+  - Também pela consola: `python -m app.cli verify-evidence [processo]`.
+  - O relatório mostra a data e o resultado da última verificação de cada vídeo e avisa se algum foi alterado ou está em falta.
+  - Ao exportar, os vídeos sem verificação nas últimas 24 h são verificados na hora, até 4 GiB no total.
+- **Interrupções:**
+  - Se o servidor for **desligado** (reinício, atualização) durante uma análise, ela volta à fila e recomeça do início no arranque seguinte. Na auditoria fica `job.interrupted` (autor "sistema"), não "cancelada pelo utilizador".
+  - Se o servidor **cair** (falha, corte de energia), a análise fica falhada e marcada como **incompleta**, com aviso nos resultados e no relatório. Não é repetida automaticamente: se foi ela que fez cair o servidor, voltaria a fazê-lo.
+  - Pode repetir qualquer análise falhada ou cancelada com **Repetir análise**: os resultados anteriores são apagados ao recomeçar e ficam resumidos na auditoria.
+- **Ids nunca reutilizados:** processos, análises, vídeos, imagens e locais eliminados nunca cedem o número (nem a pasta `case_NNNNN/` ou `job_NNNNN/`) a um registo novo.
+- **Importação robusta:** o SHA-256 de um vídeo enviado em blocos é calculado à medida que os blocos chegam, por isso concluir não obriga a reler GB de dados. Um erro transitório ao concluir (por exemplo, base de dados ocupada) repõe o ficheiro; voltar a pedir a conclusão chega, sem reenviar o vídeo.
+- **Cópia de segurança com o servidor ligado:** `python -m app.cli backup <pasta> [--files]`.
+  - Faz um instantâneo consistente da base de dados (`VACUUM INTO`) e escreve um manifesto com o SHA-256 de cada vídeo.
+  - Com `--files`, copia também os ficheiros dos processos e o `audit.jsonl`, de forma incremental.
+  - Copiar o `faceai.db` à mão com o servidor ligado pode perder as últimas escritas, que ainda estão no ficheiro `-wal`.
 - **Reprodutibilidade:** o relatório inclui os parâmetros completos (filtro de movimento, cascata, tracking, limiares) e as versões do Python, ONNX Runtime, OpenCV e NumPy. Inclui também o **SHA-256 de cada modelo** usado e o dispositivo.
 - **Evidências:** os ficheiros originais são guardados sem alterações. A cópia de reprodução é um ficheiro separado.
 - **Transparência dos filtros:** o relatório indica quantos frames foram saltados por falta de movimento e por não terem faces na 1.ª passagem. Um frame saltado não foi analisado pelo modelo completo. Se for preciso, repete a análise com os filtros desligados.

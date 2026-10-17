@@ -53,6 +53,8 @@ export interface Video {
   height: number;
   codec: string;
   uploaded_at: string;
+  verified_at?: string | null; // última verificação de integridade (SHA-256 recalculado)
+  verified_ok?: boolean | null;
   playback_status: "" | "not_needed" | "pending" | "running" | "ready" | "failed" | "unavailable";
   playback_progress: number;
   playback_error: string;
@@ -171,6 +173,7 @@ export interface Job {
   clothing_summary: ClothingSummary | null;
   eta_s: number | null;
   message: string;
+  partial?: boolean; // interrompida a meio: resultados incompletos
   created_by: string;
   created_at: string;
   started_at: string | null;
@@ -288,6 +291,28 @@ export interface AuditEvent {
   ip?: string;
   action: string;
   details: Record<string, unknown>;
+  hash?: string;
+}
+
+export interface AuditChainCheck {
+  ok: boolean;
+  events: number;
+  unsealed: number;
+  broken_at: number | null;
+  reason: string;
+  last_hash: string;
+  case_events: number;
+}
+
+export interface EvidenceCheck {
+  running: boolean;
+  done?: number;
+  total?: number;
+  current?: string;
+  ok?: number;
+  failed?: { video_id: number; filename: string; reason: string }[];
+  finished_at?: string;
+  error?: string;
 }
 
 export interface SystemInfo {

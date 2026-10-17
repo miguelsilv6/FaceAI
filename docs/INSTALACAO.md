@@ -217,6 +217,9 @@ docker compose exec faceai python -m app.cli create-admin chefe --name "Nome Ape
 ```
 
 - Os dados ficam em `./data`, incluindo `secret.key` (a chave dos segredos MFA): faz backup da pasta inteira.
+  Com o servidor ligado, usa `docker compose exec faceai python -m app.cli backup /data/backups --files`: dá uma cópia
+  consistente da base de dados (copiar o `faceai.db` à mão pode perder as últimas escritas) e copia os ficheiros de
+  forma incremental. Junta o `secret.key` à cópia.
 - Os modelos ficam no volume `faceai-models` e são descarregados na primeira análise.
 
 **GPU NVIDIA:** instala o driver NVIDIA e o [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), e depois:
