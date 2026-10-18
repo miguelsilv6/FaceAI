@@ -40,7 +40,19 @@ def verify_video(video: Video) -> tuple[bool, str]:
         digest = file_sha256(path)
     except OSError as exc:
         return False, f"erro de leitura: {exc}"
-    return (True, "") if digest == video.sha256 else (False, f"SHA-256 diferente ({digest})")
+    if digest != video.sha256:
+        return False, f"SHA-256 diferente ({digest})"
+    if video.analysis_path and video.analysis_sha256:  # cópia de trabalho extraída (.sec): é a que foi analisada
+        work = Path(video.analysis_path)
+        if not work.exists():
+            return False, "original íntegro, mas a cópia de análise extraída está em falta"
+        try:
+            work_digest = file_sha256(work)
+        except OSError as exc:
+            return False, f"erro de leitura da cópia de análise: {exc}"
+        if work_digest != video.analysis_sha256:
+            return False, f"original íntegro, mas a cópia de análise extraída tem SHA-256 diferente ({work_digest})"
+    return True, ""
 
 
 def verify_videos(s: Session, videos: list[Video], *, case_id: int, actor: str,

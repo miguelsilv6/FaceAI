@@ -94,6 +94,11 @@ class Video(SQLModel, table=True):
     width: int = 0
     height: int = 0
     codec: str = ""
+    # Formatos proprietários (.sec): o original fica intacto como evidência e a análise usa uma cópia de trabalho
+    # com o vídeo extraído sem recodificação (services/sec_format.py); extraction é o relatório dessa extração.
+    analysis_path: str | None = None
+    analysis_sha256: str = ""
+    extraction: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     playback_path: str | None = None  # cópia H.264 só para visualização no navegador
     # "" (por avaliar) | not_needed | pending | running | ready | failed | unavailable (sem ffmpeg)
     playback_status: str = ""
@@ -114,6 +119,11 @@ class Video(SQLModel, table=True):
     verified_at: datetime | None = None
     verified_ok: bool | None = None
     uploaded_at: datetime = Field(default_factory=utcnow)
+
+    @property
+    def source_path(self) -> str:
+        """Ficheiro que é descodificado (análise, frames, OCR): a cópia de trabalho extraída ou o original."""
+        return self.analysis_path or self.stored_path
 
 
 class Job(SQLModel, table=True):

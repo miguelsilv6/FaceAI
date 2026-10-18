@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import shutil
 import uuid
 from pathlib import Path
@@ -43,7 +44,7 @@ from ..schemas import (
     VideoDelete,
     VideoUpdate,
 )
-from ..services import disk, evidence
+from ..services import disk, evidence, sec_format
 from ..services.audit import log_event, verify_chain
 from ..services.clock_auto import request_auto_clock
 from ..services.face_engine import get_engine
@@ -76,8 +77,9 @@ router = APIRouter(prefix="/api", tags=["casos"], dependencies=[Depends(authoriz
 IMAGE_EXT = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff"}
 VIDEO_EXT = {
     ".mp4", ".avi", ".mkv", ".mov", ".m4v", ".wmv", ".mpg", ".mpeg", ".ts",
-    ".dav", ".h264", ".264", ".webm", ".flv", ".3gp",
+    ".dav", ".h264", ".264", ".webm", ".flv", ".3gp", ".sec",
 }
+EXTRACTED_EXT = {".sec"}  # formatos proprietários: o vídeo é extraído para uma cópia de trabalho (sec_format)
 
 
 def _store_upload(upload: UploadFile, dest_dir: Path, allowed: set[str]) -> tuple[Path, int]:
@@ -126,6 +128,7 @@ def location_of_case(session, case_id: int, location_id: int | None, actor: str 
 
 
 DUPLICATE_HEADER = "X-FaceAI-Duplicate-Of"
+PATH_FIELDS = {"stored_path", "analysis_path", "playback_path"}  # caminhos internos: não vão para a auditoria
 
 
 def duplicate_error(session, existing: Video, filename: str) -> HTTPException:
@@ -161,22 +164,38 @@ def register_video(session, case_id: int, path: Path, filename: str, size: int, 
                                "duplicate_of": existing.id, "existing_filename": existing.filename})
             raise duplicate_error(session, existing, filename)
         quick = quick_hash(path)
-        info = probe(path)
-    except (ValueError, HTTPException) as exc:
+        analysis, extraction = None, {}
+        if Path(filename).suffix.lower() in EXTRACTED_EXT:
+            analysis, extraction = sec_format.extract(path, path.with_name(path.stem + "_analysis"))
+        info = probe(analysis or path)
+    except (ValueError, OSError, HTTPException) as exc:
         path.unlink(missing_ok=True)
+        for extracted in path.parent.glob(path.stem + "_analysis*"):
+            extracted.unlink(missing_ok=True)
         if isinstance(exc, HTTPException):
             raise
         raise HTTPException(422, f"{filename}: {exc}") from exc
+    if extraction:  # o n.º de frames vem dos blocos (uma sequência H.264 crua não o indica)
+        fps = extraction["fps"]
+        frames = extraction["frames"]
+        info = dataclasses.replace(info, fps=fps, frame_count=frames, duration_s=frames / fps)
     video = Video(case_id=case_id, location_id=loc.id, filename=filename, sha256=digest, quick_hash=quick,
                   stored_path=str(path), size_bytes=size,
+                  analysis_path=str(analysis) if analysis else None,
+                  analysis_sha256=extraction.get("analysis_sha256", ""), extraction=extraction,
                   duration_s=round(info.duration_s, 3), fps=round(info.fps, 3), frame_count=info.frame_count,
                   width=info.width, height=info.height, codec=info.codec)
     session.add(video)
     session.commit()
     session.refresh(video)
     log_event(session, "video.uploaded", case_id=case_id, actor=actor,
-              details={**video.model_dump(mode="json", exclude={"stored_path", "playback_path"}),
+              details={**video.model_dump(mode="json", exclude=PATH_FIELDS | {"extraction"}),
                        "location_name": loc.name})
+    if extraction:
+        log_event(session, "video.extracted", case_id=case_id, actor=actor,
+                  details={"video_id": video.id, "filename": filename, "original_sha256": digest,
+                           **{k: v for k, v in extraction.items() if k != "first_blocks"},
+                           "note": "o original não foi alterado; a análise usa o vídeo extraído sem recodificação"})
     request_playback_copy(session, video)
     request_auto_clock(session, video)
     return video
@@ -268,7 +287,7 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
     n_detections = session.exec(select(func.count()).select_from(Detection)
                                 .where(Detection.job_id.in_(job_ids))).one()
     n_tracks = session.exec(select(func.count()).select_from(Track).where(Track.job_id.in_(job_ids))).one()
-    files = [Path(p) for v in videos for p in (v.stored_path, v.playback_path) if p]
+    files = [Path(p) for v in videos for p in (v.stored_path, v.analysis_path, v.playback_path) if p]
     files += [Path(p) for r in refs for p in (r.stored_path, r.face_crop_path) if p]
     files += [Path(u.temp_path) for u in uploads]
     summary = {
@@ -734,7 +753,10 @@ def stream_video(video_id: int, session: SessionDep) -> FileResponse:
         media_type = FORMATS.get(video.playback_format, "video/mp4")
         return FileResponse(video.playback_path, media_type=media_type, content_disposition_type="inline",
                             headers=_NO_CACHE)
-    return FileResponse(video.stored_path, filename=video.filename, content_disposition_type="inline",
+    filename = video.filename
+    if video.analysis_path:  # .sec: o browser recebe o vídeo extraído, não o ficheiro proprietário
+        filename = Path(video.filename).stem + Path(video.analysis_path).suffix
+    return FileResponse(video.source_path, filename=filename, content_disposition_type="inline",
                         headers=_NO_CACHE)
 
 
@@ -761,9 +783,9 @@ def delete_video(video_id: int, body: VideoDelete, session: SessionDep, user: Cu
         raise HTTPException(409, "Este vídeo é usado nas análises " + ", ".join(f"#{i}" for i in used)
                             + ". Elimine-as primeiro (os resultados dependem do vídeo original).")
     cancel_copies([video_id])
-    files = [Path(p) for p in (video.stored_path, video.playback_path) if p]
+    files = [Path(p) for p in (video.stored_path, video.analysis_path, video.playback_path) if p]
     summary = {"video_id": video_id, "reason": body.reason.strip(),
-               **video.model_dump(mode="json", exclude={"stored_path", "playback_path", "time_calibration"})}
+               **video.model_dump(mode="json", exclude=PATH_FIELDS | {"time_calibration", "extraction"})}
     case_id = video.case_id
     session.delete(video)
     session.commit()
@@ -814,4 +836,4 @@ def probe_video(video_id: int, session: SessionDep) -> dict:
     video = session.get(Video, video_id)
     if video is None:
         raise HTTPException(404, "Vídeo não encontrado.")
-    return probe_stream(video.stored_path) or {}
+    return probe_stream(video.source_path) or {}

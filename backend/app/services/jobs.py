@@ -383,7 +383,7 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                 if body is not None:
                     body.start_video(video, ctx.track_gap_s)
                 analyzer = _VideoAnalyzer(ctx, s, job, video, body)
-                frames_iter = sample_frames(video.stored_path, ctx.sample_fps, fps=video.fps or None,
+                frames_iter = sample_frames(video.source_path, ctx.sample_fps, fps=video.fps or None,
                                             prefetch=DECODE_PREFETCH)
                 last_commit = time.monotonic()
                 try:

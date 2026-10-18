@@ -38,6 +38,19 @@ export interface Location {
   playback_bytes: number;
 }
 
+export interface VideoExtraction {
+  method: string;
+  container: string;
+  frames: number;
+  keyframes: number;
+  fps: number;
+  fps_source: string;
+  resyncs: number;
+  skipped_bytes: number;
+  h264_sha256: string;
+  analysis_sha256: string;
+}
+
 export interface Video {
   id: number;
   case_id: number;
@@ -45,6 +58,9 @@ export interface Video {
   camera_name: string;
   filename: string;
   sha256: string; // integridade e deteção de duplicados ("" em vídeos antigos até ser calculado)
+  // Formatos proprietários (.sec): a análise usa o H.264 extraído dos blocos; o original fica intacto
+  analysis_sha256?: string;
+  extraction?: Partial<VideoExtraction>;
   size_bytes: number;
   duration_s: number;
   fps: number;

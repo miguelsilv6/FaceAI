@@ -72,10 +72,10 @@ def probe_stream(path: str | Path) -> dict | None:
 
 
 def needs_playback_copy(video: Video) -> tuple[bool, str]:
-    ext = Path(video.filename).suffix.lower()
+    ext = Path(video.analysis_path or video.filename).suffix.lower()  # .sec: conta o contentor do vídeo extraído
     if ext not in BROWSER_CONTAINERS:
         return True, f"contentor {ext or 'desconhecido'} não suportado pelos browsers"
-    info = probe_stream(video.stored_path)
+    info = probe_stream(video.source_path)
     if info is None:
         ok = video.codec.lower() in BROWSER_CODECS
         return (not ok, "" if ok else f"codec {video.codec or 'desconhecido'} não suportado pelos browsers")
@@ -129,7 +129,7 @@ def request_case_copies(s: Session, case_id: int, *, fmt: str = "mp4", actor: st
             continue
         if video.playback_status == READY and (video.playback_format or "mp4") == fmt:
             continue
-        if not Path(video.stored_path).exists():
+        if not Path(video.source_path).exists():
             continue
         request_playback_copy(s, video, force=True, actor=actor, fmt=fmt)
     return videos
@@ -166,7 +166,7 @@ def resume_pending_copies() -> None:
                     s.add(video)
                     s.commit()
                 continue
-            if not Path(video.stored_path).exists():
+            if not Path(video.source_path).exists():
                 if video.playback_status in (PENDING, RUNNING):
                     video.playback_status, video.playback_error = FAILED, "O ficheiro original não foi encontrado."
                     s.add(video)
@@ -255,7 +255,7 @@ def _transcode(video_id: int) -> None:
     if video is None:
         return
     fmt = video.playback_format if video.playback_format in FORMATS else "mp4"
-    src = Path(video.stored_path)
+    src = Path(video.source_path)
     dst = src.with_name(f"{src.stem}_playback.{fmt}")
     tmp = src.with_name(f"{src.stem}_playback.part.{fmt}")
     if fmt == "webm":  # VP9 em tempo real: mais lento que H.264 mas reproduz em qualquer browser moderno
