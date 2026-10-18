@@ -145,3 +145,63 @@ def make_people_video(path: Path, people: list[dict], duration_s: float = 6.0, f
         writer.write(frame)
     writer.release()
     return path
+
+
+def h264_access_units(data: bytes) -> list[tuple[bool, bytes]]:
+    """Divide uma sequência H.264 Annex B em frames: [(é_chave, bytes)] (um slice por frame, sem B-frames)."""
+    starts, i = [], data.find(b"\x00\x00\x01")  # start codes de 3 ou 4 bytes (o x264 usa os dois)
+    while i >= 0:
+        starts.append(i - 1 if i > 0 and data[i - 1] == 0 else i)
+        i = data.find(b"\x00\x00\x01", i + 3)
+    nals = [data[a:b] for a, b in zip(starts, [*starts[1:], len(data)], strict=True)]
+    units: list[list[bytes]] = []
+    has_slice = False
+    for nal in nals:
+        kind = nal[nal.index(b"\x00\x00\x01") + 3] & 0x1F
+        if not units or (has_slice and kind in (1, 5, 6, 7, 9)):
+            units.append([])
+            has_slice = False
+        units[-1].append(nal)
+        has_slice = has_slice or kind in (1, 5)
+    return [(any(n[n.index(b"\x00\x00\x01") + 3] & 0x1F == 5 for n in u), b"".join(u)) for u in units]
+
+
+def sec_block(payload: bytes, key: bool, width: int, height: int, seq: int) -> bytes:
+    """Bloco .sec: cabeçalho de 48 bytes (estrutura das exportações reais) + carga H.264."""
+    head = bytearray(48)
+    head[0:4] = b"\x00\xe0\x02\x03"
+    head[4] = 1 if key else 2
+    head[6:12] = bytes.fromhex("b4948f508181")
+    head[12:20] = seq.to_bytes(8, "big")
+    head[20] = 0x81
+    head[21:24] = (48 + len(payload)).to_bytes(3, "big")
+    head[24:28] = width.to_bytes(4, "big")
+    head[28:32] = height.to_bytes(4, "big")
+    return bytes(head) + payload
+
+
+def make_sec(path: Path, source: Path, *, sub_source: Path | None = None, garbage_after: int | None = None) -> Path:
+    """Converte um vídeo num .sec sintético (H.264 por ffmpeg). sub_source: segundo stream (outra resolução)
+    intercalado; garbage_after: bytes corrompidos depois desse frame (para testar a ressincronização)."""
+    import subprocess
+
+    def encode(src: Path) -> tuple[list[tuple[bool, bytes]], int, int]:
+        cap = cv2.VideoCapture(str(src))
+        w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        cap.release()
+        raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(src), "-c:v", "libx264", "-bf", "0", "-g", "10",
+                              "-x264-params", "slices=1:aud=0", "-pix_fmt", "yuv420p", "-f", "h264", "-"],
+                             check=True, capture_output=True).stdout
+        return h264_access_units(raw), w, h
+
+    main, w, h = encode(source)
+    sub, sw, sh = encode(sub_source) if sub_source else ([], 0, 0)
+    out = bytearray()
+    for i, (key, payload) in enumerate(main):
+        out += sec_block(payload, key, w, h, i)
+        if i < len(sub):
+            out += sec_block(sub[i][1], sub[i][0], sw, sh, i)
+        if garbage_after is not None and i == garbage_after:
+            out += b"\x13\x37" * 500
+    path.write_bytes(bytes(out))
+    return path

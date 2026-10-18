@@ -23,7 +23,7 @@ log = logging.getLogger(__name__)
 
 # (tabela, coluna) com caminhos de ficheiros dentro da pasta de dados
 PATH_COLUMNS = [
-    ("video", "stored_path"), ("video", "playback_path"),
+    ("video", "stored_path"), ("video", "analysis_path"), ("video", "playback_path"),
     ("referenceimage", "stored_path"), ("referenceimage", "face_crop_path"),
     ("detection", "crop_path"), ("detection", "frame_path"),
     ("savedframe", "stored_path"), ("upload", "temp_path"),

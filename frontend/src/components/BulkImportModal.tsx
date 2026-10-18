@@ -12,7 +12,7 @@ import type { Location, ServerImportScan, ServerImportState } from "../types";
 
 // Iguais a VIDEO_EXT no servidor (api/cases.py)
 const VIDEO_EXT = new Set([".mp4", ".avi", ".mkv", ".mov", ".m4v", ".wmv", ".mpg", ".mpeg", ".ts", ".dav", ".h264",
-  ".264", ".webm", ".flv", ".3gp"]);
+  ".264", ".webm", ".flv", ".3gp", ".sec"]);
 const isVideo = (name: string) => VIDEO_EXT.has(name.slice(name.lastIndexOf(".")).toLowerCase()) && !name.startsWith(".");
 
 interface Row {

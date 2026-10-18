@@ -17,9 +17,20 @@ import PlaybackBadge from "./PlaybackBadge";
 import UploadZone from "./UploadZone";
 import VideoPlayerModal from "./VideoPlayerModal";
 
+/** Resumo da extração de um formato proprietário (.sec), para a dica do vídeo. */
+function extractionTitle(v: Video): string {
+  const x = v.extraction ?? {};
+  return [
+    `Original ${v.filename} guardado intacto (SHA-256 ${v.sha256}).`,
+    `A análise usa o H.264 extraído dos blocos: ${x.frames} frames, ${x.keyframes} chave, ${x.fps} fps (${x.fps_source}).`,
+    x.resyncs ? `${x.resyncs} ressincronização(ões), ${formatBytes(x.skipped_bytes ?? 0)} ignorados.` : "Sem blocos danificados.",
+    `Cópia de análise (${x.container}): SHA-256 ${x.analysis_sha256}`,
+  ].join("\n");
+}
+
 export const VIDEO_ACCEPT = {
   "video/*": [".mp4", ".avi", ".mkv", ".mov", ".m4v", ".wmv", ".mpg", ".mpeg", ".ts", ".webm", ".flv", ".3gp"],
-  "application/octet-stream": [".dav", ".h264", ".264"],
+  "application/octet-stream": [".dav", ".h264", ".264", ".sec"],
 };
 
 interface Props {
@@ -221,7 +232,12 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                       </Group>
                     </Table.Td><Table.Td>{formatBytes(v.size_bytes)}</Table.Td>
                     <Table.Td>{formatTime(v.duration_s)}</Table.Td><Table.Td>{v.fps.toFixed(2)}</Table.Td>
-                    <Table.Td>{v.width}×{v.height}</Table.Td><Table.Td>{v.codec || "—"}</Table.Td>
+                    <Table.Td>{v.width}×{v.height}</Table.Td><Table.Td>
+                      {v.codec || "—"}
+                      {v.extraction?.method && (
+                        <Text size="xs" c="dimmed" title={extractionTitle(v)}>extraído (sem recodificar)</Text>
+                      )}
+                    </Table.Td>
                     <Table.Td><PlaybackBadge video={v} onCreate={createCopy} /></Table.Td>
                     <Table.Td>
                       {v.dvr_start ? (

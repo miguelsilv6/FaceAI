@@ -33,7 +33,7 @@ def _clock_details(v: Video) -> dict:
 def video_frame(video_id: int, session: SessionDep, t: float = 0.0) -> Response:
     v = _video(session, video_id)
     try:
-        frame = ocr.read_frame(v.stored_path, max(0.0, min(t, v.duration_s)), v.fps)
+        frame = ocr.read_frame(v.source_path, max(0.0, min(t, v.duration_s)), v.fps)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
@@ -45,7 +45,7 @@ def clock_ocr_test(video_id: int, body: ClockOcrTest, session: SessionDep) -> di
     """Lê a data/hora num frame (zona indicada ou procura automática) — para testar antes de calibrar."""
     v = _video(session, video_id)
     try:
-        frame = ocr.read_frame(v.stored_path, max(0.0, min(body.t, v.duration_s)), v.fps)
+        frame = ocr.read_frame(v.source_path, max(0.0, min(body.t, v.duration_s)), v.fps)
         if body.roi is None:
             found = ocr.find_timestamp(frame, body.date_order)
             if not found:
@@ -63,7 +63,7 @@ def clock_ocr_test(video_id: int, body: ClockOcrTest, session: SessionDep) -> di
 def clock_ocr(video_id: int, body: ClockOcr, session: SessionDep, actor: ActorDep) -> Video:
     v = _video(session, video_id)
     try:
-        cal = ocr.calibrate(v.stored_path, v.fps, v.duration_s, roi=body.roi, samples=body.samples,
+        cal = ocr.calibrate(v.source_path, v.fps, v.duration_s, roi=body.roi, samples=body.samples,
                             date_order=body.date_order)
     except ocr.OcrUnavailable as exc:
         raise HTTPException(501, str(exc)) from exc

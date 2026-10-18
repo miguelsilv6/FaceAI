@@ -805,7 +805,7 @@ def detection_original_frame(det_id: int, session: SessionDep, actor: ActorDep, 
         raise HTTPException(404, "Deteção não encontrada.")
     job = session.get(Job, det.job_id)
     video = session.get(Video, det.video_id)
-    if job is None or video is None or not Path(video.stored_path).exists():
+    if job is None or video is None or not Path(video.source_path).exists():
         raise HTTPException(404, "O vídeo original desta deteção já não está disponível.")
     try:
         body, method, err = validated_frames.original_frame_png(job, video, det)
@@ -845,7 +845,7 @@ def detection_enhanced(det_id: int, session: SessionDep, actor: ActorDep, src: s
         img = read_image(det.crop_path)
     else:
         video = session.get(Video, det.video_id)
-        if job is None or video is None or not Path(video.stored_path).exists():
+        if job is None or video is None or not Path(video.source_path).exists():
             raise HTTPException(404, "O vídeo original desta deteção já não está disponível.")
         try:
             png, _, _ = validated_frames.original_frame_png(job, video, det)
@@ -1112,12 +1112,12 @@ def save_frame(job_id: int, body: SavedFrameCreate, session: SessionDep, actor: 
     if body.video_id not in (job.video_ids or []):
         raise HTTPException(422, "O vídeo não pertence a esta análise.")
     video = session.get(Video, body.video_id)
-    if video is None or not Path(video.stored_path).exists():
+    if video is None or not Path(video.source_path).exists():
         raise HTTPException(404, "O vídeo original já não está disponível.")
     last = max(0, (video.frame_count or 1) - 1)
     frame_index = min(last, max(0, int(round(body.t * (video.fps or 0)))))
     try:
-        image = extract_frame(video.stored_path, frame_index, None, (0, 0, 0, 0)).image
+        image = extract_frame(video.source_path, frame_index, None, (0, 0, 0, 0)).image
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     ok, buf = cv2.imencode(".png", image)

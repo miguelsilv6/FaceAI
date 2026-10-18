@@ -9,6 +9,9 @@
   verify-evidence [case_id] recalcula o SHA-256 dos vídeos originais e compara com o da importação
   backup <pasta> [--files]  cópia consistente da base de dados (VACUUM INTO) + manifesto; com --files,
                             copia também os ficheiros dos processos (incremental)
+  sec-info <ficheiro.sec> [--extract <destino>]
+                            mostra a estrutura de um ficheiro .sec de DVR (blocos, streams, cabeçalhos) e, com
+                            --extract, grava o vídeo extraído (destino.mp4, ou destino.h264 sem ffmpeg)
 
 Com Docker: docker compose exec faceai python -m app.cli create-admin
 """
@@ -150,6 +153,21 @@ def run_backup(dest: str, include_files: bool) -> None:
     print(f"Manifesto: manifest_{m['created_at']}.json ({len(m['videos'])} vídeo(s)).")
 
 
+def sec_info(file: str, extract: str | None) -> None:
+    import json
+
+    from .services import sec_format
+
+    if not sec_format.is_sec(file):
+        sys.exit("O ficheiro não começa por um bloco .sec reconhecido (magic 00 e0 02 03).")
+    if extract:
+        out, info = sec_format.extract(file, Path(extract))
+        print(json.dumps(info, indent=2, ensure_ascii=False))
+        print(f"Vídeo extraído: {out}")
+    else:
+        print(json.dumps(sec_format.inspect(file), indent=2, ensure_ascii=False))
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="python -m app.cli", description="Administração local do FaceAI.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -164,8 +182,14 @@ def main(argv: list[str] | None = None) -> None:
     b = sub.add_parser("backup")
     b.add_argument("dest")
     b.add_argument("--files", action="store_true", help="copiar também os ficheiros dos processos")
+    x = sub.add_parser("sec-info")
+    x.add_argument("file")
+    x.add_argument("--extract", metavar="DESTINO", help="grava o vídeo extraído (sem extensão)")
     args = p.parse_args(argv)
 
+    if args.cmd == "sec-info":  # não usa a base de dados
+        sec_info(args.file, args.extract)
+        return
     init_db()
     with Session(get_engine()) as s:
         if args.cmd == "create-admin":

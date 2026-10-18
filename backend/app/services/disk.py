@@ -49,7 +49,7 @@ def dir_size(path: Path) -> int:
 def _outside_files(s: Session, case_id: int, folder: Path) -> int:
     paths = [u.temp_path for u in s.exec(select(Upload).where(Upload.case_id == case_id))]
     for v in s.exec(select(Video).where(Video.case_id == case_id)):
-        paths += [v.stored_path, v.playback_path or ""]
+        paths += [v.stored_path, v.analysis_path or "", v.playback_path or ""]
     for r in s.exec(select(ReferenceImage).where(ReferenceImage.case_id == case_id)):
         paths += [r.stored_path, r.face_crop_path or ""]
     total = 0

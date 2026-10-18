@@ -44,7 +44,7 @@ def original_frame_png(job: Job, video: Video, det: Detection) -> tuple[bytes, s
             return body, f"{meta['method']} (cache)", meta.get("crop_error")
         except (OSError, ValueError, KeyError):
             return body, "cache", None
-    extracted = extract_frame(video.stored_path, det.frame_index, det.crop_path, (det.x, det.y, det.w, det.h),
+    extracted = extract_frame(video.source_path, det.frame_index, det.crop_path, (det.x, det.y, det.w, det.h),
                               margin=0.05 if det.kind == "body" else 0.25)
     ok, buf = cv2.imencode(".png", extracted.image)
     if not ok:
@@ -146,7 +146,7 @@ def stream_zip(validated: ValidatedSet, *, scope: str, actor: str) -> Iterator[b
                 name = (f"analise{job.id:05d}/video{video.id:04d}_frame{det.frame_index:07d}_"
                         f"{format_timestamp(det.timestamp_s).replace(':', '-')}.png")
                 try:
-                    if not Path(video.stored_path).exists():
+                    if not Path(video.source_path).exists():
                         raise ValueError("o vídeo original já não está disponível")
                     body, method, err = original_frame_png(job, video, det)
                 except ValueError as exc:

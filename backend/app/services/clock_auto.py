@@ -63,7 +63,7 @@ def process(video_id: int) -> None:
         v = s.get(Video, video_id)
         if v is None:
             return
-        if v.dvr_start or not Path(v.stored_path).exists():
+        if v.dvr_start or not Path(v.source_path).exists():
             if v.clock_auto_status in (PENDING, RUNNING):
                 v.clock_auto_status = ""
                 s.add(v)
@@ -72,7 +72,7 @@ def process(video_id: int) -> None:
         v.clock_auto_status = RUNNING
         s.add(v)
         s.commit()
-        path, fps, duration = v.stored_path, v.fps, v.duration_s
+        path, fps, duration = v.source_path, v.fps, v.duration_s
     status, message, cal = FAILED, "", None
     try:
         cal = ocr.calibrate(path, fps, duration, roi=None, samples=SAMPLES, date_order=settings.clock_date_order)

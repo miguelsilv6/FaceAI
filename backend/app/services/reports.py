@@ -197,7 +197,8 @@ def to_json(data: dict[str, Any]) -> str:
         "job": job.model_dump(mode="json"),
         "locations": (job.params or {}).get("locations") or [],
         "videos": [
-            {**v.model_dump(mode="json", exclude={"stored_path", "playback_path"}), **place_of(v, data)}
+            {**v.model_dump(mode="json", exclude={"stored_path", "analysis_path", "playback_path"}),
+             **place_of(v, data)}
             for v in data["videos"].values()
         ],
         "references": [

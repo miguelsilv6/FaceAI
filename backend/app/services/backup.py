@@ -66,7 +66,9 @@ def backup(dest: Path, *, include_files: bool = False) -> dict[str, Any]:
                                 "database": {"file": db_out.name, "sha256": _sha256(db_out)}}
     with Session(get_engine()) as s:
         manifest["videos"] = [{"id": v.id, "case_id": v.case_id, "filename": v.filename, "sha256": v.sha256,
-                               "size_bytes": v.size_bytes, "path": _rel(v.stored_path)}
+                               "size_bytes": v.size_bytes, "path": _rel(v.stored_path),
+                               **({"analysis_path": _rel(v.analysis_path), "analysis_sha256": v.analysis_sha256}
+                                  if v.analysis_path else {})}
                               for v in s.exec(select(Video).order_by(Video.id))]
         manifest["saved_frames"] = [{"id": f.id, "case_id": f.case_id, "sha256": f.sha256,
                                      "path": _rel(f.stored_path)}
