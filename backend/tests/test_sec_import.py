@@ -116,3 +116,108 @@ def test_cli_sec_info(sec_file, capsys, tmp_path):
     cli.main(["sec-info", str(sec_file), "--extract", str(tmp_path / "out")])
     assert (tmp_path / "out.mp4").exists()
 
+
+
+def _import_sec(client, path, name="fps"):
+    cid = client.post("/api/cases", json={"name": name}).json()["id"]
+    with path.open("rb") as fh:
+        r = client.post(f"/api/cases/{cid}/videos", files=[("files", (path.name, fh, "application/octet-stream"))])
+    assert r.status_code == 201, r.text
+    return cid, r.json()[0]
+
+
+def test_fps_correction_retimes_analysis_and_keeps_h264(client, sec_file, tmp_path, monkeypatch):
+    import app.db
+    from app.models import AuditEvent, Video
+    from app.services.video_processor import probe
+
+    monkeypatch.setattr(sec_format, "_sps_fps", lambda path: None)  # DVR sem fps no SPS: assume 25
+    cid, v = _import_sec(client, sec_file)
+    assert v["fps"] == 25 and v["duration_s"] == 1.6 and v["extraction"]["fps_assumed"] is True
+    with open(make_image(tmp_path / "r.jpg", RED), "rb") as fh:
+        client.post(f"/api/cases/{cid}/references", files=[("files", ("r.jpg", fh, "image/jpeg"))])
+    body = {"params": {"sample_fps": 25, "threshold": 0.05, "motion_filter": False, "tracking": True}}
+    job = wait_for_job(client, client.post(f"/api/cases/{cid}/jobs", json=body).json()["id"])
+    assert job["matches"] > 0
+    tracks_before = client.get(f"/api/jobs/{job['id']}/tracks").json()
+    r = client.put(f"/api/videos/{v['id']}/clock", json={"video_s": 0.4, "dvr_time": "2025-11-27T12:00:00"})
+    assert r.status_code == 200
+
+    r = client.post(f"/api/videos/{v['id']}/fps", json={"fps": 10, "reason": "o DVR grava a 10 fps"})
+    assert r.status_code == 200, r.text
+    fixed = r.json()
+    x = fixed["extraction"]
+    assert fixed["fps"] == 10 and fixed["duration_s"] == 4 and fixed["frame_count"] == 40
+    assert x["h264_sha256"] == v["extraction"]["h264_sha256"] and fixed["analysis_sha256"] != v["analysis_sha256"]
+    assert x["fps_assumed"] is False and x["fps_history"][0]["from"] == 25 and "manual" in x["fps_source"]
+    with Session(app.db.get_engine()) as s:
+        video = s.get(Video, v["id"])
+        assert probe(video.analysis_path).fps == 10
+        ev = s.exec(select(AuditEvent).where(AuditEvent.action == "video.fps_corrected")).one()
+        details = json.loads(ev.details) if isinstance(ev.details, str) else ev.details
+        assert details["jobs"] == [job["id"]] and details["detections_retimed"] > 0
+    dets = client.get(f"/api/jobs/{job['id']}/detections").json()
+    assert all(abs(d["timestamp_s"] - d["frame_index"] / 10) < 1e-6 for d in dets)
+    after = client.get(f"/api/jobs/{job['id']}/tracks").json()
+    assert [round(t["start_s"] * 2.5, 3) for t in tracks_before] == [round(t["start_s"], 3) for t in after]
+    # ponto manual: o frame que mostrava 12:00:00 (0,4 s a 25 fps = frame 10) continua a mostrá-lo, agora a 1,0 s
+    assert fixed["dvr_rate"] == 1 and fixed["time_calibration"]["video_s"] == 1.0
+    assert fixed["dvr_start"] == "2025-11-27T11:59:59.000"
+    html = client.get(f"/api/jobs/{job['id']}/export/html").text
+    assert "fps corrigido de 25 para 10" in html and "fps assumido" not in html
+
+
+def test_fps_correction_from_dvr_clock_suggestion(client, sec_file, monkeypatch):
+    import app.db
+    from app.models import Video
+    from app.services import fps_fix
+
+    monkeypatch.setattr(sec_format, "_sps_fps", lambda path: None)
+    _, v = _import_sec(client, sec_file)
+    with Session(app.db.get_engine()) as s:  # o OCR leu o relógio: avança 2,5 s por cada segundo do vídeo
+        video = s.get(Video, v["id"])
+        video.dvr_start, video.dvr_rate, video.time_source = "2025-11-27T12:00:00.000", 2.5, "ocr"
+        video.time_calibration = {"rate": 2.5, "samples": [{"video_s": 1.0, "text": "12:00:02"}]}
+        fps_fix.suggest_from_clock(video, 2.5)
+        s.add(video)
+        s.commit()
+        assert video.extraction["suggested_fps"]["fps"] == 10
+    r = client.post(f"/api/videos/{v['id']}/fps", json={"fps": 10, "reason": "relógio do DVR", "source": "ocr"})
+    fixed = r.json()
+    assert fixed["dvr_rate"] == 1 and fixed["time_calibration"]["samples"][0]["video_s"] == 2.5
+    assert "suggested_fps" not in fixed["extraction"] and "OCR" in fixed["extraction"]["fps_source"]
+
+
+def test_fps_correction_is_refused_when_not_allowed(client, sec_file, tmp_path):
+    import app.db
+    from app.models import Job, JobStatus
+
+    cid, v = _import_sec(client, sec_file)
+    assert client.post(f"/api/videos/{v['id']}/fps", json={"fps": 200, "reason": "teste"}).status_code == 422
+    with Session(app.db.get_engine()) as s:
+        s.add(Job(case_id=cid, video_ids=[v["id"]], status=JobStatus.running))
+        s.commit()
+    r = client.post(f"/api/videos/{v['id']}/fps", json={"fps": 10, "reason": "teste"})
+    assert r.status_code == 409
+    mp4 = make_video(tmp_path / "n.mp4", [(0.5, 1.5, RED)], duration_s=2, fps=10)
+    with mp4.open("rb") as fh:
+        other = client.post(f"/api/cases/{cid}/videos", files=[("files", ("n.mp4", fh, "video/mp4"))]).json()[0]
+    assert client.post(f"/api/videos/{other['id']}/fps", json={"fps": 12, "reason": "teste"}).status_code == 422
+
+
+def test_restart_copy_requeues_a_running_conversion(client, sec_file):
+    import app.db
+    from app.models import Video
+    from app.services import transcode
+
+    _, v = _import_sec(client, sec_file)
+    with Session(app.db.get_engine()) as s:
+        video = s.get(Video, v["id"])
+        transcode._queued.add(video.id)  # simula uma conversão em fila
+        try:
+            assert transcode.restart_copy(s, video) == transcode.PENDING
+            assert video.id in transcode._requeue and video.id in transcode._cancelled
+        finally:
+            transcode._queued.discard(video.id)
+            transcode._requeue.discard(video.id)
+            transcode._cancelled.discard(video.id)

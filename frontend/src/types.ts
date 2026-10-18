@@ -49,6 +49,9 @@ export interface VideoExtraction {
   skipped_bytes: number;
   h264_sha256: string;
   analysis_sha256: string;
+  fps_assumed: boolean;
+  suggested_fps?: { fps: number; rate: number; at: string };
+  fps_history?: { from: number; to: number; source: string; reason: string; by: string; at: string }[];
 }
 
 export interface Video {

@@ -20,6 +20,7 @@ from ..db import get_engine
 from ..models import Video
 from . import ocr
 from .audit import log_event
+from .fps_fix import suggest_from_clock
 
 log = logging.getLogger(__name__)
 
@@ -102,6 +103,7 @@ def process(video_id: int) -> None:
             v.time_source = "ocr"
             v.time_note = "Lida automaticamente por OCR na importação: confirme."
             v.time_calibration = cal
+            suggest_from_clock(v, cal["rate"])
         s.add(v)
         s.commit()
         if status == DONE:
