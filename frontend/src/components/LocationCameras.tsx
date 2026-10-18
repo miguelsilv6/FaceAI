@@ -149,8 +149,19 @@ export default function LocationCameras({ caseId, location, videos, locations, j
 
   // Atualiza o estado das conversões para o browser (e da leitura da hora por OCR) enquanto decorrem.
   const converting = vs.some((v) => v.playback_status === "pending" || v.playback_status === "running"
-    || v.clock_auto_status === "pending" || v.clock_auto_status === "running");
+    || v.clock_auto_status === "pending" || v.clock_auto_status === "running"
+    || v.extraction_status === "pending" || v.extraction_status === "running");
   usePolling(onChange, 3000, converting);
+
+  const retryExtraction = async (v: Video) => {
+    try {
+      await api.retryExtraction(v.id);
+      notifyOk(`Extração do vídeo #${v.id} na fila.`);
+      onChange();
+    } catch (e) {
+      notifyError(e);
+    }
+  };
 
   const createCopy = async (v: Video) => {
     try {
@@ -168,7 +179,8 @@ export default function LocationCameras({ caseId, location, videos, locations, j
     try {
       const { created, duplicates: dups } = await api.uploadVideos(caseId, files, setProgress, location.id);
       setDuplicates(dups);
-      if (created.length) notifyOk(`${created.length} vídeo(s) importado(s) para "${location.name}".`);
+      if (created.length) notifyOk(`${created.length} vídeo(s) importado(s) para "${location.name}".`
+        + (created.some((v) => v.extraction_status) ? " Os .sec estão a ser extraídos (pode demorar alguns minutos)." : ""));
     } catch (e) {
       notifyError(e, "Falha ao importar vídeo");
     } finally {
@@ -237,6 +249,28 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                     <Table.Td>{formatTime(v.duration_s)}</Table.Td><Table.Td>{v.fps.toFixed(2)}</Table.Td>
                     <Table.Td>{v.width}×{v.height}</Table.Td><Table.Td>
                       {v.codec || "—"}
+                      {(v.extraction_status === "pending" || v.extraction_status === "running") && (
+                        <Group gap={4} wrap="nowrap">
+                          <Loader size={10} />
+                          <Text size="xs" c="dimmed">
+                            {v.extraction_status === "pending" ? "na fila para extrair"
+                              : `a extrair… ${Math.round((v.extraction_progress ?? 0) * 100)}%`}
+                          </Text>
+                        </Group>
+                      )}
+                      {v.extraction_status === "failed" && (
+                        <Stack gap={2}>
+                          <Text size="xs" c="red" maw={260}>extração falhou: {v.extraction_error}</Text>
+                          {canManage && (
+                            <Button size="compact-xs" variant="subtle" onClick={() => retryExtraction(v)}>
+                              tentar de novo
+                            </Button>
+                          )}
+                        </Stack>
+                      )}
+                      {v.extraction_status === "ready" && v.extraction_error && (
+                        <Text size="xs" c="orange" maw={260}>{v.extraction_error}</Text>
+                      )}
                       {v.extraction?.method && (
                         <Text size="xs" c="dimmed" title={extractionTitle(v)}>extraído (sem recodificar)</Text>
                       )}
@@ -246,7 +280,7 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                             : "fps assumido"}
                         </Text>
                       )}
-                      {v.extraction?.method && canManage && (
+                      {v.extraction?.method && canManage && v.extraction_status === "ready" && (
                         <Button size="compact-xs" variant="subtle" onClick={() => setFpsVideo(v)}>corrigir fps…</Button>
                       )}
                     </Table.Td>

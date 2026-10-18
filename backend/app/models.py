@@ -99,6 +99,10 @@ class Video(SQLModel, table=True):
     analysis_path: str | None = None
     analysis_sha256: str = ""
     extraction: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    # Extração em segundo plano (services/sec_extract.py): "" (não se aplica) | pending | running | ready | failed
+    extraction_status: str = ""
+    extraction_progress: float = 0.0
+    extraction_error: str = ""
     playback_path: str | None = None  # cópia H.264 só para visualização no navegador
     # "" (por avaliar) | not_needed | pending | running | ready | failed | unavailable (sem ffmpeg)
     playback_status: str = ""

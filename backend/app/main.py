@@ -33,6 +33,7 @@ from .services.jobs import acquire_runner_lock, recover_interrupted_jobs, releas
 from .services.locations import migrate_locations
 from .services.references import migrate_person_labels
 from .services.relocate import relocate_data_dir
+from .services.sec_extract import start_resume_pending_extractions
 from .services.transcode import start_resume_pending_copies
 
 logging_setup.configure()
@@ -57,6 +58,7 @@ async def lifespan(_: FastAPI):
         cleanup_stale_uploads()
         start_periodic_cleanup()
         start_resume_pending_copies()
+        start_resume_pending_extractions()
         resume_pending_auto_clock()
         start_backfill()
     preload_models()

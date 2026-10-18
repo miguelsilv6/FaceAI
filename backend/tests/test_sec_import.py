@@ -6,6 +6,7 @@ import hashlib
 import json
 import shutil
 import subprocess
+import time
 
 import pytest
 from sqlmodel import Session, select
@@ -16,6 +17,17 @@ from .conftest import wait_for_job
 from .fakes import RED, make_image, make_sec, make_video
 
 pytestmark = pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="requer ffmpeg (para criar o H.264 de teste)")
+
+
+def wait_extracted(client, cid, vid, timeout=60):
+    """A extração corre em segundo plano: espera que o vídeo fique pronto (ou falhe)."""
+    deadline = time.time() + timeout
+    while True:
+        v = next(x for x in client.get(f"/api/cases/{cid}/videos").json() if x["id"] == vid)
+        if v["extraction_status"] in ("ready", "failed"):
+            return v
+        assert time.time() < deadline, v
+        time.sleep(0.05)
 
 
 @pytest.fixture
@@ -62,7 +74,9 @@ def test_sec_upload_is_analysed_and_original_kept(client, sec_file, tmp_path):
         r = client.post(f"/api/cases/{cid}/videos",
                         files=[("files", (sec_file.name, fh, "application/octet-stream"))])
     assert r.status_code == 201, r.text
-    v = r.json()[0]
+    assert r.json()[0]["extraction_status"] in ("pending", "running", "ready")
+    v = wait_extracted(client, cid, r.json()[0]["id"])
+    assert v["extraction_status"] == "ready" and v["extraction_progress"] == 1
     assert v["sha256"] == original and v["frame_count"] == 40 and v["fps"] == 10 and v["duration_s"] == 4
     assert v["extraction"]["method"] == sec_format.METHOD and v["analysis_sha256"]
     with Session(app.db.get_engine()) as s:
@@ -123,7 +137,7 @@ def _import_sec(client, path, name="fps"):
     with path.open("rb") as fh:
         r = client.post(f"/api/cases/{cid}/videos", files=[("files", (path.name, fh, "application/octet-stream"))])
     assert r.status_code == 201, r.text
-    return cid, r.json()[0]
+    return cid, wait_extracted(client, cid, r.json()[0]["id"])
 
 
 def test_fps_correction_retimes_analysis_and_keeps_h264(client, sec_file, tmp_path, monkeypatch):
@@ -145,7 +159,8 @@ def test_fps_correction_retimes_analysis_and_keeps_h264(client, sec_file, tmp_pa
 
     r = client.post(f"/api/videos/{v['id']}/fps", json={"fps": 10, "reason": "o DVR grava a 10 fps"})
     assert r.status_code == 200, r.text
-    fixed = r.json()
+    assert r.json()["extraction_status"] in ("pending", "running", "ready")
+    fixed = wait_extracted(client, cid, v["id"])
     x = fixed["extraction"]
     assert fixed["fps"] == 10 and fixed["duration_s"] == 4 and fixed["frame_count"] == 40
     assert x["h264_sha256"] == v["extraction"]["h264_sha256"] and fixed["analysis_sha256"] != v["analysis_sha256"]
@@ -173,7 +188,7 @@ def test_fps_correction_from_dvr_clock_suggestion(client, sec_file, monkeypatch)
     from app.services import fps_fix
 
     monkeypatch.setattr(sec_format, "_sps_fps", lambda path: None)
-    _, v = _import_sec(client, sec_file)
+    cid, v = _import_sec(client, sec_file)
     with Session(app.db.get_engine()) as s:  # o OCR leu o relógio: avança 2,5 s por cada segundo do vídeo
         video = s.get(Video, v["id"])
         video.dvr_start, video.dvr_rate, video.time_source = "2025-11-27T12:00:00.000", 2.5, "ocr"
@@ -183,7 +198,8 @@ def test_fps_correction_from_dvr_clock_suggestion(client, sec_file, monkeypatch)
         s.commit()
         assert video.extraction["suggested_fps"]["fps"] == 10
     r = client.post(f"/api/videos/{v['id']}/fps", json={"fps": 10, "reason": "relógio do DVR", "source": "ocr"})
-    fixed = r.json()
+    assert r.status_code == 200, r.text
+    fixed = wait_extracted(client, cid, v["id"])
     assert fixed["dvr_rate"] == 1 and fixed["time_calibration"]["samples"][0]["video_s"] == 2.5
     assert "suggested_fps" not in fixed["extraction"] and "OCR" in fixed["extraction"]["fps_source"]
 
@@ -221,3 +237,75 @@ def test_restart_copy_requeues_a_running_conversion(client, sec_file):
             transcode._queued.discard(video.id)
             transcode._requeue.discard(video.id)
             transcode._cancelled.discard(video.id)
+
+
+def test_other_channel_and_payload_prefix_are_read(tmp_path):
+    """O byte 3 do cabeçalho é o canal (…0400.sec → 04); algumas cargas trazem bytes antes do start code."""
+    from .fakes import h264_access_units, sec_block
+
+    video = make_video(tmp_path / "v.mp4", [(0.5, 1.5, RED)], duration_s=2, fps=10)
+    sec = make_sec(tmp_path / "21000400.sec", video, channel=4)
+    assert sec_format.is_sec(sec)
+    info = sec_format.inspect(sec)
+    assert info["channels"] == [4] and info["streams"][0]["frames"] == 20
+    blocks = [p for _, p in sec_format.iter_blocks(sec)]
+    padded = tmp_path / "pad.sec"
+    padded.write_bytes(b"".join(sec_block(b"\x00\x10\x20\x30" + p, i % 10 == 0, 320, 240, i, 5)
+                                for i, p in enumerate(blocks)))
+    stats = {}
+    assert [p for _, p in sec_format.iter_blocks(padded, stats)] == blocks and stats["payload_prefix_bytes"] == 80
+    assert h264_access_units  # (o gerador de teste continua disponível)
+
+
+def test_extraction_failure_keeps_original_and_can_be_retried(client, sec_file, monkeypatch):
+    import app.db
+    from app.models import AuditEvent, Video
+
+    real = sec_format._free_space
+    monkeypatch.setattr(sec_format, "_free_space", lambda folder: 1000)
+    cid = client.post("/api/cases", json={"name": "Sem espaço"}).json()["id"]
+    with sec_file.open("rb") as fh:
+        r = client.post(f"/api/cases/{cid}/videos", files=[("files", (sec_file.name, fh, "application/octet-stream"))])
+    assert r.status_code == 201  # o upload termina logo; a extração corre depois
+    v = wait_extracted(client, cid, r.json()[0]["id"])
+    assert v["extraction_status"] == "failed" and "espaço insuficiente" in v["extraction_error"]
+    with Session(app.db.get_engine()) as s:
+        video = s.get(Video, v["id"])
+        assert open(video.stored_path, "rb").read() == sec_file.read_bytes()  # original guardado e intacto
+        assert s.exec(select(AuditEvent).where(AuditEvent.action == "video.extraction_failed")).first()
+    body = {"params": {"sample_fps": 10, "threshold": 0.05, "motion_filter": False}}
+    job = client.post(f"/api/cases/{cid}/jobs", json={"params": {**body["params"], "mode": "discover"}})
+    assert job.status_code == 409 and "extração" in job.json()["detail"]
+    assert client.get(f"/api/videos/{v['id']}/stream").status_code == 409
+    monkeypatch.setattr(sec_format, "_free_space", real)
+    assert client.post(f"/api/videos/{v['id']}/extract").status_code == 200
+    v = wait_extracted(client, cid, v["id"])
+    assert v["extraction_status"] == "ready" and v["frame_count"] == 40 and not v["extraction_error"]
+    assert client.post(f"/api/videos/{v['id']}/extract").status_code == 409  # já não falhou
+
+
+def test_single_write_and_resume_after_restart(client, sec_file, tmp_path):
+    import app.db
+    from app.models import Video
+    from app.services import sec_extract
+
+    cid, v = _import_sec(client, sec_file)
+    with Session(app.db.get_engine()) as s:
+        video = s.get(Video, v["id"])
+        folder = __import__("pathlib").Path(video.stored_path).parent
+        assert not list(folder.glob("*.h264")) and not list(folder.glob("*.part*"))  # sem o .h264 intermédio
+        video.extraction_status = "running"  # o servidor parou a meio da extração
+        s.add(video)
+        s.commit()
+    sec_extract.resume_pending_extractions()
+    assert wait_extracted(client, cid, v["id"])["extraction_status"] == "ready"
+
+
+def test_invalid_sec_reports_first_bytes(client, tmp_path):
+    cid = client.post("/api/cases", json={"name": "Inválido 2"}).json()["id"]
+    bad = tmp_path / "x.sec"
+    bad.write_bytes(b"ABCD" * 100)
+    with bad.open("rb") as fh:
+        r = client.post(f"/api/cases/{cid}/videos", files=[("files", (bad.name, fh, "application/octet-stream"))])
+    assert r.status_code == 422 and "41 42 43 44" in r.json()["detail"]
+    assert client.get(f"/api/cases/{cid}/videos").json() == []

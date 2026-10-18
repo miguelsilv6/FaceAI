@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import dataclasses
 import shutil
 import uuid
 from pathlib import Path
@@ -45,7 +44,7 @@ from ..schemas import (
     VideoDelete,
     VideoUpdate,
 )
-from ..services import disk, evidence, fps_fix, sec_format
+from ..services import disk, evidence, fps_fix, sec_extract, sec_format
 from ..services.audit import log_event, verify_chain
 from ..services.clock_auto import request_auto_clock
 from ..services.face_engine import get_engine
@@ -60,7 +59,7 @@ from ..services.transcode import (
     request_case_copies,
     request_playback_copy,
 )
-from ..services.video_processor import probe
+from ..services.video_processor import VideoInfo, probe
 from .deps import (
     ActorDep,
     CurrentUser,
@@ -165,25 +164,24 @@ def register_video(session, case_id: int, path: Path, filename: str, size: int, 
                                "duplicate_of": existing.id, "existing_filename": existing.filename})
             raise duplicate_error(session, existing, filename)
         quick = quick_hash(path)
-        analysis, extraction = None, {}
-        if Path(filename).suffix.lower() in EXTRACTED_EXT:
-            analysis, extraction = sec_format.extract(path, path.with_name(path.stem + "_analysis"))
-        info = probe(analysis or path)
+        extracted = Path(filename).suffix.lower() in EXTRACTED_EXT
+        if extracted:  # validação rápida; a extração (minutos num .sec grande) corre em segundo plano
+            head = sec_format.header_summary(path)
+            if head is None:
+                raise ValueError("não é um ficheiro .sec reconhecido (sem blocos de vídeo H.264 válidos; "
+                                 f"primeiros bytes: {sec_format.first_bytes(path, 64)})")
+            info = VideoInfo(fps=0.0, frame_count=0, width=head["width"], height=head["height"], duration_s=0.0,
+                             codec="h264")
+        else:
+            info = probe(path)
     except (ValueError, OSError, HTTPException) as exc:
         path.unlink(missing_ok=True)
-        for extracted in path.parent.glob(path.stem + "_analysis*"):
-            extracted.unlink(missing_ok=True)
         if isinstance(exc, HTTPException):
             raise
         raise HTTPException(422, f"{filename}: {exc}") from exc
-    if extraction:  # o n.º de frames vem dos blocos (uma sequência H.264 crua não o indica)
-        fps = extraction["fps"]
-        frames = extraction["frames"]
-        info = dataclasses.replace(info, fps=fps, frame_count=frames, duration_s=frames / fps)
     video = Video(case_id=case_id, location_id=loc.id, filename=filename, sha256=digest, quick_hash=quick,
                   stored_path=str(path), size_bytes=size,
-                  analysis_path=str(analysis) if analysis else None,
-                  analysis_sha256=extraction.get("analysis_sha256", ""), extraction=extraction,
+                  extraction_status=sec_extract.PENDING if extracted else "",
                   duration_s=round(info.duration_s, 3), fps=round(info.fps, 3), frame_count=info.frame_count,
                   width=info.width, height=info.height, codec=info.codec)
     session.add(video)
@@ -192,11 +190,10 @@ def register_video(session, case_id: int, path: Path, filename: str, size: int, 
     log_event(session, "video.uploaded", case_id=case_id, actor=actor,
               details={**video.model_dump(mode="json", exclude=PATH_FIELDS | {"extraction"}),
                        "location_name": loc.name})
-    if extraction:
-        log_event(session, "video.extracted", case_id=case_id, actor=actor,
-                  details={"video_id": video.id, "filename": filename, "original_sha256": digest,
-                           **{k: v for k, v in extraction.items() if k != "first_blocks"},
-                           "note": "o original não foi alterado; a análise usa o vídeo extraído sem recodificação"})
+    if extracted:  # a cópia de reprodução e a leitura da hora são pedidas quando a extração terminar
+        sec_extract.request_extraction(session, video)
+        session.refresh(video)
+        return video
     request_playback_copy(session, video)
     request_auto_clock(session, video)
     return video
@@ -283,6 +280,7 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
     refs = list(session.exec(select(ReferenceImage).where(ReferenceImage.case_id == case_id)))
     uploads = list(session.exec(select(Upload).where(Upload.case_id == case_id)))
     cancel_copies([v.id for v in videos])
+    sec_extract.cancel_extractions([v.id for v in videos])
 
     job_ids = [j.id for j in jobs] or [-1]
     n_detections = session.exec(select(func.count()).select_from(Detection)
@@ -754,6 +752,8 @@ def stream_video(video_id: int, session: SessionDep) -> FileResponse:
         media_type = FORMATS.get(video.playback_format, "video/mp4")
         return FileResponse(video.playback_path, media_type=media_type, content_disposition_type="inline",
                             headers=_NO_CACHE)
+    if not sec_extract.is_ready(video):
+        raise HTTPException(409, sec_extract.not_ready_reason(video))
     filename = video.filename
     if video.analysis_path:  # .sec: o browser recebe o vídeo extraído, não o ficheiro proprietário
         filename = Path(video.filename).stem + Path(video.analysis_path).suffix
@@ -784,6 +784,7 @@ def delete_video(video_id: int, body: VideoDelete, session: SessionDep, user: Cu
         raise HTTPException(409, "Este vídeo é usado nas análises " + ", ".join(f"#{i}" for i in used)
                             + ". Elimine-as primeiro (os resultados dependem do vídeo original).")
     cancel_copies([video_id])
+    sec_extract.cancel_extractions([video_id])
     files = [Path(p) for p in (video.stored_path, video.analysis_path, video.playback_path) if p]
     summary = {"video_id": video_id, "reason": body.reason.strip(),
                **video.model_dump(mode="json", exclude=PATH_FIELDS | {"time_calibration", "extraction"})}
@@ -840,6 +841,22 @@ def correct_video_fps(video_id: int, body: FpsCorrection, session: SessionDep, u
     _require_manager(session, user, video.case_id)
     return fps_fix.correct_fps(session, video, body.fps, reason=body.reason.strip(), actor=user.username,
                                source=body.source)
+
+
+@router.post("/videos/{video_id}/extract", response_model=Video)
+def retry_extraction(video_id: int, session: SessionDep, user: CurrentUser) -> Video:
+    """Volta a tentar a extração de um vídeo .sec cuja extração falhou (ex.: falta de espaço em disco)."""
+    video = session.get(Video, video_id)
+    if video is None:
+        raise HTTPException(404, "Vídeo não encontrado.")
+    _require_manager(session, user, video.case_id)
+    if video.extraction_status != sec_extract.FAILED:
+        raise HTTPException(409, "Só se pode tentar de novo uma extração que falhou.")
+    log_event(session, "video.extraction_retry", case_id=video.case_id, actor=user.username,
+              details={"video_id": video.id, "filename": video.filename, "previous_error": video.extraction_error})
+    sec_extract.request_extraction(session, video)
+    session.refresh(video)
+    return video
 
 
 @router.get("/videos/{video_id}/probe")

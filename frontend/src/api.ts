@@ -375,6 +375,7 @@ export const api = {
   evidenceStatus: (caseId: number) => request<EvidenceCheck>("GET", `/api/cases/${caseId}/evidence/verify`),
   updateQueue: (id: number, body: { priority?: number; held?: boolean }) =>
     request<Job>("PATCH", `/api/jobs/${id}/queue`, body),
+  retryExtraction: (id: number) => request<Video>("POST", `/api/videos/${id}/extract`),
   correctFps: (id: number, fps: number, reason: string, source: "manual" | "ocr" = "manual") =>
     request<Video>("POST", `/api/videos/${id}/fps`, { fps, reason, source }),
   deleteVideo: (id: number, reason: string) =>

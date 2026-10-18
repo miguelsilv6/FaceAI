@@ -64,6 +64,9 @@ export interface Video {
   // Formatos proprietários (.sec): a análise usa o H.264 extraído dos blocos; o original fica intacto
   analysis_sha256?: string;
   extraction?: Partial<VideoExtraction>;
+  extraction_status?: "" | "pending" | "running" | "ready" | "failed";
+  extraction_progress?: number;
+  extraction_error?: string;
   size_bytes: number;
   duration_s: number;
   fps: number;

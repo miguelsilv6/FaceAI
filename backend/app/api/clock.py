@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from ..models import Video
 from ..schemas import ClockManual, ClockOcr, ClockOcrTest, ClockOffset
-from ..services import fps_fix, ocr
+from ..services import fps_fix, ocr, sec_extract
 from ..services.audit import log_event
 from .deps import ActorDep, SessionDep, authorize_objects
 
@@ -21,6 +21,8 @@ def _video(session, video_id: int) -> Video:
     v = session.get(Video, video_id)
     if v is None:
         raise HTTPException(404, "Vídeo não encontrado.")
+    if not sec_extract.is_ready(v):
+        raise HTTPException(409, sec_extract.not_ready_reason(v))
     return v
 
 

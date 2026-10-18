@@ -102,6 +102,8 @@ def request_playback_copy(s: Session, video: Video, *, force: bool = False, acto
         raise ValueError(f"Formato de reprodução desconhecido: {fmt}")
     if video.playback_status in (PENDING, RUNNING) and video.id in _queued:
         return video.playback_status
+    if video.extraction_status and video.extraction_status != "ready":
+        return video.playback_status  # .sec ainda a extrair: a cópia é pedida no fim da extração
     if not ffmpeg_available():
         video.playback_status, video.playback_error = UNAVAILABLE, "ffmpeg não está instalado no servidor."
     else:

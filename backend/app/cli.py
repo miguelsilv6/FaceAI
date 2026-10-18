@@ -159,7 +159,8 @@ def sec_info(file: str, extract: str | None) -> None:
     from .services import sec_format
 
     if not sec_format.is_sec(file):
-        sys.exit("O ficheiro não começa por um bloco .sec reconhecido (magic 00 e0 02 03).")
+        print("O ficheiro não começa por um bloco .sec reconhecido (00 e0 …). Primeiros bytes:\n"
+              + sec_format.first_bytes(file, 128), file=sys.stderr)
     if extract:
         out, info = sec_format.extract(file, Path(extract))
         print(json.dumps(info, indent=2, ensure_ascii=False))
