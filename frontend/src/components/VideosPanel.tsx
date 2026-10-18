@@ -161,7 +161,7 @@ export default function VideosPanel({ caseId, videos, locations, onChange }: Pro
                     <Badge variant="light">{vs.length} vídeo{vs.length === 1 ? "" : "s"}</Badge>
                     {vs.length > 0 && <Text size="xs" c="dimmed">{formatTime(l.duration_s)} de vídeo</Text>}
                     {vs.length > 0 && (
-                      <Tooltip label={`Originais ${formatBytes(l.originals_bytes)} · cópias de reprodução ${formatBytes(l.playback_bytes)}`}>
+                      <Tooltip label={`Originais ${formatBytes(l.originals_bytes)} · cópias de análise e reprodução ${formatBytes(l.playback_bytes)}`}>
                         <Badge size="sm" variant="default" leftSection={<IconDatabase size={10} />}>{formatBytes(l.size_bytes)}</Badge>
                       </Tooltip>
                     )}

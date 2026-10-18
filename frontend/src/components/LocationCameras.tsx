@@ -129,7 +129,7 @@ function LocationHeader({ location, cameras, duration, onChange, onDeleted }: {
         <Badge variant="light">{cameras} vídeo{cameras === 1 ? "" : "s"}</Badge>
         {cameras > 0 && <Text size="xs" c="dimmed">{formatTime(duration)} de vídeo</Text>}
         {cameras > 0 && (
-          <Tooltip label={`Originais ${formatBytes(location.originals_bytes)} · cópias de reprodução ${formatBytes(location.playback_bytes)}`}>
+          <Tooltip label={`Originais ${formatBytes(location.originals_bytes)} · cópias de análise e reprodução ${formatBytes(location.playback_bytes)}`}>
             <Badge variant="default" leftSection={<IconDatabase size={12} />}>{formatBytes(location.size_bytes)} em disco</Badge>
           </Tooltip>
         )}
