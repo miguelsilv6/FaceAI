@@ -1,5 +1,6 @@
 import {
-  Alert, Anchor, Badge, Breadcrumbs, Button, Checkbox, Group, Loader, Modal, Progress, ScrollArea, Stack, Table, Tabs,
+  Alert, Anchor, Badge, Breadcrumbs, Button, Checkbox, Group, Loader, Modal, Paper, Progress, ScrollArea, Stack, Table,
+  Tabs,
   Text, TextInput,
 } from "@mantine/core";
 import { IconArrowUp, IconDeviceDesktop, IconFolder, IconFolders, IconServer } from "@tabler/icons-react";
@@ -22,22 +23,57 @@ interface Row {
   bytes: number;
 }
 
+interface PickedFile {
+  file: File;
+  path: string; // caminho relativo à pasta escolhida/largada, ex.: "CCTV/Café Central/cam1.mp4"
+}
+
+const extOf = (name: string) => (name.includes(".") ? name.slice(name.lastIndexOf(".")).toLowerCase() : "(sem extensão)");
+
 /** Pastas escolhidas no computador → grupos: cada subpasta (de 1.º nível) é um local; os ficheiros soltos ficam
  * num local com o nome da pasta escolhida. */
-function groupFiles(files: File[]): { rows: Row[]; byKey: Map<string, File[]> } {
+function groupFiles(files: PickedFile[]): { rows: Row[]; byKey: Map<string, File[]> } {
   const byKey = new Map<string, File[]>();
   const names = new Map<string, string>();
-  for (const f of files) {
-    if (!isVideo(f.name)) continue;
-    const parts = (f.webkitRelativePath || f.name).split("/");
-    const key = parts.length > 2 ? parts.slice(0, 2).join("/") : parts[0];
-    names.set(key, parts.length > 2 ? parts[1] : parts[0]);
-    byKey.set(key, [...(byKey.get(key) ?? []), f]);
+  for (const { file, path } of files) {
+    if (!isVideo(file.name)) continue;
+    const parts = path.replace(/\\/g, "/").replace(/^\/+/, "").split("/").filter(Boolean);
+    if (!parts.length) parts.push(file.name);
+    const key = parts.length > 2 ? parts.slice(0, 2).join("/") : parts.length === 2 ? parts[0] : "";
+    names.set(key, parts.length > 2 ? parts[1] : parts.length === 2 ? parts[0] : "Ficheiros soltos");
+    byKey.set(key, [...(byKey.get(key) ?? []), file]);
   }
   const rows = [...byKey.entries()].map(([key, fs]) => ({
     key, name: names.get(key) ?? key, include: true, count: fs.length, bytes: fs.reduce((n, f) => n + f.size, 0),
   })).sort((a, b) => a.name.localeCompare(b.name, "pt"));
   return { rows, byKey };
+}
+
+/** Pasta largada (arrastar e largar): percorre as entradas recursivamente. readEntries() devolve os ficheiros em
+ * lotes (o Firefox e o Chrome até ~100 de cada vez): chama-se até devolver uma lista vazia. */
+async function filesFromDrop(items: DataTransferItemList): Promise<PickedFile[]> {
+  const out: PickedFile[] = [];
+  const asFile = (e: FileSystemFileEntry) => new Promise<File>((res, rej) => e.file(res, rej));
+  const readAll = async (dir: FileSystemDirectoryEntry) => {
+    const reader = dir.createReader();
+    const all: FileSystemEntry[] = [];
+    for (;;) {
+      const batch = await new Promise<FileSystemEntry[]>((res, rej) => reader.readEntries(res, rej));
+      if (!batch.length) return all;
+      all.push(...batch);
+    }
+  };
+  const walk = async (entry: FileSystemEntry): Promise<void> => {
+    if (entry.isFile) {
+      out.push({ file: await asFile(entry as FileSystemFileEntry), path: entry.fullPath.replace(/^\/+/, "") });
+    } else if (entry.isDirectory) {
+      for (const child of await readAll(entry as FileSystemDirectoryEntry)) await walk(child);
+    }
+  };
+  // As entradas têm de ser obtidas já (durante o evento "drop"); a leitura pode ser assíncrona depois.
+  const entries = [...items].map((it) => it.webkitGetAsEntry?.()).filter((e): e is FileSystemEntry => !!e);
+  for (const e of entries) await walk(e);
+  return out;
 }
 
 const existingLoc = (locations: Location[], name: string) =>
@@ -103,16 +139,36 @@ function BrowserImport({ caseId, locations, onChange }: { caseId: number; locati
   const [progress, setProgress] = useState(0);
   const [current, setCurrent] = useState("");
   const [result, setResult] = useState<Parameters<typeof Summary>[0] | null>(null);
+  const [picked, setPicked] = useState<{ files: number; videos: number; exts: string[] } | null>(null);
+  const [dragging, setDragging] = useState(false);
   useEffect(() => {
+    // Só "webkitdirectory" (Firefox, Chrome, Edge, Safari). O atributo "directory" ativava no Firefox a antiga
+    // Directory Upload API, em que a lista de ficheiros chega vazia.
     input.current?.setAttribute("webkitdirectory", "");
-    input.current?.setAttribute("directory", "");
   }, []);
 
-  const pick = (files: FileList | null) => {
-    const g = groupFiles([...(files ?? [])]);
+  const use = (files: PickedFile[]) => {
+    const g = groupFiles(files);
     setRows(g.rows);
     setByKey(g.byKey);
     setResult(null);
+    setPicked({ files: files.length, videos: g.rows.reduce((n, r) => n + r.count, 0),
+      exts: [...new Set(files.filter((f) => !isVideo(f.file.name)).map((f) => extOf(f.file.name)))].slice(0, 12) });
+  };
+  const pick = (list: FileList | null) =>
+    use([...(list ?? [])].map((file) => ({ file, path: file.webkitRelativePath || file.name })));
+  const onDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragging(false);
+    if (busy) return;
+    try {
+      const items = e.dataTransfer.items;
+      const plain = [...e.dataTransfer.files].map((file) => ({ file, path: file.name }));
+      const walked = items?.length && typeof items[0].webkitGetAsEntry === "function" ? await filesFromDrop(items) : [];
+      use(walked.length ? walked : plain); // sem entradas (ex.: ficheiros soltos), usa a lista simples
+    } catch (err) {
+      notifyError(err, "Não foi possível ler a pasta largada");
+    }
   };
 
   const chosen = rows.filter((r) => r.include && r.name.trim());
@@ -155,6 +211,7 @@ function BrowserImport({ caseId, locations, onChange }: { caseId: number; locati
     setCurrent("");
     setResult(out);
     setRows([]);
+    setPicked(null);
     onChange();
     if (out.imported) notifyOk(`${out.imported} vídeo(s) importado(s) em ${chosen.length} local(is).`);
   };
@@ -166,11 +223,32 @@ function BrowserImport({ caseId, locations, onChange }: { caseId: number; locati
         escolhida ficam num local com o nome dessa pasta. Os vídeos que já existem no processo são ignorados.</Text>
       <input ref={input} type="file" multiple hidden data-testid="bulk-folder-input"
         onChange={(e) => { pick(e.currentTarget.files); e.currentTarget.value = ""; }} />
-      <Group>
-        <Button leftSection={<IconFolders size={16} />} variant="light" disabled={busy}
-          onClick={() => input.current?.click()}>Escolher pasta…</Button>
-        {rows.length > 0 && <Text size="sm">{rows.length} pasta(s) · {rows.reduce((n, r) => n + r.count, 0)} vídeo(s)</Text>}
-      </Group>
+      <Paper withBorder p="md" radius="md" data-testid="bulk-drop-zone"
+        style={{ borderStyle: "dashed", borderColor: dragging ? "var(--mantine-color-indigo-5)" : undefined,
+          background: dragging ? "var(--mantine-color-indigo-light)" : undefined }}
+        onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)} onDrop={onDrop}>
+        <Group justify="space-between" wrap="wrap">
+          <Text size="sm">Arraste uma pasta para aqui, ou</Text>
+          <Button leftSection={<IconFolders size={16} />} variant="light" disabled={busy}
+            onClick={() => input.current?.click()}>Escolher pasta…</Button>
+        </Group>
+      </Paper>
+      {picked && rows.length > 0 && (
+        <Text size="sm">{rows.length} pasta(s) · {picked.videos} vídeo(s)
+          {picked.files > picked.videos ? ` · ${picked.files - picked.videos} outro(s) ficheiro(s) ignorado(s)` : ""}</Text>
+      )}
+      {picked && rows.length === 0 && (
+        <Alert color="orange" title={picked.files ? "Nenhum vídeo reconhecido na pasta" : "A pasta chegou vazia"}>
+          {picked.files ? (
+            <>Recebidos {picked.files} ficheiro(s), mas nenhum com uma extensão de vídeo aceite
+              ({[...VIDEO_EXT].join(", ")}). Extensões encontradas: {picked.exts.join(", ") || "—"}.</>
+          ) : (
+            <>O browser não entregou nenhum ficheiro desta pasta. Experimente arrastar a pasta para a zona acima, ou
+              confirme que o browser tem permissão para ler a pasta.</>
+          )}
+        </Alert>
+      )}
       {rows.length > 0 && <PlanTable rows={rows} setRows={setRows} locations={locations} />}
       {busy && (
         <Stack gap={4}>
