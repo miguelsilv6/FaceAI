@@ -33,7 +33,57 @@ Inclui ainda:
 
 ---
 
-## Como funciona
+## Visão geral
+
+### Arquitetura
+
+```mermaid
+flowchart LR
+    U["Analista / perito<br/>(browser)"] -- HTTPS --> FE["Interface web<br/>React + Mantine"]
+    FE -- "API REST /api" --> BE["Servidor FastAPI"]
+    BE --> DB[("SQLite<br/>processos, vídeos, deteções,<br/>auditoria encadeada")]
+    BE --> FS[("Pasta de dados<br/>cópias de análise, recortes,<br/>frames, relatórios")]
+    BE --> Q1["Fila de cópias de análise<br/>(.sec / remux sem perdas)"]
+    BE --> Q2["Fila de cópias de reprodução<br/>(ffmpeg)"]
+    BE --> Q3["Executor de análises<br/>(uma de cada vez)"]
+    Q3 --> M["Modelos ONNX<br/>SCRFD · ArcFace · YOLOX · ReID"]
+    BE --> OCR["OCR da hora do DVR"]
+    CLI["Consola: python -m app.cli<br/>admin · backup · verificações"] --> DB
+```
+
+### Percurso de um vídeo (da importação ao relatório)
+
+```mermaid
+flowchart TD
+    A["Importação<br/>upload em blocos, pasta do PC ou pasta do servidor"] --> B["SHA-256 calculado durante o envio<br/>duplicados recusados"]
+    B --> C{"O browser abre o formato?"}
+    C -- "sim (MP4/WebM H.264/VP9)" --> E["O original é a cópia analisada"]
+    C -- "não (.sec, .dav, .avi HEVC…)" --> D["Cópia de análise sem recodificação<br/>.sec → H.264 dos blocos · outros → remux -c copy"]
+    D --> V{"Cópia verificada?<br/>SHA-256 H.264 / hash dos pacotes"}
+    V -- sim --> R["Original apagado do servidor<br/>(fica o SHA-256; pode ser reanexado)"]
+    V -- não --> K["Original mantido<br/>motivo na auditoria"]
+    R --> P
+    K --> P
+    E --> P["Cópia de reprodução (se preciso)<br/>e hora real por OCR"]
+    P --> J["Análise<br/>procurar pessoa (referências) ou descobrir pessoas"]
+    J --> T["Deteções, tracks e pessoas<br/>com recortes e frames"]
+    T --> H["Revisão humana<br/>confirmar / rejeitar"]
+    H --> X["Relatório PDF/HTML e exportações<br/>CSV · JSON · ZIP"]
+
+    AU[["Auditoria com cadeia de hashes<br/>cada passo fica registado"]]
+    B -.-> AU
+    R -.-> AU
+    J -.-> AU
+    H -.-> AU
+    X -.-> AU
+```
+
+Princípios forenses do percurso:
+- **A análise nunca usa uma cópia recodificada.** Usa o original ou uma cópia com os mesmos pacotes de vídeo, verificada por hash. A cópia de reprodução serve só para ver no browser.
+- **Tudo fica registado na auditoria.** Cada importação, conversão, remoção de original, análise, revisão e exportação deixa um evento. A auditoria é uma cadeia de hashes que deteta alterações (`python -m app.cli verify-audit`).
+- **A integridade pode ser reconfirmada a qualquer momento.** O SHA-256 dos vídeos é recalculado no relatório e na verificação de evidência (`verify-evidence`).
+
+## Como funciona (reconhecimento)
 
 ```
 Referências ──► SCRFD ──► alinhamento (5 pontos) ──► ArcFace (512-d) ─────────────────────────┐
