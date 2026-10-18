@@ -17,6 +17,7 @@ def client(tmp_path, monkeypatch):
     monkeypatch.setenv("FACEAI_FRONTEND_DIST", str(tmp_path / "no-frontend"))
     monkeypatch.setenv("FACEAI_PRELOAD_MODELS", "0")
     monkeypatch.setenv("FACEAI_AUTO_CLOCK_OCR", "0")
+    monkeypatch.setenv("FACEAI_REMOVE_ORIGINALS", "0")
     # Recarrega a configuração e a base de dados para usar a pasta temporária.
     import app.config
     import app.db

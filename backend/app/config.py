@@ -58,6 +58,10 @@ class Settings:
     shutdown_grace_s: float = field(default_factory=lambda: float(_env("SHUTDOWN_GRACE_S", "20")))
     # Lê a data/hora impressa (OCR) dos vídeos logo na importação e acerta o relógio, se a leitura for coerente.
     auto_clock_ocr: bool = field(default_factory=lambda: _env("AUTO_CLOCK_OCR", "1").lower() in ("1", "true", "yes"))
+    # Depois de convertido (cópia de análise sem perdas verificada), o ficheiro original é apagado do servidor para
+    # poupar espaço; fica o SHA-256 para o relacionar com o original guardado no suporte de origem.
+    remove_originals: bool = field(
+        default_factory=lambda: _env("REMOVE_ORIGINALS", "1").lower() in ("1", "true", "yes"))
     clock_date_order: str = field(default_factory=lambda: _env("CLOCK_DATE_ORDER", "DMY").upper())
     # Alertas de disco (pasta de dados): % de ocupação e espaço livre mínimo.
     disk_warn_percent: float = field(default_factory=lambda: float(_env("DISK_WARN_PERCENT", "80")))

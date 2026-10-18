@@ -103,6 +103,9 @@ class Video(SQLModel, table=True):
     extraction_status: str = ""
     extraction_progress: float = 0.0
     extraction_error: str = ""
+    # Original apagado do servidor depois de convertido (services/originals.py); stored_path fica como registo.
+    original_removed_at: datetime | None = None
+    analysis_streamhash: str = ""  # SHA-256 dos pacotes de vídeo da cópia (ffmpeg streamhash)
     playback_path: str | None = None  # cópia H.264 só para visualização no navegador
     # "" (por avaliar) | not_needed | pending | running | ready | failed | unavailable (sem ffmpeg)
     playback_status: str = ""

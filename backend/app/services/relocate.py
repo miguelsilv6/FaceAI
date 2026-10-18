@@ -44,15 +44,17 @@ def relocate_data_dir() -> int:
     """Atualiza os caminhos de uma pasta de dados antiga para a atual. Devolve o n.º de caminhos alterados."""
     current = str(settings.data_dir)
     with Session(get_engine()) as s:
-        candidates: dict[str, str] = {}
-        for path in s.exec(select(Video.stored_path).limit(500)):
+        candidates: dict[str, list[str]] = {}
+        paths = [*s.exec(select(Video.stored_path).limit(500)),  # (originais removidos: conta a cópia de análise)
+                 *(p for p in s.exec(select(Video.analysis_path).limit(500)) if p)]
+        for path in paths:
             root = _old_root(path or "")
-            if root and root != current and root not in candidates:
-                candidates[root] = path
+            if root and root != current:
+                candidates.setdefault(root, []).append(path)
         moved = 0
-        for root, sample in candidates.items():
-            rel = sample[len(root):].lstrip("/\\")
-            if Path(sample).exists() or not (settings.data_dir / rel).exists():
+        for root, samples in candidates.items():
+            rels = [(p, p[len(root):].lstrip("/\\")) for p in samples]
+            if any(Path(p).exists() for p, _ in rels) or not any((settings.data_dir / r).exists() for _, r in rels):
                 continue  # a pasta antiga ainda existe, ou os ficheiros não estão na pasta atual
             for table, col in PATH_COLUMNS:
                 r = s.exec(text(f'UPDATE "{table}" SET "{col}" = :new || substr("{col}", :n) '

@@ -38,7 +38,7 @@ def correct_fps(s: Session, video: Video, new_fps: float, *, reason: str, actor:
                 source: str = "manual") -> Video:
     """Valida e põe na fila de extração a cópia com o novo fps; a correção é aplicada quando ela estiver pronta
     (apply_fps_correction). Num .sec grande, refazer o MP4 demora mais do que o tempo de um pedido."""
-    if not video.extraction or not video.analysis_path:
+    if not video.extraction or not video.analysis_path or not sec_extract.is_sec(video):
         raise HTTPException(422, "Só o fps de vídeos extraídos de formatos proprietários (.sec) pode ser corrigido.")
     if not sec_extract.is_ready(video) or video.extraction_status != sec_extract.READY:
         raise HTTPException(409, "O vídeo ainda está a ser extraído: aguarde que termine.")

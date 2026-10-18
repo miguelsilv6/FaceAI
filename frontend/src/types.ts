@@ -50,6 +50,7 @@ export interface VideoExtraction {
   h264_sha256: string;
   analysis_sha256: string;
   fps_assumed: boolean;
+  packets: number; // remux: n.º de pacotes de vídeo (iguais aos do original)
   suggested_fps?: { fps: number; rate: number; at: string };
   fps_history?: { from: number; to: number; source: string; reason: string; by: string; at: string }[];
 }
@@ -67,6 +68,8 @@ export interface Video {
   extraction_status?: "" | "pending" | "running" | "ready" | "failed";
   extraction_progress?: number;
   extraction_error?: string;
+  original_removed_at?: string | null; // original apagado do servidor depois de convertido (fica o SHA-256)
+  analysis_streamhash?: string;
   size_bytes: number;
   duration_s: number;
   fps: number;

@@ -139,6 +139,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 | `FACEAI_SESSION_IDLE_MINUTES` / `FACEAI_SESSION_MAX_HOURS` | `30` / `12` | Expiração da sessão por inatividade e duração máxima |
 | `FACEAI_API_DOCS` | `false` | Expor `/api/docs` e `/api/openapi.json` (só para desenvolvimento) |
 | `FACEAI_AUTO_CLOCK_OCR` | `1` | Lê a data/hora (OCR) dos vídeos logo na importação. `0` desativa. |
+| `FACEAI_REMOVE_ORIGINALS` | `1` | Apaga do servidor o original de um vídeo convertido (`.sec`, ou formato que o browser não abre) depois de verificada a cópia de análise sem perdas; fica o SHA-256. `0` mantém todos os originais. |
 | `FACEAI_CLOCK_DATE_ORDER` | `DMY` | Ordem da data no relógio impresso, para a leitura automática (`DMY`, `MDY` ou `YMD`). |
 | `FACEAI_CPU_THREADS` | `0` (todos) | Threads de CPU para o ONNX Runtime, OpenCV e ffmpeg. Limita o CPU usado pelas análises. |
 | `FACEAI_JOB_NICE` | `10` | Prioridade ("nice") da thread das análises; valores maiores deixam a interface e os uploads mais fluidos |
@@ -206,6 +207,17 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
      - **Extração em segundo plano:** o upload termina logo. O vídeo aparece na lista com "na fila para extrair" e depois "a extrair… N%", e fica pronto ao fim de alguns minutos num ficheiro grande. Só então são criadas a cópia de reprodução e a leitura da hora. Até lá, o vídeo não pode ser analisado.
        - É preciso espaço livre no disco de cerca do tamanho do `.sec` (mais 200 MB) para a cópia de análise, que é gravada de uma só vez.
        - Se a extração falhar (por exemplo, falta de espaço), o vídeo fica com "extração falhou: motivo" e o original fica guardado. Pode usar-se **tentar de novo** depois de corrigir a causa. A falha fica na auditoria (`video.extraction_failed`).
+     - **Remoção dos originais convertidos** (`FACEAI_REMOVE_ORIGINALS=1`, por omissão): para poupar espaço, o original é apagado do servidor depois de convertido. O SHA-256 do original, o tamanho e o nome ficam no vídeo, na auditoria (`video.original_removed`) e no relatório, para relacionar a cópia com o original. **O original deve continuar preservado no suporte de origem**, que é a evidência mestre.
+       - **Só se apaga com uma cópia de análise sem perdas e verificada:**
+         - **`.sec`:** a sequência H.264 é recalculada a partir da cópia e tem de ter o mesmo SHA-256 que a lida do original.
+         - **Outros formatos que o browser não abre** (`.dav`, `.avi` com MPEG-4/HEVC, …): é feito um remux sem recodificação (`-c copy`) para MKV. O hash dos pacotes de vídeo (`ffmpeg streamhash`) tem de ser igual ao do original.
+
+         A cópia de reprodução, que é recodificada, nunca é a analisada. Antes de apagar, o SHA-256 do original é confirmado de novo.
+       - Se alguma verificação falhar, o original fica e o motivo é registado (`video.original_kept`).
+       - Os vídeos que o browser abre (MP4/WebM com H.264/VP9) não são convertidos e o original nunca é apagado.
+       - **Reanexar:** reenviar o mesmo ficheiro (SHA-256 igual) volta a anexá-lo ao vídeo, sem o duplicar (`video.original_reattached`).
+       - A correção do fps é feita a partir da cópia, por isso não precisa do original.
+       - **Vídeos importados antes:** `python -m app.cli remove-originals [processo] --dry-run` lista os originais que podem ser removidos; sem `--dry-run`, apaga-os depois de confirmação.
      - O formato foi deduzido de exportações reais; não há documentação pública. Os bytes 12–19 do cabeçalho variam de frame para frame, e provavelmente são a hora, mas ainda não estão descodificados. A hora real deve vir do OCR ou ser indicada manualmente.
    - Se o browser não reproduzir um vídeo, ficam logo em fila as cópias de **todos os vídeos do processo**, porque os vídeos do mesmo DVR têm o mesmo formato.
    - Se, mesmo assim, o browser não reproduzir o vídeo nos resultados, a cópia certa é pedida **automaticamente**:

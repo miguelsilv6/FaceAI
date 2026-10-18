@@ -44,7 +44,7 @@ from ..schemas import (
     VideoDelete,
     VideoUpdate,
 )
-from ..services import disk, evidence, fps_fix, sec_extract, sec_format
+from ..services import disk, evidence, fps_fix, originals, sec_extract, sec_format, transcode
 from ..services.audit import log_event, verify_chain
 from ..services.clock_auto import request_auto_clock
 from ..services.face_engine import get_engine
@@ -144,8 +144,9 @@ def find_duplicate(session, case_id: int, *, sha256: str | None = None, quick: s
     q = select(Video).where(Video.case_id == case_id)
     if sha256:
         return session.exec(q.where(Video.sha256 == sha256)).first()
-    if quick and size is not None:
-        return session.exec(q.where(Video.quick_hash == quick, Video.size_bytes == size)).first()
+    if quick and size is not None:  # pré-verificação: um vídeo sem original no servidor aceita reenviá-lo
+        return session.exec(q.where(Video.quick_hash == quick, Video.size_bytes == size,
+                                    Video.original_removed_at.is_(None))).first()
     return None
 
 
@@ -158,6 +159,9 @@ def register_video(session, case_id: int, path: Path, filename: str, size: int, 
         loc = location_of_case(session, case_id, location_id, actor)
         digest = sha256 or file_sha256(path)  # o upload em blocos calcula o SHA-256 à medida que recebe
         existing = find_duplicate(session, case_id, sha256=digest)
+        if existing is not None and existing.original_removed_at is not None:
+            # o mesmo ficheiro de um vídeo cujo original foi removido do servidor: volta a anexá-lo
+            return originals.reattach(session, existing, path, actor=actor)
         if existing is not None:
             log_event(session, "video.duplicate_rejected", case_id=case_id, actor=actor,
                       details={"filename": filename, "size_bytes": size, "sha256": digest,
@@ -190,7 +194,10 @@ def register_video(session, case_id: int, path: Path, filename: str, size: int, 
     log_event(session, "video.uploaded", case_id=case_id, actor=actor,
               details={**video.model_dump(mode="json", exclude=PATH_FIELDS | {"extraction"}),
                        "location_name": loc.name})
-    if extracted:  # a cópia de reprodução e a leitura da hora são pedidas quando a extração terminar
+    if not extracted and originals.enabled() and transcode.ffmpeg_available() \
+            and transcode.needs_playback_copy(video)[0]:
+        extracted = True  # formato que o browser não abre: cópia de análise sem perdas (remux) e o original sai
+    if extracted:  # a cópia de reprodução e a leitura da hora são pedidas quando a cópia de análise estiver feita
         sec_extract.request_extraction(session, video)
         session.refresh(video)
         return video
@@ -664,18 +671,19 @@ def update_video(video_id: int, body: VideoUpdate, session: SessionDep, actor: A
 # ---------------------------------------------------------------- locais
 def _location_out(session, loc: Location) -> dict:
     videos = session.exec(select(Video).where(Video.location_id == loc.id).order_by(Video.id)).all()
-    copies = 0  # cópias de reprodução (H.264/VP9) dos vídeos do local
+    copies = 0  # cópias de reprodução (H.264/VP9) e de análise dos vídeos do local
     for v in videos:
-        if v.playback_path:
-            try:
-                copies += Path(v.playback_path).stat().st_size
-            except OSError:
-                pass
-    originals = sum(v.size_bytes for v in videos)
+        for copy in (v.playback_path, v.analysis_path):  # cópias de reprodução e de análise (.sec, remux)
+            if copy:
+                try:
+                    copies += Path(copy).stat().st_size
+                except OSError:
+                    pass
+    originals_bytes = sum(v.size_bytes for v in videos if v.original_removed_at is None)
     return {"id": loc.id, "case_id": loc.case_id, "name": loc.name, "created_by": loc.created_by,
             "created_at": loc.created_at, "video_ids": [v.id for v in videos],
             "duration_s": round(sum(v.duration_s for v in videos), 3),
-            "size_bytes": originals + copies, "originals_bytes": originals, "playback_bytes": copies}
+            "size_bytes": originals_bytes + copies, "originals_bytes": originals_bytes, "playback_bytes": copies}
 
 
 def _check_location_name(session, case_id: int, name: str, exclude: int | None = None) -> str:
@@ -852,6 +860,8 @@ def retry_extraction(video_id: int, session: SessionDep, user: CurrentUser) -> V
     _require_manager(session, user, video.case_id)
     if video.extraction_status != sec_extract.FAILED:
         raise HTTPException(409, "Só se pode tentar de novo uma extração que falhou.")
+    if video.original_removed_at is not None or not Path(video.stored_path).exists():
+        raise HTTPException(409, "O original não está no servidor: reenvie o mesmo ficheiro para o voltar a anexar.")
     log_event(session, "video.extraction_retry", case_id=video.case_id, actor=user.username,
               details={"video_id": video.id, "filename": video.filename, "previous_error": video.extraction_error})
     sec_extract.request_extraction(session, video)
