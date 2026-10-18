@@ -145,6 +145,7 @@ Abre **http://localhost:8000** no browser e entra com essa conta. Recomendado: e
 - **HTTP numa LAN:** o cookie de sessão só leva a flag `Secure` quando o pedido chega por HTTPS (`FACEAI_COOKIE_SECURE=auto`). Num acesso por `http://` na rede local a sessão funciona, mas a password e o cookie passam em claro: prefere o túnel SSH abaixo ou HTTPS.
 - Para aceder a partir do teu computador sem expor a porta na rede, usa um túnel SSH: `ssh -L 8000:localhost:8000 utilizador@vm`. Depois abre `http://localhost:8000` no teu computador.
 - `FACEAI_DATA_DIR` é onde ficam os casos, as evidências, a base de dados e o `audit.jsonl`. Escolhe um disco com espaço e com backup.
+- `FACEAI_REMOVE_ORIGINALS` (por omissão `1`): os originais dos vídeos convertidos (`.sec` e formatos que o browser não abre) são apagados do servidor depois de verificada a cópia de análise sem perdas; fica o SHA-256 de cada um. Guarda os originais no suporte de origem. `0` mantém-nos no servidor. Para os vídeos já importados: `python -m app.cli remove-originals --dry-run`.
 
 ### 8. Verificar
 

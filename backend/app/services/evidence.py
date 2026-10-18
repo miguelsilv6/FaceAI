@@ -32,6 +32,19 @@ _progress: dict[int, dict[str, Any]] = {}  # case_id → {running, done, total, 
 def verify_video(video: Video) -> tuple[bool, str]:
     """(ok, motivo). Não grava: quem chama atualiza o vídeo e a auditoria."""
     path = Path(video.stored_path)
+    if video.original_removed_at is not None:  # convertido: o servidor guarda só a cópia sem perdas
+        work = Path(video.analysis_path or "")
+        if not video.analysis_path or not work.exists():
+            return False, "original removido do servidor e cópia de análise em falta"
+        try:
+            ok = file_sha256(work) == video.analysis_sha256
+        except OSError as exc:
+            return False, f"erro de leitura da cópia de análise: {exc}"
+        when = video.original_removed_at.strftime("%Y-%m-%d %H:%M")
+        if not ok:
+            return False, "original removido do servidor; a cópia de análise tem SHA-256 diferente"
+        return True, (f"original removido do servidor em {when} UTC (SHA-256 {video.sha256}, preservado no suporte "
+                      "de origem); cópia de análise íntegra")
     if not path.exists():
         return False, "ficheiro original em falta"
     if not video.sha256:

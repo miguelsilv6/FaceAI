@@ -23,13 +23,15 @@ import hashlib
 import re
 import shutil
 import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-MAGIC = b"\x00\xe0\x02\x03"
+MAGIC = b"\x00\xe0"  # bytes 0-1; byte 2 = 02 e byte 3 = canal da câmara (03 em 12000300.sec, 04 em …0400.sec)
 HEADER = 48
-START_CODES = (b"\x00\x00\x00\x01", b"\x00\x00\x01")
+START_SCAN = 64  # a carga pode trazer alguns bytes antes do 1.º start code H.264
+MAX_SIDE = 8192
 MAX_BLOCK = 16 * 1024 * 1024  # um frame maior do que isto é um comprimento corrompido
 CHUNK = 8 * 1024 * 1024
 FRAME_TYPES = {1: "chave", 2: "P"}
@@ -44,6 +46,7 @@ class Block:
     width: int
     height: int
     stamp: bytes  # bytes 12-19 (desconhecidos; provavelmente a hora)
+    channel: int = 0  # byte 3
 
 
 @dataclass
@@ -59,19 +62,27 @@ class _Stream:
 
 def is_sec(path: str | Path) -> bool:
     with open(path, "rb") as fh:
-        head = fh.read(HEADER)
-    return len(head) == HEADER and head[:4] == MAGIC
+        head = fh.read(HEADER + START_SCAN)
+    return _parse_header(head, 0) is not None and _start_code_at(head[HEADER:]) is not None
 
 
 def _parse_header(head: bytes, offset: int) -> Block | None:
-    if len(head) < HEADER or head[:4] != MAGIC:
+    if len(head) < HEADER or head[:2] != MAGIC:
         return None
     length = int.from_bytes(head[21:24], "big")
-    if length <= HEADER or length > MAX_BLOCK:
+    width, height = int.from_bytes(head[24:28], "big"), int.from_bytes(head[28:32], "big")
+    if length <= HEADER or length > MAX_BLOCK or not (16 <= width <= MAX_SIDE and 16 <= height <= MAX_SIDE):
         return None
-    return Block(offset=offset, length=length, frame_type=head[4],
-                 width=int.from_bytes(head[24:28], "big"), height=int.from_bytes(head[28:32], "big"),
-                 stamp=head[12:20])
+    return Block(offset=offset, length=length, frame_type=head[4], width=width, height=height,
+                 stamp=head[12:20], channel=head[3])
+
+
+def _start_code_at(data: bytes) -> int | None:
+    """Posição do 1.º start code H.264 (00 00 01, ou 00 00 00 01) nos primeiros START_SCAN bytes da carga."""
+    i = data[:START_SCAN + 3].find(b"\x00\x00\x01")
+    if i < 0:
+        return None
+    return i - 1 if i > 0 and data[i - 1] == 0 else i
 
 
 def iter_blocks(path: str | Path, stats: dict[str, Any] | None = None):
@@ -97,10 +108,13 @@ def iter_blocks(path: str | Path, stats: dict[str, Any] | None = None):
                     return
                 pos = nxt
                 continue
-            if not payload.startswith(START_CODES):
+            start = _start_code_at(payload)
+            if start is None:
                 stats["non_h264_blocks"] += 1  # ex.: áudio ou dados do fabricante
             else:
-                yield block, payload
+                if start:
+                    stats["payload_prefix_bytes"] = stats.get("payload_prefix_bytes", 0) + start
+                yield block, payload[start:]
             pos += block.length
         if pos < size:
             stats["skipped_bytes"] += size - pos  # restos no fim (cabeçalho truncado)
@@ -116,7 +130,8 @@ def _find_magic(fh, start: int, size: int) -> int | None:
         i = buf.find(MAGIC)
         while i >= 0:
             fh.seek(pos + i)
-            if _parse_header(fh.read(HEADER), pos + i):
+            head = fh.read(HEADER + START_SCAN)
+            if _parse_header(head, pos + i) and _start_code_at(head[HEADER:]) is not None:
                 return pos + i
             i = buf.find(MAGIC, i + 1)
         pos += CHUNK
@@ -139,7 +154,9 @@ def inspect(path: str | Path, sample: int = 8) -> dict[str, Any]:
     stats: dict[str, Any] = {}
     streams: dict[tuple[int, int], _Stream] = {}
     first: list[dict[str, Any]] = []
+    channels: set[int] = set()
     for block, payload in iter_blocks(path, stats):
+        channels.add(block.channel)
         st = streams.setdefault((block.width, block.height),
                                 _Stream(block.width, block.height, first_offset=block.offset))
         st.frames += 1
@@ -150,10 +167,11 @@ def inspect(path: str | Path, sample: int = 8) -> dict[str, Any]:
             with open(path, "rb") as fh:
                 fh.seek(block.offset)
                 head = fh.read(HEADER)
-            first.append({"offset": block.offset, "length": block.length,
+            first.append({"offset": block.offset, "length": block.length, "channel": block.channel,
                           "type": FRAME_TYPES.get(block.frame_type, str(block.frame_type)),
                           "width": block.width, "height": block.height, "header_hex": head.hex(" ")})
     return {"format": "sec", "size_bytes": Path(path).stat().st_size, **stats,
+            "channels": sorted(channels),
             "streams": [_stream_dict(s) for s in sorted(streams.values(), key=lambda s: -s.bytes)],
             "first_blocks": first}
 
@@ -192,68 +210,156 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+class NoSpace(OSError):
+    """Disco sem espaço para a cópia de trabalho (mensagem clara para o analista)."""
+
+
+SPACE_MARGIN = 200 * 1024 * 1024
+
+
+def _free_space(folder: Path) -> int:
+    return shutil.disk_usage(folder).free
+
+
+def _check_space(folder: Path, needed: int) -> None:
+    free = _free_space(folder)
+    if free < needed:
+        raise NoSpace(f"espaço insuficiente no disco para extrair o vídeo: são precisos {needed / 1e9:.2f} GB, "
+                      f"livres {free / 1e9:.2f} GB")
+
+
+def _main_payloads(src: Path, main: dict[str, Any], progress=None):
+    """Cargas H.264 do stream principal, a partir do 1.º frame-chave: (bloco, carga)."""
+    started = False
+    size = src.stat().st_size or 1
+    for block, payload in iter_blocks(src):
+        if progress:
+            progress(block.offset / size)
+        if (block.width, block.height) != (main["width"], main["height"]):
+            continue
+        if not started and block.frame_type != 1 and not has_sps(payload):
+            continue  # sem SPS/PPS antes do 1.º frame-chave, os frames P não são descodificáveis
+        started = True
+        yield block, payload
+
+
 def extract(src: str | Path, dest_stem: Path, *, default_fps: float = 25.0, fps: float | None = None,
-            fps_source: str = "") -> tuple[Path, dict[str, Any]]:
+            fps_source: str = "", progress=None) -> tuple[Path, dict[str, Any]]:
     """Extrai o stream principal (a resolução com mais dados) para uma cópia de trabalho.
 
-    fps: força o fps da cópia (correção, ex.: o DVR grava a 12 fps e o SPS não o indica); fps_source diz de onde
-    vem. A sequência H.264 é a mesma: só muda o ritmo com que o MP4 a apresenta.
+    Uma só escrita: com ffmpeg, as cargas H.264 seguem diretamente para o ffmpeg (stdin) e só o MP4 é gravado
+    (-c copy, sem recodificação); sem ffmpeg, grava-se a sequência .h264. O SHA-256 H.264 é calculado pelo caminho.
 
-    Devolve (ficheiro de análise, relatório). Erro (ValueError) se o ficheiro não tiver vídeo H.264 reconhecível.
+    fps: força o fps da cópia (correção, ex.: o DVR grava a 12 fps e o SPS não o indica); fps_source diz de onde
+    vem. A sequência H.264 é a mesma: só muda o ritmo com que o MP4 a apresenta. progress(fração 0–1).
+
+    Devolve (ficheiro de análise, relatório). Erro (ValueError) se o ficheiro não tiver vídeo H.264 reconhecível;
+    NoSpace se o disco não tiver espaço para a cópia.
     """
     src = Path(src)
     summary = inspect(src, sample=4)
     if not summary["streams"]:
-        raise ValueError("ficheiro .sec sem blocos de vídeo H.264 reconhecíveis")
+        head = first_bytes(src)
+        raise ValueError(
+            "ficheiro .sec sem blocos de vídeo H.264 reconhecíveis (blocos sem H.264: "
+            f"{summary['non_h264_blocks']}, ressincronizações: {summary['resyncs']}, "
+            f"bytes ignorados: {summary['skipped_bytes']}; primeiros bytes: {head})")
     main = summary["streams"][0]
-    raw = dest_stem.with_name(dest_stem.name + ".h264")
-    h = hashlib.sha256()
-    frames = keyframes = 0
-    started = False
-    with raw.open("wb") as out:
-        for block, payload in iter_blocks(src):
-            if (block.width, block.height) != (main["width"], main["height"]):
-                continue
-            if not started and block.frame_type != 1 and not has_sps(payload):
-                continue  # sem SPS/PPS antes do 1.º frame-chave, os frames P não são descodificáveis
-            started = True
-            out.write(payload)
-            h.update(payload)
-            frames += 1
-            keyframes += block.frame_type == 1
-    if frames == 0:
-        raw.unlink(missing_ok=True)
+    _check_space(dest_stem.parent, int(main["h264_bytes"] * 1.05) + SPACE_MARGIN)
+    first_key = next((p for _, p in _main_payloads(src, main)), None)
+    if first_key is None:
         raise ValueError("ficheiro .sec sem nenhum frame-chave H.264")
     assumed = False
     if fps:
         source = fps_source or "indicado"
-    elif sps_fps := _sps_fps(raw):
+    elif sps_fps := _first_key_fps(first_key, dest_stem):
         fps, source = sps_fps, "SPS (VUI)"
     else:
         fps, source, assumed = default_fps, f"valor de recurso ({default_fps:g})", True
-    info: dict[str, Any] = {
-        "method": METHOD, "container": "h264", "frames": frames, "keyframes": keyframes,
-        "frames_before_first_keyframe": main["frames"] - frames,
-        "width": main["width"], "height": main["height"],
-        "fps": fps, "fps_source": source, "fps_assumed": assumed,
-        "h264_sha256": h.hexdigest(), "h264_bytes": raw.stat().st_size,
-        "resyncs": summary["resyncs"], "skipped_bytes": summary["skipped_bytes"],
-        "non_h264_blocks": summary["non_h264_blocks"],
-        "streams": summary["streams"], "first_blocks": summary["first_blocks"],
-    }
-    analysis = raw
+    h = hashlib.sha256()
+    counts = {"frames": 0, "keyframes": 0, "bytes": 0}
+
+    def feed(out) -> None:
+        for block, payload in _main_payloads(src, main, progress):
+            out.write(payload)
+            h.update(payload)
+            counts["frames"] += 1
+            counts["keyframes"] += block.frame_type == 1
+            counts["bytes"] += len(payload)
+
+    info: dict[str, Any] = {"method": METHOD, "fps": fps, "fps_source": source, "fps_assumed": assumed}
+    analysis = None
     if shutil.which("ffmpeg") is not None:
         mp4 = dest_stem.with_name(dest_stem.name + ".mp4")
         part = dest_stem.with_name(dest_stem.name + ".part.mp4")
-        cmd = ["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-fflags", "+genpts", "-r", f"{info['fps']:g}",
-               "-f", "h264", "-i", str(raw), "-map", "0:v:0", "-c", "copy", "-movflags", "+faststart", str(part)]
-        try:
-            subprocess.run(cmd, check=True, capture_output=True, timeout=3600)
-            part.replace(mp4)
-            raw.unlink()
-            analysis, info["container"] = mp4, "mp4 (-c copy, sem recodificação)"
-        except Exception as exc:  # noqa: BLE001 - fica a sequência H.264 crua, que o OpenCV também lê
-            part.unlink(missing_ok=True)
-            info["remux_error"] = str(getattr(exc, "stderr", b"") or exc)[:500]
+        cmd = ["ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-fflags", "+genpts", "-r", f"{fps:g}",
+               "-f", "h264", "-i", "pipe:0", "-map", "0:v:0", "-c", "copy", "-movflags", "+faststart", str(part)]
+        with tempfile.TemporaryFile() as err:
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=err)
+            try:
+                try:
+                    feed(proc.stdin)
+                    proc.stdin.close()
+                except BrokenPipeError:  # o ffmpeg terminou antes do fim: trata-se como falha do MP4
+                    pass
+                code = proc.wait(timeout=3600)
+            except BaseException:
+                proc.kill()
+                proc.wait()
+                part.unlink(missing_ok=True)
+                raise
+            if code == 0:
+                part.replace(mp4)
+                analysis, info["container"] = mp4, "mp4 (-c copy, sem recodificação)"
+            else:
+                part.unlink(missing_ok=True)
+                err.seek(0)
+                info["remux_error"] = err.read().decode("utf-8", "replace")[-500:]
+                h, counts = hashlib.sha256(), {"frames": 0, "keyframes": 0, "bytes": 0}
+    if analysis is None:  # sem ffmpeg (ou o MP4 falhou): fica a sequência H.264 crua, que o OpenCV também lê
+        raw = dest_stem.with_name(dest_stem.name + ".h264")
+        with raw.open("wb") as out:
+            feed(out)
+        analysis, info["container"] = raw, "h264"
+    info.update({
+        "frames": counts["frames"], "keyframes": counts["keyframes"],
+        "frames_before_first_keyframe": main["frames"] - counts["frames"],
+        "width": main["width"], "height": main["height"],
+        "h264_sha256": h.hexdigest(), "h264_bytes": counts["bytes"],
+        "resyncs": summary["resyncs"], "skipped_bytes": summary["skipped_bytes"],
+        "non_h264_blocks": summary["non_h264_blocks"],
+        "streams": summary["streams"], "first_blocks": summary["first_blocks"],
+    })
     info["analysis_sha256"] = _sha256(analysis)
     return analysis, info
+
+
+def _first_key_fps(payload: bytes, dest_stem: Path) -> float | None:
+    """fps do SPS do 1.º frame-chave (só essa carga vai para um ficheiro temporário)."""
+    tmp = dest_stem.with_name(dest_stem.name + ".sps.h264")
+    try:
+        tmp.write_bytes(payload)
+        return _sps_fps(tmp)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
+def first_bytes(path: str | Path, n: int = 64) -> str:
+    with open(path, "rb") as fh:
+        return fh.read(n).hex(" ")
+
+
+def header_summary(path: str | Path, limit: int = 64) -> dict[str, Any] | None:
+    """Validação rápida (na importação): primeiros blocos válidos, sem ler o ficheiro todo."""
+    blocks = []
+    for block, _ in iter_blocks(path):
+        blocks.append(block)
+        if len(blocks) >= limit:
+            break
+    if not blocks:
+        return None
+    sizes: dict[tuple[int, int], int] = {}
+    for b in blocks:
+        sizes[(b.width, b.height)] = sizes.get((b.width, b.height), 0) + b.length
+    width, height = max(sizes, key=sizes.get)
+    return {"width": width, "height": height, "blocks": len(blocks)}

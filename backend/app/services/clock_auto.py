@@ -38,6 +38,8 @@ def request_auto_clock(s: Session, video: Video) -> None:
     """Põe o vídeo na fila da leitura automática da hora (se ativa e se o vídeo ainda não tiver hora)."""
     if not settings.auto_clock_ocr or video.dvr_start:
         return
+    if video.extraction_status and video.extraction_status != "ready":
+        return  # .sec ainda a extrair: é pedida no fim da extração
     video.clock_auto_status, video.clock_auto_message = PENDING, ""
     s.add(video)
     s.commit()

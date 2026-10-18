@@ -43,7 +43,7 @@ from ..schemas import (
     SavedFrameCreate,
     TrackPerson,
 )
-from ..services import disk, enhance, evidence, linking, reports, thumbs, validated_frames
+from ..services import disk, enhance, evidence, linking, reports, sec_extract, thumbs, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.clock import real_time
@@ -113,6 +113,10 @@ def create_job(case_id: int, body: JobCreate, session: SessionDep, actor: ActorD
         video_ids = [v.id for v in videos if v.id in wanted or v.location_id in wanted_locs]
     if not video_ids:
         raise HTTPException(422, "Selecione pelo menos um vídeo do processo.")
+    blocked = [v for v in videos if v.id in video_ids and not sec_extract.is_ready(v)]
+    if blocked:
+        raise HTTPException(409, "Não é possível iniciar a análise: " + "; ".join(
+            sec_extract.not_ready_reason(v) for v in blocked) + ".")
     ref_ids: list[int] = []
     job_params = params.model_dump()
     # Locais abrangidos (nome no momento da análise, para o relatório e a reprodutibilidade)

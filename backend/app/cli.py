@@ -9,6 +9,9 @@
   verify-evidence [case_id] recalcula o SHA-256 dos vídeos originais e compara com o da importação
   backup <pasta> [--files]  cópia consistente da base de dados (VACUUM INTO) + manifesto; com --files,
                             copia também os ficheiros dos processos (incremental)
+  remove-originals [case_id] [--dry-run] [--yes]
+                            apaga do servidor os originais já convertidos (cópia de análise sem perdas verificada);
+                            fica o SHA-256 para os relacionar com o original guardado no suporte de origem
   sec-info <ficheiro.sec> [--extract <destino>]
                             mostra a estrutura de um ficheiro .sec de DVR (blocos, streams, cabeçalhos) e, com
                             --extract, grava o vídeo extraído (destino.mp4, ou destino.h264 sem ffmpeg)
@@ -153,13 +156,60 @@ def run_backup(dest: str, include_files: bool) -> None:
     print(f"Manifesto: manifest_{m['created_at']}.json ({len(m['videos'])} vídeo(s)).")
 
 
+def remove_originals(s: Session, case_id: int | None, dry_run: bool, yes: bool) -> None:
+    from .models import utcnow
+    from .services import originals, sec_extract, transcode
+
+    q = select(Video).where(Video.original_removed_at.is_(None)).order_by(Video.id)
+    if case_id is not None:
+        q = q.where(Video.case_id == case_id)
+    todo = []
+    for v in s.exec(q):
+        if not Path(v.stored_path).exists() or not sec_extract.is_ready(v):
+            continue
+        if v.analysis_path:
+            todo.append((v, "cópia de análise já existe"))
+        elif transcode.ffmpeg_available() and transcode.needs_playback_copy(v)[0]:
+            todo.append((v, "cria primeiro a cópia por remux sem perdas"))
+    total = sum(v.size_bytes for v, _ in todo)
+    for v, how in todo:
+        print(f"#{v.id} processo {v.case_id} {v.filename} ({v.size_bytes / 1e9:.2f} GB): {how}")
+    print(f"{len(todo)} original(is), {total / 1e9:.2f} GB.")
+    if dry_run or not todo:
+        return
+    if not yes and input("Apagar estes originais do servidor? Escreva 'sim': ").strip().lower() != "sim":
+        sys.exit("Nada foi apagado.")
+    removed = 0
+    for v, _ in todo:
+        if not v.analysis_path:
+            src = Path(v.stored_path)
+            try:
+                out, info = originals.remux_for_analysis(src, src.with_name(src.stem + "_analysis"))
+            except (OSError, ValueError) as exc:
+                print(f"#{v.id}: original mantido ({exc})", file=sys.stderr)
+                continue
+            v.analysis_path, v.analysis_sha256, v.extraction = str(out), info["analysis_sha256"], info
+            v.extraction_status = sec_extract.READY
+            s.add(v)
+            s.commit()
+            log_event(s, "video.analysis_copy_ready", case_id=v.case_id, actor=ACTOR, ip="local",
+                      details={"video_id": v.id, "filename": v.filename, "original_sha256": v.sha256,
+                               "at": utcnow().isoformat(), **info})
+        if originals.remove_original(s, v, actor=ACTOR):
+            removed += 1
+        else:
+            print(f"#{v.id}: original mantido (ver auditoria video.original_kept)", file=sys.stderr)
+    print(f"{removed} original(is) apagado(s).")
+
+
 def sec_info(file: str, extract: str | None) -> None:
     import json
 
     from .services import sec_format
 
     if not sec_format.is_sec(file):
-        sys.exit("O ficheiro não começa por um bloco .sec reconhecido (magic 00 e0 02 03).")
+        print("O ficheiro não começa por um bloco .sec reconhecido (00 e0 …). Primeiros bytes:\n"
+              + sec_format.first_bytes(file, 128), file=sys.stderr)
     if extract:
         out, info = sec_format.extract(file, Path(extract))
         print(json.dumps(info, indent=2, ensure_ascii=False))
@@ -182,6 +232,10 @@ def main(argv: list[str] | None = None) -> None:
     b = sub.add_parser("backup")
     b.add_argument("dest")
     b.add_argument("--files", action="store_true", help="copiar também os ficheiros dos processos")
+    r = sub.add_parser("remove-originals")
+    r.add_argument("case_id", nargs="?", type=int)
+    r.add_argument("--dry-run", action="store_true", help="só lista o que seria apagado")
+    r.add_argument("--yes", action="store_true", help="não pede confirmação")
     x = sub.add_parser("sec-info")
     x.add_argument("file")
     x.add_argument("--extract", metavar="DESTINO", help="grava o vídeo extraído (sem extensão)")
@@ -204,6 +258,8 @@ def main(argv: list[str] | None = None) -> None:
             verify_audit(s)
         elif args.cmd == "verify-evidence":
             verify_evidence(s, args.case_id)
+        elif args.cmd == "remove-originals":
+            remove_originals(s, args.case_id, args.dry_run, args.yes)
         elif args.cmd == "backup":
             run_backup(args.dest, args.files)
         else:

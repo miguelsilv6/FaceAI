@@ -68,6 +68,8 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
   const chosenVideos = useMemo(() => videos.filter((v) => locIds.includes(String(v.location_id))
     && !excluded.includes(v.id)), [videos, locIds, excluded]);
   const videoIds = chosenVideos.map((v) => v.id);
+  // .sec ainda a extrair (ou com a extração falhada): o servidor recusa a análise até estarem prontos
+  const notReady = chosenVideos.filter((v) => v.extraction_status && v.extraction_status !== "ready");
   const nLocs = new Set(chosenVideos.map((v) => v.location_id)).size;
   useEffect(() => setChoices(allChoices(validRefs, persons)), [validRefs, persons]);
   const refIds = useMemo(() => choicesToRefIds(choices, validRefs), [choices, validRefs]);
@@ -180,6 +182,16 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                         </Accordion.Panel>
                       </Accordion.Item>
                     </Accordion>
+                  )}
+                  {notReady.length > 0 && (
+                      <Alert color="orange" p="xs">
+                        <Text size="xs">
+                          {notReady.map((v) => cameraName(v)).join(", ")}:{" "}
+                          {notReady.some((v) => v.extraction_status === "failed")
+                            ? "a extração falhou (ver Locais e vídeos); retire o vídeo ou tente de novo."
+                            : "ainda a extrair o vídeo do .sec; aguarde que termine para iniciar a análise."}
+                        </Text>
+                      </Alert>
                   )}
                 </Stack>
               </Input.Wrapper>

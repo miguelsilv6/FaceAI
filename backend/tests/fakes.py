@@ -166,10 +166,10 @@ def h264_access_units(data: bytes) -> list[tuple[bool, bytes]]:
     return [(any(n[n.index(b"\x00\x00\x01") + 3] & 0x1F == 5 for n in u), b"".join(u)) for u in units]
 
 
-def sec_block(payload: bytes, key: bool, width: int, height: int, seq: int) -> bytes:
+def sec_block(payload: bytes, key: bool, width: int, height: int, seq: int, channel: int = 3) -> bytes:
     """Bloco .sec: cabeçalho de 48 bytes (estrutura das exportações reais) + carga H.264."""
     head = bytearray(48)
-    head[0:4] = b"\x00\xe0\x02\x03"
+    head[0:4] = b"\x00\xe0\x02" + bytes([channel])
     head[4] = 1 if key else 2
     head[6:12] = bytes.fromhex("b4948f508181")
     head[12:20] = seq.to_bytes(8, "big")
@@ -180,7 +180,8 @@ def sec_block(payload: bytes, key: bool, width: int, height: int, seq: int) -> b
     return bytes(head) + payload
 
 
-def make_sec(path: Path, source: Path, *, sub_source: Path | None = None, garbage_after: int | None = None) -> Path:
+def make_sec(path: Path, source: Path, *, sub_source: Path | None = None, garbage_after: int | None = None,
+             channel: int = 3) -> Path:
     """Converte um vídeo num .sec sintético (H.264 por ffmpeg). sub_source: segundo stream (outra resolução)
     intercalado; garbage_after: bytes corrompidos depois desse frame (para testar a ressincronização)."""
     import subprocess
@@ -198,9 +199,9 @@ def make_sec(path: Path, source: Path, *, sub_source: Path | None = None, garbag
     sub, sw, sh = encode(sub_source) if sub_source else ([], 0, 0)
     out = bytearray()
     for i, (key, payload) in enumerate(main):
-        out += sec_block(payload, key, w, h, i)
+        out += sec_block(payload, key, w, h, i, channel)
         if i < len(sub):
-            out += sec_block(sub[i][1], sub[i][0], sw, sh, i)
+            out += sec_block(sub[i][1], sub[i][0], sw, sh, i, channel)
         if garbage_after is not None and i == garbage_after:
             out += b"\x13\x37" * 500
     path.write_bytes(bytes(out))

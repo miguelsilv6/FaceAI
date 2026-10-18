@@ -21,8 +21,15 @@ import VideoPlayerModal from "./VideoPlayerModal";
 /** Resumo da extração de um formato proprietário (.sec), para a dica do vídeo. */
 function extractionTitle(v: Video): string {
   const x = v.extraction ?? {};
+  const original = v.original_removed_at
+    ? `Original ${v.filename} removido do servidor (SHA-256 ${v.sha256}).`
+    : `Original ${v.filename} guardado intacto (SHA-256 ${v.sha256}).`;
+  if (x.method?.startsWith("remux")) {
+    return [original, `A análise usa uma cópia por remux sem recodificação (${x.container}), com os mesmos pacotes `
+      + `de vídeo do original (${x.packets} pacotes).`, `Cópia de análise: SHA-256 ${v.analysis_sha256}`].join("\n");
+  }
   return [
-    `Original ${v.filename} guardado intacto (SHA-256 ${v.sha256}).`,
+    original,
     `A análise usa o H.264 extraído dos blocos: ${x.frames} frames, ${x.keyframes} chave, ${x.fps} fps (${x.fps_source}).`,
     x.resyncs ? `${x.resyncs} ressincronização(ões), ${formatBytes(x.skipped_bytes ?? 0)} ignorados.` : "Sem blocos danificados.",
     ...(x.fps_history ?? []).map((h) => `fps corrigido de ${h.from} para ${h.to} (${h.source}; ${h.reason}; ${h.by}).`),
@@ -122,7 +129,7 @@ function LocationHeader({ location, cameras, duration, onChange, onDeleted }: {
         <Badge variant="light">{cameras} vídeo{cameras === 1 ? "" : "s"}</Badge>
         {cameras > 0 && <Text size="xs" c="dimmed">{formatTime(duration)} de vídeo</Text>}
         {cameras > 0 && (
-          <Tooltip label={`Originais ${formatBytes(location.originals_bytes)} · cópias de reprodução ${formatBytes(location.playback_bytes)}`}>
+          <Tooltip label={`Originais ${formatBytes(location.originals_bytes)} · cópias de análise e reprodução ${formatBytes(location.playback_bytes)}`}>
             <Badge variant="default" leftSection={<IconDatabase size={12} />}>{formatBytes(location.size_bytes)} em disco</Badge>
           </Tooltip>
         )}
@@ -149,8 +156,19 @@ export default function LocationCameras({ caseId, location, videos, locations, j
 
   // Atualiza o estado das conversões para o browser (e da leitura da hora por OCR) enquanto decorrem.
   const converting = vs.some((v) => v.playback_status === "pending" || v.playback_status === "running"
-    || v.clock_auto_status === "pending" || v.clock_auto_status === "running");
+    || v.clock_auto_status === "pending" || v.clock_auto_status === "running"
+    || v.extraction_status === "pending" || v.extraction_status === "running");
   usePolling(onChange, 3000, converting);
+
+  const retryExtraction = async (v: Video) => {
+    try {
+      await api.retryExtraction(v.id);
+      notifyOk(`Extração do vídeo #${v.id} na fila.`);
+      onChange();
+    } catch (e) {
+      notifyError(e);
+    }
+  };
 
   const createCopy = async (v: Video) => {
     try {
@@ -168,7 +186,8 @@ export default function LocationCameras({ caseId, location, videos, locations, j
     try {
       const { created, duplicates: dups } = await api.uploadVideos(caseId, files, setProgress, location.id);
       setDuplicates(dups);
-      if (created.length) notifyOk(`${created.length} vídeo(s) importado(s) para "${location.name}".`);
+      if (created.length) notifyOk(`${created.length} vídeo(s) importado(s) para "${location.name}".`
+        + (created.some((v) => v.extraction_status) ? " Os .sec estão a ser extraídos (pode demorar alguns minutos)." : ""));
     } catch (e) {
       notifyError(e, "Falha ao importar vídeo");
     } finally {
@@ -237,16 +256,52 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                     <Table.Td>{formatTime(v.duration_s)}</Table.Td><Table.Td>{v.fps.toFixed(2)}</Table.Td>
                     <Table.Td>{v.width}×{v.height}</Table.Td><Table.Td>
                       {v.codec || "—"}
-                      {v.extraction?.method && (
-                        <Text size="xs" c="dimmed" title={extractionTitle(v)}>extraído (sem recodificar)</Text>
+                      {(v.extraction_status === "pending" || v.extraction_status === "running") && (
+                        <Group gap={4} wrap="nowrap">
+                          <Loader size={10} />
+                          <Text size="xs" c="dimmed">
+                            {v.filename.toLowerCase().endsWith(".sec")
+                              ? (v.extraction_status === "pending" ? "na fila para extrair"
+                                : `a extrair… ${Math.round((v.extraction_progress ?? 0) * 100)}%`)
+                              : "a preparar cópia de análise sem perdas…"}
+                          </Text>
+                        </Group>
                       )}
-                      {v.extraction?.method && (v.extraction.fps_assumed || v.extraction.suggested_fps) && (
+                      {v.extraction_status === "failed" && (
+                        <Stack gap={2}>
+                          <Text size="xs" c="red" maw={260}>extração falhou: {v.extraction_error}</Text>
+                          {canManage && (
+                            <Button size="compact-xs" variant="subtle" onClick={() => retryExtraction(v)}>
+                              tentar de novo
+                            </Button>
+                          )}
+                        </Stack>
+                      )}
+                      {v.original_removed_at && (
+                        <Tooltip multiline w={320} label={`Original apagado do servidor em ${new Date(v.original_removed_at)
+                          .toLocaleString()} depois de verificada a cópia de análise sem perdas (${formatBytes(v.size_bytes)}
+                          libertados). SHA-256 do original: ${v.sha256}. Reenvie o mesmo ficheiro para o voltar a anexar.`}>
+                          <Badge size="xs" variant="light" color="gray">original removido</Badge>
+                        </Tooltip>
+                      )}
+                      {(v.extraction_status === "ready" || !v.extraction_status) && v.extraction_error && (
+                        <Text size="xs" c="orange" maw={260}>{v.extraction_error}</Text>
+                      )}
+                      {v.extraction?.method && (
+                        <Text size="xs" c="dimmed" title={extractionTitle(v)}>
+                          {v.extraction.method.startsWith("remux") ? "cópia por remux (sem recodificar)"
+                            : "extraído (sem recodificar)"}
+                        </Text>
+                      )}
+                      {v.extraction?.method && !v.extraction.method.startsWith("remux")
+                        && (v.extraction.fps_assumed || v.extraction.suggested_fps) && (
                         <Text size="xs" c="orange" title="O fps pode estar errado: a reprodução e os tempos ficam acelerados ou lentos.">
                           {v.extraction.suggested_fps ? `relógio do DVR: ≈${v.extraction.suggested_fps.fps} fps`
                             : "fps assumido"}
                         </Text>
                       )}
-                      {v.extraction?.method && canManage && (
+                      {v.extraction?.method && !v.extraction.method.startsWith("remux") && canManage
+                        && v.extraction_status === "ready" && (
                         <Button size="compact-xs" variant="subtle" onClick={() => setFpsVideo(v)}>corrigir fps…</Button>
                       )}
                     </Table.Td>
