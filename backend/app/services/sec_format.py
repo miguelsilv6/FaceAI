@@ -192,8 +192,12 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def extract(src: str | Path, dest_stem: Path, *, default_fps: float = 25.0) -> tuple[Path, dict[str, Any]]:
+def extract(src: str | Path, dest_stem: Path, *, default_fps: float = 25.0, fps: float | None = None,
+            fps_source: str = "") -> tuple[Path, dict[str, Any]]:
     """Extrai o stream principal (a resolução com mais dados) para uma cópia de trabalho.
+
+    fps: força o fps da cópia (correção, ex.: o DVR grava a 12 fps e o SPS não o indica); fps_source diz de onde
+    vem. A sequência H.264 é a mesma: só muda o ritmo com que o MP4 a apresenta.
 
     Devolve (ficheiro de análise, relatório). Erro (ValueError) se o ficheiro não tiver vídeo H.264 reconhecível.
     """
@@ -220,12 +224,18 @@ def extract(src: str | Path, dest_stem: Path, *, default_fps: float = 25.0) -> t
     if frames == 0:
         raw.unlink(missing_ok=True)
         raise ValueError("ficheiro .sec sem nenhum frame-chave H.264")
-    fps = _sps_fps(raw)
+    assumed = False
+    if fps:
+        source = fps_source or "indicado"
+    elif sps_fps := _sps_fps(raw):
+        fps, source = sps_fps, "SPS (VUI)"
+    else:
+        fps, source, assumed = default_fps, f"valor de recurso ({default_fps:g})", True
     info: dict[str, Any] = {
         "method": METHOD, "container": "h264", "frames": frames, "keyframes": keyframes,
         "frames_before_first_keyframe": main["frames"] - frames,
         "width": main["width"], "height": main["height"],
-        "fps": fps or default_fps, "fps_source": "SPS (VUI)" if fps else f"valor de recurso ({default_fps:g})",
+        "fps": fps, "fps_source": source, "fps_assumed": assumed,
         "h264_sha256": h.hexdigest(), "h264_bytes": raw.stat().st_size,
         "resyncs": summary["resyncs"], "skipped_bytes": summary["skipped_bytes"],
         "non_h264_blocks": summary["non_h264_blocks"],

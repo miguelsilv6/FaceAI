@@ -13,6 +13,7 @@ import type { Job, Location, Video } from "../types";
 import { usePolling } from "../usePolling";
 import ClockModal from "./ClockModal";
 import DeleteVideoModal from "./DeleteVideoModal";
+import FpsModal from "./FpsModal";
 import PlaybackBadge from "./PlaybackBadge";
 import UploadZone from "./UploadZone";
 import VideoPlayerModal from "./VideoPlayerModal";
@@ -24,6 +25,7 @@ function extractionTitle(v: Video): string {
     `Original ${v.filename} guardado intacto (SHA-256 ${v.sha256}).`,
     `A análise usa o H.264 extraído dos blocos: ${x.frames} frames, ${x.keyframes} chave, ${x.fps} fps (${x.fps_source}).`,
     x.resyncs ? `${x.resyncs} ressincronização(ões), ${formatBytes(x.skipped_bytes ?? 0)} ignorados.` : "Sem blocos danificados.",
+    ...(x.fps_history ?? []).map((h) => `fps corrigido de ${h.from} para ${h.to} (${h.source}; ${h.reason}; ${h.by}).`),
     `Cópia de análise (${x.container}): SHA-256 ${x.analysis_sha256}`,
   ].join("\n");
 }
@@ -141,6 +143,7 @@ export default function LocationCameras({ caseId, location, videos, locations, j
   const [clockVideo, setClockVideo] = useState<Video | null>(null);
   const [playId, setPlayId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [fpsVideo, setFpsVideo] = useState<Video | null>(null);
   const [duplicates, setDuplicates] = useState<{ file: string; message: string }[]>([]);
   const vs = videos.filter((v) => v.location_id === location.id);
 
@@ -237,6 +240,15 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                       {v.extraction?.method && (
                         <Text size="xs" c="dimmed" title={extractionTitle(v)}>extraído (sem recodificar)</Text>
                       )}
+                      {v.extraction?.method && (v.extraction.fps_assumed || v.extraction.suggested_fps) && (
+                        <Text size="xs" c="orange" title="O fps pode estar errado: a reprodução e os tempos ficam acelerados ou lentos.">
+                          {v.extraction.suggested_fps ? `relógio do DVR: ≈${v.extraction.suggested_fps.fps} fps`
+                            : "fps assumido"}
+                        </Text>
+                      )}
+                      {v.extraction?.method && canManage && (
+                        <Button size="compact-xs" variant="subtle" onClick={() => setFpsVideo(v)}>corrigir fps…</Button>
+                      )}
                     </Table.Td>
                     <Table.Td><PlaybackBadge video={v} onCreate={createCopy} /></Table.Td>
                     <Table.Td>
@@ -299,6 +311,10 @@ export default function LocationCameras({ caseId, location, videos, locations, j
         onChange={onChange} locations={locations} />
       <DeleteVideoModal video={vs.find((v) => v.id === deleteId) ?? null} jobs={jobs} locations={locations}
         onClose={() => setDeleteId(null)} onDeleted={() => { setDeleteId(null); onChange(); }} />
+      {fpsVideo && (
+        <FpsModal key={fpsVideo.id} video={fpsVideo} jobs={jobs} onClose={() => setFpsVideo(null)}
+          onSaved={() => { setFpsVideo(null); onChange(); }} />
+      )}
       {clockVideo && (
         <ClockModal key={clockVideo.id} video={clockVideo} opened onClose={() => setClockVideo(null)} locations={locations}
           onSaved={(v) => { setClockVideo(v); onChange(); }} />

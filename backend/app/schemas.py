@@ -80,6 +80,12 @@ class VideoDelete(BaseModel):
     reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")
 
 
+class FpsCorrection(BaseModel):
+    fps: float = Field(gt=0, description="fps real do vídeo extraído (ex.: o DVR gravou a 12 fps)")
+    reason: str = Field(min_length=3, max_length=1000, description="Motivo da correção (fica na auditoria)")
+    source: str = Field("manual", pattern="^(manual|ocr)$", description="ocr: valor sugerido pelo relógio do DVR")
+
+
 class CaseDelete(BaseModel):
     confirm_case_id: int = Field(description="Número do processo, repetido como confirmação do pedido")
     reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")

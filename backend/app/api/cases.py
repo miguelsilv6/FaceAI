@@ -37,6 +37,7 @@ from ..schemas import (
     CasePersonCreate,
     CasePersonUpdate,
     CaseUpdate,
+    FpsCorrection,
     LocationCreate,
     MemberAdd,
     ReferenceUpdate,
@@ -44,7 +45,7 @@ from ..schemas import (
     VideoDelete,
     VideoUpdate,
 )
-from ..services import disk, evidence, sec_format
+from ..services import disk, evidence, fps_fix, sec_format
 from ..services.audit import log_event, verify_chain
 from ..services.clock_auto import request_auto_clock
 from ..services.face_engine import get_engine
@@ -828,6 +829,17 @@ def create_case_playback_copies(case_id: int, session: SessionDep, actor: ActorD
     for v in videos:
         session.refresh(v)
     return videos
+
+
+@router.post("/videos/{video_id}/fps", response_model=Video)
+def correct_video_fps(video_id: int, body: FpsCorrection, session: SessionDep, user: CurrentUser) -> Video:
+    """Corrige o fps de um vídeo extraído (.sec): refaz a cópia de análise e recalcula os tempos das análises."""
+    video = session.get(Video, video_id)
+    if video is None:
+        raise HTTPException(404, "Vídeo não encontrado.")
+    _require_manager(session, user, video.case_id)
+    return fps_fix.correct_fps(session, video, body.fps, reason=body.reason.strip(), actor=user.username,
+                               source=body.source)
 
 
 @router.get("/videos/{video_id}/probe")

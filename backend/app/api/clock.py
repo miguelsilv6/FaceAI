@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from ..models import Video
 from ..schemas import ClockManual, ClockOcr, ClockOcrTest, ClockOffset
-from ..services import ocr
+from ..services import fps_fix, ocr
 from ..services.audit import log_event
 from .deps import ActorDep, SessionDep, authorize_objects
 
@@ -79,6 +79,7 @@ def clock_ocr(video_id: int, body: ClockOcr, session: SessionDep, actor: ActorDe
     v.time_source = "ocr"
     v.time_note = body.note
     v.time_calibration = cal
+    fps_fix.suggest_from_clock(v, cal["rate"])
     session.add(v)
     session.commit()
     session.refresh(v)

@@ -44,6 +44,7 @@ _lock = threading.Lock()
 _worker: threading.Thread | None = None
 _running: dict[int, subprocess.Popen] = {}  # conversões em curso (para poderem ser canceladas)
 _cancelled: set[int] = set()
+_requeue: set[int] = set()  # canceladas para voltar à fila (o vídeo de origem mudou)
 
 
 def ffmpeg_available() -> bool:
@@ -147,6 +148,30 @@ def cancel_copies(video_ids: list[int]) -> None:
                 proc.kill()
 
 
+def restart_copy(s: Session, video: Video, *, actor: str = "sistema") -> str:
+    """Refaz a cópia de reprodução porque o vídeo de origem mudou (ex.: fps corrigido). Uma conversão na fila ou em
+    curso é cancelada e volta à fila; uma cópia pronta é apagada e pedida de novo (no mesmo formato)."""
+    with _lock:
+        busy = video.id in _queued or video.id in _running
+        if busy:
+            _cancelled.add(video.id)
+            _requeue.add(video.id)
+            proc = _running.get(video.id)
+            if proc is not None and proc.poll() is None:
+                proc.kill()
+    old = video.playback_path
+    if old:
+        Path(old).unlink(missing_ok=True)
+    video.playback_path, video.playback_progress, video.playback_error = None, 0.0, ""
+    if busy:
+        video.playback_status = PENDING
+        s.add(video)
+        s.commit()
+        return PENDING
+    video.playback_status = ""
+    return request_playback_copy(s, video, force=bool(old), actor=actor, fmt=video.playback_format or "mp4")
+
+
 def resume_pending_copies() -> None:
     """No arranque (em segundo plano): retoma conversões interrompidas e avalia vídeos de versões anteriores.
 
@@ -213,9 +238,13 @@ def _work() -> None:
             log.exception("Falha inesperada na conversão do vídeo %s", video_id)
         finally:
             with _lock:
-                _queued.discard(video_id)
                 _cancelled.discard(video_id)
                 _running.pop(video_id, None)
+                if video_id in _requeue:
+                    _requeue.discard(video_id)
+                    _queue.put(video_id)  # continua em _queued
+                else:
+                    _queued.discard(video_id)
 
 
 def _lower_priority() -> None:  # pragma: no cover - corre no processo filho
