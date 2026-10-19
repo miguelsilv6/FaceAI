@@ -103,7 +103,7 @@ Vídeo ─► frames a N fps ─► [1] filtro de movimento ─► [2] SCRFD-500
 5. **Qualidade da face (0–100).** É a média geométrica de três componentes: **nitidez** (variância do Laplaciano), **tamanho** e **frontalidade** (posição do nariz face aos olhos). Serve para ordenar e filtrar deteções, e para explicar porque um match é fraco.
 6. **Tracking.** As deteções da mesma face em frames consecutivos são agrupadas num *track*, por semelhança do embedding e sobreposição das caixas. O match do track decide-se pela **média das 3 melhores distâncias**, mais robusta do que frames isolados. Depois de um track ter uma correspondência, os frames seguintes da mesma face também são guardados, mesmo os de perfil ou desfocados, o que dá ao perito a trajetória completa. **Na revisão, um track inteiro confirma-se ou rejeita-se de uma vez.**
 7. **Hora real.** Ver a secção [Hora real do CCTV](#hora-real-do-cctv).
-8. **Segmentos e prova.** Os tracks e as deteções com match formam os intervalos de aparição. Por cada deteção ficam guardados: recorte da face, frame anotado, timestamp, nº de frame, caixa, confiança, distância, qualidade e track.
+8. **Segmentos e prova.** Os tracks e as deteções com match formam os intervalos de aparição. Por cada deteção ficam guardados: recorte da face, timestamp, nº de frame, caixa, confiança, distância, qualidade e track. O **frame anotado é gerado a pedido** a partir do vídeo (ver [Armazenamento](#armazenamento)).
 
 ### Desempenho (CPU, 4 vCPU)
 
@@ -119,7 +119,7 @@ Em CCTV real, o ganho do pré-filtro depende do movimento na cena: quanto mais e
 **Análise (pipeline):**
 - **Medição por fase:** cada análise guarda o tempo de cada fase em `job.environment["timings"]` (descodificação, movimento, cascata, deteção, gravação, base de dados), com o total e os frames/s. O benchmark `tools/bench_pipeline.py` usa um vídeo sintético tipo CCTV com relógio sobreposto e confirma que uma otimização não muda os resultados (`--compare`).
 - **Descodificação:** corre numa thread própria, com 4 frames de avanço e exatamente os mesmos frames. Com o SCRFD real num vídeo de 640×360, a análise passou de 11,8 para 12,5 frames/s; em resoluções maiores, onde descodificar custa mais, o ganho cresce.
-- **Recortes e frames anotados:** gravados num pool de 2 threads. Antes de cada commit espera-se que estejam no disco, por isso nenhuma deteção fica registada sem os seus ficheiros.
+- **Recortes:** gravados num pool de 2 threads. Antes de cada commit espera-se que estejam no disco, por isso nenhuma deteção fica registada sem os seus ficheiros. O frame anotado já não é gravado na análise.
 - **Faces abaixo do tamanho ou da qualidade mínimos:** são descartadas **antes** do alinhamento e do ArcFace, o passo mais caro.
 - **Relógio do DVR:** a região da hora (lida por OCR ou indicada à mão) é ignorada pelo filtro de movimento. Um relógio pequeno quase não afeta o filtro; um relógio grande (texto com cerca de 8% da altura) fazia contar como movimento um frame por segundo.
 - **Base de dados:** os commits são feitos por tempo (a cada 1,5 s), em vez de a cada 10 frames. No modo descoberta, as distâncias finais são gravadas numa atualização em massa, sem manter os objetos de todas as deteções em memória.
@@ -330,8 +330,16 @@ O separador **Painel**, o primeiro de cada processo, resume o processo num relan
 - **Por hora real:** histograma das correspondências por hora. As dos vídeos sem relógio acertado são indicadas à parte.
 - **Por pessoa:** só aparece quando a análise procura várias pessoas.
 - **Atividade recente:** os últimos eventos da auditoria.
+- **Armazenamento:** espaço do processo por categoria (ver [Armazenamento](#armazenamento)).
 
 A contagem segue o mesmo critério do relatório: uma deteção conta como correspondência se estiver abaixo do limiar ou num track com correspondência. As aparições só pelo vestuário e o modo descoberta contam à parte.
+
+### Armazenamento
+- **Frames anotados a pedido.** As análises já não gravam um JPEG do frame inteiro por cada face, que era a maior fonte de crescimento das análises (num frame com 3 faces ficavam 3 cópias do mesmo frame). Ao pedir o frame (resultados, download, relatório, ZIP), o frame é lido do vídeo analisado pelo nº de frame, **verificado contra o recorte da face** (como o PNG original), e a caixa e o rótulo vêm da base de dados. Fica em cache um JPEG limpo por nº de frame, partilhado pelas faces desse frame. O ZIP só inclui os frames das correspondências, das deteções confirmadas e da melhor face de cada track. As análises anteriores continuam a servir os ficheiros que gravaram.
+- **Painel (separador Painel → Armazenamento):** espaço do processo por categoria, com o nº de ficheiros e se é **evidência/dados** (vídeos analisados, fotos de referência, recortes) ou **regenerável** (cópias de reprodução, frames anotados de análises anteriores, caches de frames, PNG originais e miniaturas).
+- **Libertar espaço:** o responsável do processo ou um administrador pode libertar cada categoria regenerável. As cópias de reprodução voltam a ser criadas ao abrir o leitor; os frames e as caches são refeitos a pedido. A evidência nunca é tocada e cada operação fica na auditoria (`storage.freed`, com o nº de ficheiros e de bytes).
+- **Administração (Utilizadores → Armazenamento):** disco do servidor, totais por categoria, base de dados, auditoria, uploads em curso e os processos que mais ocupam.
+- **CLI:** `python -m app.cli prune-frames [processo] [--dry-run]` apaga os frames anotados gravados por versões anteriores (todos os processos, ou só um).
 
 ### Pesquisa por foto noutros processos
 Para identificar a mesma pessoa em vários processos, em **Referências/Pessoas** abre o menu da pessoa (ou de uma foto solta) e escolhe **Procurar noutros processos**.
@@ -435,7 +443,7 @@ Desempenho em CPU (4 vCPU): o YOLOX-s demora cerca de 80 ms por frame e o YOLOX-
 ### Download do frame
 
 No frame completo de uma deteção (🔍) há dois downloads:
-- **Frame com marcação (JPEG):** o frame guardado na análise, com a caixa e a etiqueta.
+- **Frame com marcação (JPEG):** o frame do vídeo com a caixa e a etiqueta da análise, gerado a pedido (ou o ficheiro gravado, nas análises anteriores).
 - **Frame original (PNG):** o frame extraído do vídeo analisado, sem marcações e sem perdas em relação ao frame descodificado. Para garantir que é o mesmo frame que a análise viu, é comparado com o recorte da face guardado na análise:
   - o salto direto (*seek*) é aceite se o recorte coincidir;
   - senão, procura-se um vizinho que seja o único a coincidir;

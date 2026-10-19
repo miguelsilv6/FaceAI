@@ -40,11 +40,12 @@ from ..schemas import (
     LocationCreate,
     MemberAdd,
     ReferenceUpdate,
+    StorageFree,
     VideoCheck,
     VideoDelete,
     VideoUpdate,
 )
-from ..services import disk, evidence, fps_fix, originals, sec_extract, sec_format, transcode
+from ..services import disk, evidence, fps_fix, originals, sec_extract, sec_format, storage, transcode
 from ..services.audit import log_event, verify_chain
 from ..services.clock_auto import request_auto_clock
 from ..services.face_engine import get_engine
@@ -867,6 +868,25 @@ def retry_extraction(video_id: int, session: SessionDep, user: CurrentUser) -> V
     sec_extract.request_extraction(session, video)
     session.refresh(video)
     return video
+
+
+@router.get("/cases/{case_id}/storage")
+def case_storage(case_id: int, session: SessionDep, fresh: bool = False) -> dict:
+    """Espaço ocupado pelo processo, por categoria (evidência / regenerável)."""
+    get_case_or_404(session, case_id)
+    return storage.case_storage(case_id, fresh=fresh)
+
+
+@router.post("/cases/{case_id}/storage/free")
+def free_case_storage(case_id: int, body: StorageFree, session: SessionDep, user: CurrentUser) -> dict:
+    """Apaga o que é regenerável (cópias de reprodução, frames anotados antigos, caches). A evidência fica."""
+    get_case_or_404(session, case_id)
+    _require_manager(session, user, case_id)
+    try:
+        result = storage.free(session, case_id, body.targets, actor=user.username)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    return {"freed": result, "storage": storage.case_storage(case_id, fresh=True)}
 
 
 @router.get("/videos/{video_id}/probe")

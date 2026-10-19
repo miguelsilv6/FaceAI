@@ -9,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { api, formatBytes, formatDate, formatDuration, formatTime } from "../api";
 import { notifyError } from "../notify";
 import { personColor } from "../personColors";
+import StoragePanel from "./StoragePanel";
 import type { CaseDashboard as Dashboard, Job, PersonAlert } from "../types";
 
 // Estado da revisão: cores de estado reservadas, sempre acompanhadas de ícone e texto (nunca só a cor).
@@ -125,11 +126,12 @@ const ACTIONS: Record<string, string> = {
   "frames.validated_downloaded": "frames validados descarregados",
   "alert.created": "alerta criado", "alert.confirmed": "alerta confirmado", "alert.dismissed": "alerta descartado",
   "alert.reopened": "alerta reaberto",
+  "storage.freed": "armazenamento libertado",
 };
 
 /** Painel do caso: material, análises, progresso da revisão, correspondências por câmara, hora e pessoa. */
-export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
-  caseId: number; jobs: Job[]; onOpenTab: (tab: string) => void;
+export default function CaseDashboard({ caseId, jobs, onOpenTab, canManage = false }: {
+  caseId: number; jobs: Job[]; onOpenTab: (tab: string) => void; canManage?: boolean;
 }) {
   const navigate = useNavigate();
   const completed = jobs.filter((j) => j.status === "completed");
@@ -334,6 +336,8 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab }: {
           )}
         </>
       )}
+
+      <StoragePanel caseId={caseId} canManage={canManage} />
 
       <Card withBorder>
         <Group justify="space-between" mb="xs">

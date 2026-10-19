@@ -33,7 +33,7 @@ from .motion import MotionGate
 from .quality import face_quality
 from .references import person_groups, reference_embeddings
 from .tracking import FaceTracker
-from .video_processor import SampledFrame, annotate, crop_with_margin, format_timestamp, sample_frames
+from .video_processor import SampledFrame, crop_with_margin, sample_frames
 
 log = logging.getLogger(__name__)
 
@@ -813,24 +813,17 @@ class _VideoAnalyzer:
         matched = distance is not None and is_match(distance, ctx.threshold)
         stem = f"v{self.video.id:04d}_f{frame.index:07d}_{k}"
         crop_path = ctx.out_dir / "crops" / f"{stem}.jpg"
-        frame_path = ctx.out_dir / "frames" / f"{stem}.jpg"
         with ctx.timings("save"):
             ctx.writer.submit(crop_path, crop_with_margin(frame.image, face.x, face.y, face.w, face.h))
+        # O frame anotado não é gravado: é gerado a pedido a partir do vídeo (services/annotated.py)
         if distance is None:
-            label = f"{format_timestamp(frame.timestamp_s)} q={q.score:.2f}"
-            color = (255, 160, 0)
             distance = 1.0  # substituída pela distância ao centro do grupo da pessoa no fim da análise
-        else:
-            label = f"{format_timestamp(frame.timestamp_s)} sim={1 - distance:.2f} q={q.score:.2f}"
-            color = (0, 0, 255) if matched else (0, 165, 255)
-        with ctx.timings("save"):
-            ctx.writer.submit(frame_path, annotate(frame.image, face.x, face.y, face.w, face.h, label, color))
         det = Detection(
             job_id=self.job.id, video_id=self.video.id, reference_id=ref_id,
             frame_index=frame.index, timestamp_s=round(frame.timestamp_s, 3),
             x=face.x, y=face.y, w=face.w, h=face.h, face_confidence=round(face.confidence, 4),
             distance=round(distance, 4), similarity=round(1 - distance, 4), is_match=matched,
-            crop_path=str(crop_path), frame_path=str(frame_path),
+            crop_path=str(crop_path), frame_path="",
             quality=round(q.score, 3), sharpness=round(q.sharpness, 3), size_score=round(q.size, 3),
             frontal=None if q.frontal is None else round(q.frontal, 3),
         )
