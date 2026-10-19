@@ -204,3 +204,7 @@ class ClockOcrTest(BaseModel):
 class ClockOffset(BaseModel):
     clock_offset_s: float
     note: str | None = None
+
+
+class StorageFree(BaseModel):
+    targets: list[str] = Field(min_length=1, description="playback | frames | caches (só o que é regenerável)")

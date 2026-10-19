@@ -17,6 +17,7 @@ from sqlmodel import Session, select
 from .. import __version__
 from ..config import settings
 from ..models import Alert, AuditEvent, Case, CasePerson, Detection, Job, ReferenceImage, ReviewStatus, Track, Video
+from . import annotated
 from .audit import verify_chain
 from .clock import format_real, real_time
 from .locations import locations_by_id, video_place
@@ -174,7 +175,7 @@ def detection_row(d: Detection, data: dict[str, Any]) -> dict[str, Any]:
         "colors": "; ".join(f"{k}: {v}" for k, v in (d.colors or {}).items()),
         "review_status": d.review_status.value, "reviewed_by": d.reviewed_by,
         "reviewed_at": d.reviewed_at.isoformat() if d.reviewed_at else "", "review_note": d.review_note,
-        "crop_file": f"crops/{Path(d.crop_path).name}", "frame_file": f"frames/{Path(d.frame_path).name}",
+        "crop_file": f"crops/{Path(d.crop_path).name}", "frame_file": f"frames/{annotated.frame_name(d)}",
     }
 
 
@@ -240,6 +241,17 @@ def audit_jsonl(data: dict[str, Any]) -> str:
     )
 
 
+def _frame_uri(data: dict[str, Any], det: Detection | None) -> str:
+    """Frame anotado (gravado pelas análises antigas, ou gerado a pedido a partir do vídeo)."""
+    if det is None:
+        return ""
+    try:
+        body = annotated.annotated_jpeg(data["job"], data["videos"].get(det.video_id), det)
+    except (ValueError, OSError):
+        return ""
+    return "data:image/jpeg;base64," + base64.b64encode(body).decode()
+
+
 def _img_data_uri(path: str | None) -> str:
     if not path or not Path(path).exists():
         return ""
@@ -258,7 +270,7 @@ def clothing_for(data: dict[str, Any], by_id: dict[int, Detection]) -> list[dict
         out.append({"t": t, "video": tv, "real_start": video_real_time(tv, t.start_s),
                     "real_end": video_real_time(tv, t.end_s),
                     "crop_img": _img_data_uri(best.crop_path if best else None),
-                    "frame_img": _img_data_uri(best.frame_path if best else None) if t.evidence == "vestuário" else ""})
+                    "frame_img": _frame_uri(data, best) if t.evidence == "vestuário" else ""})
     return sorted(out, key=lambda x: (x["t"].evidence != "face+vestuário", x["t"].video_id, x["t"].start_s))
 
 
@@ -269,7 +281,7 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
     segments = segments_for(data)
     for seg in segments:
         best = by_id.get(seg["best_detection_id"])
-        seg["frame_img"] = _img_data_uri(best.frame_path if best else None)
+        seg["frame_img"] = _frame_uri(data, best)
         seg["crop_img"] = _img_data_uri(best.crop_path if best else None)
         seg["video"] = data["videos"].get(seg["video_id"])
     discover = is_discover(job)
@@ -285,7 +297,7 @@ def render_html(data: dict[str, Any], *, max_images: int = 300) -> str:
     for person in persons:
         best = by_id.get(person["best_detection_id"])
         person["crop_img"] = _img_data_uri(best.crop_path if best else None)
-        person["frame_img"] = _img_data_uri(best.frame_path if best else None)
+        person["frame_img"] = _frame_uri(data, best)
     clothing = clothing_for(data, by_id)
     tracks = []
     for t in data.get("tracks", {}).values():
@@ -347,10 +359,20 @@ def write_zip(data: dict[str, Any], fh) -> None:
         zf.writestr("deteccoes.csv", to_csv(data))
         zf.writestr("resultados.json", to_json(data))
         zf.writestr("auditoria.jsonl", audit_jsonl(data))
+        best_ids = {t.best_detection_id for t in data.get("tracks", {}).values()}
         for d in data["detections"]:
-            for p, folder in ((d.crop_path, "crops"), (d.frame_path, "frames")):
-                if p and Path(p).exists():
-                    zf.write(p, f"{folder}/{Path(p).name}", compress_type=zipfile.ZIP_STORED)
+            if d.crop_path and Path(d.crop_path).exists():
+                zf.write(d.crop_path, f"crops/{Path(d.crop_path).name}", compress_type=zipfile.ZIP_STORED)
+            if annotated.stored_frame(d):
+                zf.write(d.frame_path, f"frames/{Path(d.frame_path).name}", compress_type=zipfile.ZIP_STORED)
+                continue
+            if not (d.is_match or d.review_status == ReviewStatus.confirmed or d.id in best_ids):
+                continue  # gerar o frame de todas as deteções seria lento; ficam as relevantes (o CSV tem todas)
+            try:  # gerado a partir do vídeo (as análises novas não gravam o frame anotado)
+                body = annotated.annotated_jpeg(data["job"], data["videos"].get(d.video_id), d)
+            except (ValueError, OSError):
+                continue
+            zf.writestr(zipfile.ZipInfo(f"frames/{annotated.frame_name(d)}"), body, compress_type=zipfile.ZIP_STORED)
         for r in data["references"].values():
             if Path(r.stored_path).exists():
                 zf.write(r.stored_path, f"referencias/{r.id:05d}_{Path(r.filename).name}",

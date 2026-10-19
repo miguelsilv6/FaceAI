@@ -43,7 +43,7 @@ from ..schemas import (
     SavedFrameCreate,
     TrackPerson,
 )
-from ..services import disk, enhance, evidence, linking, reports, sec_extract, thumbs, validated_frames
+from ..services import annotated, disk, enhance, evidence, linking, reports, sec_extract, thumbs, validated_frames
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.clock import real_time
@@ -874,6 +874,22 @@ def detection_enhanced(det_id: int, session: SessionDep, actor: ActorDep, src: s
     return Response(content=body, media_type="image/png", headers=headers)
 
 
+def _generated_frame(session, det: Detection, actor: str, download: bool, w: int | None) -> Response:
+    if w is not None and w not in thumbs.WIDTHS:
+        raise HTTPException(422, f"Largura de miniatura inválida (use {', '.join(map(str, thumbs.WIDTHS))}).")
+    try:
+        body = annotated.for_detection(session, det, None if download else w)
+    except ValueError as exc:
+        raise HTTPException(404, f"Frame indisponível: {exc}") from exc
+    if not download:
+        return Response(content=body, media_type="image/jpeg", headers=IMMUTABLE_CACHE)
+    job = session.get(Job, det.job_id)
+    filename = _download_name(det, job, "anotado.jpg")
+    _log_download(session, det, job, actor, "anotado", body, filename)
+    return Response(content=body, media_type="image/jpeg",
+                    headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+
+
 @router.get("/detections/{det_id}/{kind}")
 def detection_image(det_id: int, kind: str, session: SessionDep, actor: ActorDep, download: bool = False,
                     w: int | None = Query(None, description="Miniatura JPEG com esta largura (160 ou 360)"),
@@ -881,6 +897,8 @@ def detection_image(det_id: int, kind: str, session: SessionDep, actor: ActorDep
     det = session.get(Detection, det_id)
     if det is None or kind not in ("crop", "frame"):
         raise HTTPException(404, "Imagem não encontrada.")
+    if kind == "frame" and not annotated.stored_frame(det):  # gerado a pedido a partir do vídeo
+        return _generated_frame(session, det, actor, download, w)
     path = det.crop_path if kind == "crop" else det.frame_path
     if w is not None and not download and Path(path).exists():
         # crops/ e frames/ têm ficheiros com o mesmo nome: uma pasta de miniaturas para cada uma

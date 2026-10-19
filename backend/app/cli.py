@@ -12,6 +12,9 @@
   remove-originals [case_id] [--dry-run] [--yes]
                             apaga do servidor os originais já convertidos (cópia de análise sem perdas verificada);
                             fica o SHA-256 para os relacionar com o original guardado no suporte de origem
+  prune-frames [case_id] [--dry-run]
+                            apaga os frames anotados gravados por análises anteriores (regeneráveis a partir do
+                            vídeo: passam a ser gerados a pedido)
   sec-info <ficheiro.sec> [--extract <destino>]
                             mostra a estrutura de um ficheiro .sec de DVR (blocos, streams, cabeçalhos) e, com
                             --extract, grava o vídeo extraído (destino.mp4, ou destino.h264 sem ffmpeg)
@@ -203,6 +206,24 @@ def remove_originals(s: Session, case_id: int | None, dry_run: bool, yes: bool) 
     print(f"{removed} original(is) apagado(s).")
 
 
+def prune_frames(s: Session, case_id: int | None, dry_run: bool) -> None:
+    from .models import Case
+    from .services import storage
+
+    ids = [case_id] if case_id is not None else list(s.exec(select(Case.id).order_by(Case.id)))
+    total = 0
+    for cid in ids:
+        info = storage.case_storage(cid, fresh=True)
+        frames = next(c for c in info["categories"] if c["key"] == "frames")
+        if not frames["files"]:
+            continue
+        print(f"processo {cid}: {frames['files']} frame(s) anotado(s), {frames['bytes'] / 1e9:.2f} GB")
+        total += frames["bytes"]
+        if not dry_run:
+            storage.free(s, cid, ["frames"], actor=ACTOR)
+    print(f"{'Seriam libertados' if dry_run else 'Libertados'} {total / 1e9:.2f} GB.")
+
+
 def sec_info(file: str, extract: str | None) -> None:
     import json
 
@@ -237,6 +258,9 @@ def main(argv: list[str] | None = None) -> None:
     r.add_argument("case_id", nargs="?", type=int)
     r.add_argument("--dry-run", action="store_true", help="só lista o que seria apagado")
     r.add_argument("--yes", action="store_true", help="não pede confirmação")
+    pf = sub.add_parser("prune-frames")
+    pf.add_argument("case_id", nargs="?", type=int)
+    pf.add_argument("--dry-run", action="store_true")
     x = sub.add_parser("sec-info")
     x.add_argument("file")
     x.add_argument("--extract", metavar="DESTINO", help="grava o vídeo extraído (sem extensão)")
@@ -259,6 +283,8 @@ def main(argv: list[str] | None = None) -> None:
             verify_audit(s)
         elif args.cmd == "verify-evidence":
             verify_evidence(s, args.case_id)
+        elif args.cmd == "prune-frames":
+            prune_frames(s, args.case_id, args.dry_run)
         elif args.cmd == "remove-originals":
             remove_originals(s, args.case_id, args.dry_run, args.yes)
         elif args.cmd == "backup":

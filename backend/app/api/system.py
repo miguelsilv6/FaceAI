@@ -4,9 +4,10 @@ from fastapi import APIRouter, Depends
 
 from .. import __version__
 from ..schemas import JobParams
+from ..services import storage
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.face_engine import get_engine
-from .deps import get_current_user
+from .deps import AdminUser, SessionDep, get_current_user
 from .uploads import chunk_size
 
 router = APIRouter(prefix="/api", tags=["sistema"], dependencies=[Depends(get_current_user)])
@@ -34,3 +35,9 @@ def system_info() -> dict:
         "defaults": engine_defaults().model_dump(),
         "upload_chunk_bytes": chunk_size(),
     }
+
+
+@router.get("/system/storage")
+def system_storage(session: SessionDep, _: AdminUser) -> dict:
+    """Armazenamento global (administrador): disco, categorias, base de dados e processos maiores."""
+    return storage.global_storage(session)
