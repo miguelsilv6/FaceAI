@@ -51,6 +51,7 @@ export interface VideoExtraction {
   analysis_sha256: string;
   fps_assumed: boolean;
   packets: number; // remux: n.º de pacotes de vídeo (iguais aos do original)
+  original_kept_reason: string; // a verificação da cópia falhou: o original não foi removido
   suggested_fps?: { fps: number; rate: number; at: string };
   fps_history?: { from: number; to: number; source: string; reason: string; by: string; at: string }[];
 }

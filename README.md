@@ -258,12 +258,14 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
        - É preciso espaço livre no disco de cerca do tamanho do `.sec` (mais 200 MB) para a cópia de análise, que é gravada de uma só vez.
        - Se a extração falhar (por exemplo, falta de espaço), o vídeo fica com "extração falhou: motivo" e o original fica guardado. Pode usar-se **tentar de novo** depois de corrigir a causa. A falha fica na auditoria (`video.extraction_failed`).
      - **Remoção dos originais convertidos** (`FACEAI_REMOVE_ORIGINALS=1`, por omissão): para poupar espaço, o original é apagado do servidor depois de convertido. O SHA-256 do original, o tamanho e o nome ficam no vídeo, na auditoria (`video.original_removed`) e no relatório, para relacionar a cópia com o original. **O original deve continuar preservado no suporte de origem**, que é a evidência mestre.
-       - **Só se apaga com uma cópia de análise sem perdas e verificada:**
-         - **`.sec`:** a sequência H.264 é recalculada a partir da cópia e tem de ter o mesmo SHA-256 que a lida do original.
-         - **Outros formatos que o browser não abre** (`.dav`, `.avi` com MPEG-4/HEVC, …): é feito um remux sem recodificação (`-c copy`) para MKV. O hash dos pacotes de vídeo (`ffmpeg streamhash`) tem de ser igual ao do original.
+       - **Só se apaga com uma cópia de análise sem perdas e verificada.** A verificação compara as **fatias codificadas do vídeo** (NAL de imagem, VCL) e os parâmetros (SPS/PPS), e não os bytes do contentor. Num remux, os start codes, os AUD/SEI e a repetição dos parâmetros podem mudar, mas as fatias não; com as mesmas fatias e os mesmos parâmetros, os frames descodificados são os mesmos.
+         - **`.sec`:** a impressão das fatias é calculada a partir dos blocos do original e da cópia MP4, e tem de ser igual.
+         - **Outros formatos:** só há cópia se **o problema for apenas o contentor** (por exemplo, H.264 em `.dav`, `.avi` ou `.ts`). Nesse caso faz-se um remux sem recodificação para MP4, que o browser reproduz: **um único ficheiro**, sem original e sem cópia de reprodução. A verificação compara os pacotes de vídeo ou, se o contentor os mudar, as fatias.
+         - **Codecs que o browser não reproduz** (HEVC, MPEG-4, 10 bits): **não há cópia sem perdas**, porque ocuparia o mesmo que o original. O original é o ficheiro analisado e só se faz a cópia de reprodução.
 
-         A cópia de reprodução, que é recodificada, nunca é a analisada. Antes de apagar, o SHA-256 do original é confirmado de novo.
-       - Se alguma verificação falhar, o original fica e o motivo é registado (`video.original_kept`).
+         Antes de apagar, o SHA-256 do original é confirmado de novo.
+       - Se alguma verificação falhar, o original fica, com a etiqueta "original mantido" e o motivo na lista de vídeos, e o motivo é registado na auditoria (`video.original_kept`).
+       - **No arranque**, os vídeos que ainda têm o original e a cópia (versões anteriores) são verificados, e o original é removido se a verificação passar.
        - Os vídeos que o browser abre (MP4/WebM com H.264/VP9) não são convertidos e o original nunca é apagado.
        - **Reanexar:** reenviar o mesmo ficheiro (SHA-256 igual) volta a anexá-lo ao vídeo, sem o duplicar (`video.original_reattached`).
        - A correção do fps é feita a partir da cópia, por isso não precisa do original.

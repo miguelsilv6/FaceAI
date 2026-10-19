@@ -219,9 +219,21 @@ export default function ValidatedFramesPanel({ caseId, jobs, locations: caseLoca
   const itemJobs = useMemo(() => [...new Set([...(items ?? []).map((i) => i.job_id), ...(job ? [Number(job)] : [])])]
     .sort((a, b) => a - b), [items, job]);
   const hasSaved = (items ?? []).some((i) => i.type === "saved_frame");
-  const visible = (items ?? []).filter((i) => (loc === "all" || String(i.location_id) === loc)
+  const filtered = (items ?? []).filter((i) => (loc === "all" || String(i.location_id) === loc)
     && (!person || i.person_label === person) && (!job || String(i.job_id) === job)
     && (kind === "all" || i.type === kind));
+  // Com mais do que um local, as imagens aparecem divididas por local (pela ordem dos locais do processo)
+  const order = new Map(caseLocations.map((l, n) => [l.id, n]));
+  const groups = useMemo(() => {
+    const byLoc = new Map<number | null, ValidatedItem[]>();
+    for (const i of filtered) byLoc.set(i.location_id, [...(byLoc.get(i.location_id) ?? []), i]);
+    return [...byLoc.entries()]
+      .sort(([a], [b]) => (a == null ? 1e9 : order.get(a) ?? 1e8) - (b == null ? 1e9 : order.get(b) ?? 1e8))
+      .map(([id, list]) => ({ id, name: list[0].location_name || "Sem local", items: list }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, loc, person, job, kind, caseLocations]);
+  const grouped = groups.length > 1;
+  const visible = grouped ? groups.flatMap((g) => g.items) : filtered;
   const selectedSet = new Set(selected);
   const chosen = visible.filter((i) => selectedSet.has(keyOf(i)));
 
@@ -301,8 +313,19 @@ export default function ValidatedFramesPanel({ caseId, jobs, locations: caseLoca
         {" "}{chosen.length} selecionada(s). Clique numa imagem para a abrir. O ZIP leva o frame original (PNG, sem
         marcações) de cada imagem selecionada e o manifesto com SHA-256; o download fica na auditoria.
       </Text>
-      <SimpleGrid cols={{ base: 1, xs: 2, md: 3, xl: 4 }}>
-        {visible.map((i, idx) => {
+      {(grouped ? groups : [{ id: null, name: "", items: visible }]).map((g) => {
+        const offset = visible.indexOf(g.items[0]);
+        return (
+          <Stack key={String(g.id)} gap="xs" data-testid={grouped ? `validated-group-${g.id ?? "none"}` : undefined}>
+            {grouped && (
+              <Group gap="xs" mt="sm">
+                <Title order={6}>{g.name}</Title>
+                <Badge size="sm" variant="light">{g.items.length} imagem(ns)</Badge>
+              </Group>
+            )}
+            <SimpleGrid cols={{ base: 1, xs: 2, md: 3, xl: 4 }}>
+              {g.items.map((i, n) => {
+                const idx = offset + n;
           const k = keyOf(i);
           const on = selectedSet.has(k);
           const saved = i.type === "saved_frame";
@@ -353,7 +376,10 @@ export default function ValidatedFramesPanel({ caseId, jobs, locations: caseLoca
             </Card>
           );
         })}
-      </SimpleGrid>
+            </SimpleGrid>
+          </Stack>
+        );
+      })}
       {!visible.length && <Text size="sm" c="dimmed">Sem imagens validadas com estes filtros.</Text>}
       <PhotoViewer items={visible} index={viewing} onIndex={setViewing} onClose={() => setViewing(null)} />
     </Stack>

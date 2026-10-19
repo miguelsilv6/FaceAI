@@ -210,6 +210,71 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+class NalFingerprint:
+    """Impressão de uma sequência Annex B (H.264/HEVC) independente do contentor.
+
+    SHA-256 das NAL de imagem (VCL), pela ordem, e conjunto dos parâmetros (SPS/PPS/VPS). Um remux -c copy (ex.:
+    para MP4 e de volta a Annex B) pode mudar os start codes (3/4 bytes), os zeros de preenchimento, os AUD/SEI e a
+    repetição dos parâmetros, mas não as fatias codificadas: com as mesmas fatias e os mesmos parâmetros, os frames
+    descodificados são os mesmos."""
+
+    def __init__(self, codec: str = "h264") -> None:
+        self.hevc = codec in ("hevc", "h265")
+        self._vcl = hashlib.sha256()
+        self.vcl_nals = 0
+        self.params: set[str] = set()
+        self._buf = b""
+
+    def update(self, data: bytes) -> None:
+        buf = self._buf + data
+        starts, i = [], buf.find(b"\x00\x00\x01")
+        while i >= 0:
+            starts.append(i)
+            i = buf.find(b"\x00\x00\x01", i + 3)
+        if len(starts) < 2:
+            self._buf = buf
+            return
+        for a, b in zip(starts, starts[1:], strict=False):
+            self._nal(buf[a + 3:b])
+        self._buf = buf[starts[-1]:]
+
+    def _nal(self, nal: bytes) -> None:
+        nal = nal.rstrip(b"\x00")  # zeros entre NAL (e o 1.º zero dos start codes de 4 bytes)
+        if not nal:
+            return
+        kind = (nal[0] >> 1) & 0x3F if self.hevc else nal[0] & 0x1F
+        vcl = kind <= 31 if self.hevc else 1 <= kind <= 5
+        params = kind in (32, 33, 34) if self.hevc else kind in (7, 8)
+        if vcl:
+            self._vcl.update(len(nal).to_bytes(4, "big") + nal)
+            self.vcl_nals += 1
+        elif params:
+            self.params.add(hashlib.sha256(nal).hexdigest())
+
+    def result(self) -> dict[str, Any]:
+        if self._buf.startswith(b"\x00\x00\x01") or self._buf.startswith(b"\x00\x00\x00\x01"):
+            self._nal(self._buf[self._buf.find(b"\x00\x00\x01") + 3:])
+        self._buf = b""
+        return {"vcl_sha256": self._vcl.hexdigest(), "vcl_nals": self.vcl_nals, "param_sets": sorted(self.params)}
+
+
+def same_video(a: dict[str, Any], b: dict[str, Any]) -> bool:
+    return (a.get("vcl_sha256") == b.get("vcl_sha256") and a.get("vcl_nals") == b.get("vcl_nals")
+            and sorted(a.get("param_sets") or []) == sorted(b.get("param_sets") or []))
+
+
+def payload_fingerprint(src: str | Path) -> dict[str, Any]:
+    """Impressão do vídeo de um .sec, lida diretamente dos blocos do original (stream principal)."""
+    src = Path(src)
+    summary = inspect(src, sample=0)
+    if not summary["streams"]:
+        raise ValueError("ficheiro .sec sem blocos de vídeo H.264 reconhecíveis")
+    fp = NalFingerprint()
+    for _, payload in _main_payloads(src, summary["streams"][0]):
+        fp.update(payload)
+    return fp.result()
+
+
 class NoSpace(OSError):
     """Disco sem espaço para a cópia de trabalho (mensagem clara para o analista)."""
 
@@ -276,13 +341,14 @@ def extract(src: str | Path, dest_stem: Path, *, default_fps: float = 25.0, fps:
         fps, source = sps_fps, "SPS (VUI)"
     else:
         fps, source, assumed = default_fps, f"valor de recurso ({default_fps:g})", True
-    h = hashlib.sha256()
+    h, fp = hashlib.sha256(), NalFingerprint()
     counts = {"frames": 0, "keyframes": 0, "bytes": 0}
 
     def feed(out) -> None:
         for block, payload in _main_payloads(src, main, progress):
             out.write(payload)
             h.update(payload)
+            fp.update(payload)
             counts["frames"] += 1
             counts["keyframes"] += block.frame_type == 1
             counts["bytes"] += len(payload)
@@ -315,7 +381,7 @@ def extract(src: str | Path, dest_stem: Path, *, default_fps: float = 25.0, fps:
                 part.unlink(missing_ok=True)
                 err.seek(0)
                 info["remux_error"] = err.read().decode("utf-8", "replace")[-500:]
-                h, counts = hashlib.sha256(), {"frames": 0, "keyframes": 0, "bytes": 0}
+                h, fp, counts = hashlib.sha256(), NalFingerprint(), {"frames": 0, "keyframes": 0, "bytes": 0}
     if analysis is None:  # sem ffmpeg (ou o MP4 falhou): fica a sequência H.264 crua, que o OpenCV também lê
         raw = dest_stem.with_name(dest_stem.name + ".h264")
         with raw.open("wb") as out:
@@ -325,7 +391,7 @@ def extract(src: str | Path, dest_stem: Path, *, default_fps: float = 25.0, fps:
         "frames": counts["frames"], "keyframes": counts["keyframes"],
         "frames_before_first_keyframe": main["frames"] - counts["frames"],
         "width": main["width"], "height": main["height"],
-        "h264_sha256": h.hexdigest(), "h264_bytes": counts["bytes"],
+        "h264_sha256": h.hexdigest(), "h264_bytes": counts["bytes"], **fp.result(),
         "resyncs": summary["resyncs"], "skipped_bytes": summary["skipped_bytes"],
         "non_h264_blocks": summary["non_h264_blocks"],
         "streams": summary["streams"], "first_blocks": summary["first_blocks"],

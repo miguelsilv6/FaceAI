@@ -169,7 +169,8 @@ def remove_originals(s: Session, case_id: int | None, dry_run: bool, yes: bool) 
             continue
         if v.analysis_path:
             todo.append((v, "cópia de análise já existe"))
-        elif transcode.ffmpeg_available() and transcode.needs_playback_copy(v)[0]:
+        elif transcode.ffmpeg_available() and transcode.needs_playback_copy(v)[0] \
+                and originals.remux_worthwhile(Path(v.stored_path)):
             todo.append((v, "cria primeiro a cópia por remux sem perdas"))
     total = sum(v.size_bytes for v, _ in todo)
     for v, how in todo:

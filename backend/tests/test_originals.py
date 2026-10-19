@@ -73,7 +73,7 @@ def test_sec_original_removed_after_verified_extraction(client, sec_file, tmp_pa
     assert not Path(video.stored_path).exists() and Path(video.analysis_path).exists()
     ev = _events("video.original_removed")[0]
     assert ev["original_sha256"] == v["sha256"] and ev["original_size_bytes"] == sec_file.stat().st_size
-    assert ev["video_streamhash"] == video.analysis_streamhash
+    assert ev["video_fingerprint"] == video.analysis_streamhash == v["extraction"]["vcl_sha256"]
     job = _analyse(client, cid, tmp_path)
     assert job["status"] == "completed" and job["matches"] > 0
     from app.services.evidence import verify_video
@@ -83,6 +83,18 @@ def test_sec_original_removed_after_verified_extraction(client, sec_file, tmp_pa
     html = client.get(f"/api/jobs/{job['id']}/export/html").text
     assert "Original removido do servidor" in html
     assert client.post(f"/api/videos/{v['id']}/extract").status_code == 409  # não falhou (e não há original)
+
+
+def test_dvr_like_sec_original_is_removed(client, tmp_path, removing):
+    """Num DVR real a sequência H.264 não sobrevive byte a byte a MP4 → Annex B (AUD, start codes de 4 bytes, SPS/PPS
+    repetidos): a verificação compara as fatias codificadas (VCL) e os parâmetros, não os bytes do contentor."""
+    video = make_video(tmp_path / "v.mp4", [(0.5, 3.5, RED)], duration_s=4, fps=10)
+    sec = make_sec(tmp_path / "21000400.sec", video, channel=4, dvr_like=True)
+    cid = client.post("/api/cases", json={"name": "DVR"}).json()["id"]
+    v = wait_extracted(client, cid, _upload(client, cid, sec)["id"])
+    assert v["extraction_status"] == "ready" and v["original_removed_at"], _events("video.original_kept")
+    assert not Path(_video(v["id"]).stored_path).exists()
+    assert _analyse(client, cid, tmp_path)["matches"] > 0
 
 
 def test_fps_correction_without_original(client, sec_file, removing, monkeypatch):
@@ -98,7 +110,8 @@ def test_fps_correction_without_original(client, sec_file, removing, monkeypatch
     assert fixed["fps"] == 10 and fixed["duration_s"] == 4 and not fixed["extraction_error"]
     assert fixed["extraction"]["h264_sha256"] == v["extraction"]["h264_sha256"]
     copy = _video(v["id"]).analysis_path
-    assert probe(copy).frame_count == 40 and originals.annexb_sha256(copy)[0] == v["extraction"]["h264_sha256"]
+    assert probe(copy).frame_count == 40
+    assert originals.nal_fingerprint(copy)["vcl_sha256"] == v["extraction"]["vcl_sha256"]
 
 
 def test_reupload_reattaches_original(client, sec_file, removing):
@@ -115,27 +128,43 @@ def test_reupload_reattaches_original(client, sec_file, removing):
     assert r.status_code == 409
 
 
-def test_other_format_gets_lossless_remux_then_original_removed(client, tmp_path, removing):
-    avi = make_video(tmp_path / "cam.avi", [(0.5, 3.5, RED)], duration_s=4, fps=10)  # MPEG-4: o browser não abre
-    original_hash = originals.stream_hash(avi)
+def _h264(src: Path, dest: Path) -> Path:
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(src), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                    "-bf", "0", str(dest)], check=True)
+    return dest
+
+
+@pytest.mark.parametrize("ext", [".ts", ".avi"])
+def test_h264_in_other_container_becomes_single_mp4(client, tmp_path, removing, ext):
+    """Só o contentor não abre no browser: um MP4 sem perdas (verificado) substitui o original, sem cópia de
+    reprodução. No .ts o H.264 está em Annex B e os pacotes mudam de forma no MP4: verifica-se pelas fatias."""
+    src = _h264(make_video(tmp_path / "v.mp4", [(0.5, 3.5, RED)], duration_s=4, fps=10), tmp_path / f"cam{ext}")
     keep = client.post("/api/cases", json={"name": "Sem remoção"}).json()["id"]
-    base = _upload(client, keep, avi, "video/x-msvideo")  # com a remoção desligada para comparar
-    cid = client.post("/api/cases", json={"name": "Remux"}).json()["id"]
-    v = wait_extracted(client, cid, _upload(client, cid, avi, "video/x-msvideo")["id"])
-    video = _video(v["id"])
-    assert v["extraction"]["method"] == originals.REMUX_METHOD and video.analysis_path.endswith(".mkv")
-    assert originals.stream_hash(video.analysis_path) == original_hash  # os mesmos pacotes de vídeo
-    assert v["original_removed_at"] and not Path(video.stored_path).exists()
-    assert v["frame_count"] == base["frame_count"] and v["fps"] == base["fps"]
-    job = _analyse(client, cid, tmp_path)
-    assert job["matches"] > 0
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(originals, "enabled", lambda: False)
-        from app.services import transcode
+        base = _upload(client, keep, src, "video/mp2t")
+    cid = client.post("/api/cases", json={"name": "Remux"}).json()["id"]
+    v = wait_extracted(client, cid, _upload(client, cid, src, "video/mp2t")["id"])
+    video = _video(v["id"])
+    assert v["extraction"]["method"] == originals.REMUX_METHOD and video.analysis_path.endswith(".mp4")
+    assert v["original_removed_at"] and not Path(video.stored_path).exists(), _events("video.original_kept")
+    assert v["playback_status"] == "not_needed"  # o MP4 sem perdas já abre no browser: uma só cópia
+    assert v["frame_count"] == base["frame_count"]
+    job = _analyse(client, cid, tmp_path)
+    base_job = _analyse(client, keep, tmp_path)
+    assert job["matches"] > 0 and base_job["matches"] == job["matches"]
+    assert base_job["faces_detected"] == job["faces_detected"]
 
-        mp.setattr(transcode, "ffmpeg_available", lambda: False)
-        base_job = _analyse(client, keep, tmp_path)
-    assert base_job["matches"] == job["matches"] and base_job["faces_detected"] == job["faces_detected"]
+
+def test_codec_the_browser_cannot_play_is_not_copied(client, tmp_path, removing):
+    """MPEG-4/HEVC: uma cópia sem perdas ocuparia o mesmo que o original; fica o original (analisado) e só se faz
+    a cópia de reprodução."""
+    avi = make_video(tmp_path / "cam.avi", [(0.5, 1.5, RED)], duration_s=2, fps=10)  # MPEG-4 Part 2
+    cid = client.post("/api/cases", json={"name": "MPEG-4"}).json()["id"]
+    v = _upload(client, cid, avi, "video/x-msvideo")
+    assert v["extraction_status"] == "" and v["original_removed_at"] is None and not v["analysis_path"]
+    assert v["playback_status"] in ("pending", "running", "ready")
+    assert Path(_video(v["id"]).stored_path).exists()
 
 
 def test_browser_playable_mp4_is_never_removed(client, tmp_path, removing):
@@ -162,9 +191,9 @@ def test_cli_remove_originals(client, tmp_path, capsys, monkeypatch):
     from app import cli
     from app.services import transcode
 
-    avi = make_video(tmp_path / "old.avi", [(0.5, 1.5, RED)], duration_s=2, fps=10)
+    ts = _h264(make_video(tmp_path / "old.mp4", [(0.5, 1.5, RED)], duration_s=2, fps=10), tmp_path / "old.ts")
     cid = client.post("/api/cases", json={"name": "Antigos"}).json()["id"]
-    v = _upload(client, cid, avi, "video/x-msvideo")  # importado sem remoção (como nas versões anteriores)
+    v = _upload(client, cid, ts, "video/mp2t")  # importado sem remoção (como nas versões anteriores)
     monkeypatch.setattr(transcode, "ffmpeg_available", lambda: True)
     cli.main(["remove-originals", str(cid), "--dry-run"])
     assert "1 original(is)" in capsys.readouterr().out and Path(_video(v["id"]).stored_path).exists()
@@ -172,3 +201,41 @@ def test_cli_remove_originals(client, tmp_path, capsys, monkeypatch):
     assert "1 original(is) apagado(s)" in capsys.readouterr().out
     video = _video(v["id"])
     assert video.original_removed_at and not Path(video.stored_path).exists() and Path(video.analysis_path).exists()
+
+
+def test_existing_duplicates_cleaned_at_startup(client, sec_file, monkeypatch):
+    """Vídeos que ficaram com original e cópia (versão anterior, ou verificação antiga que falhava): no arranque
+    a cópia é verificada e o original removido; com FACEAI_REMOVE_ORIGINALS=0 nada é tocado."""
+    import app.db
+    from app.models import Video
+
+    cid = client.post("/api/cases", json={"name": "Antes"}).json()["id"]
+    v = wait_extracted(client, cid, _upload(client, cid, sec_file)["id"])  # remoção desligada (conftest)
+    with Session(app.db.get_engine()) as s:  # extração de uma versão anterior: sem a impressão das fatias
+        video = s.get(Video, v["id"])
+        video.extraction = {k: x for k, x in video.extraction.items()
+                            if k not in ("vcl_sha256", "vcl_nals", "param_sets")}
+        s.add(video)
+        s.commit()
+    assert originals.remove_pending() == 0 and Path(_video(v["id"]).stored_path).exists()
+    monkeypatch.setattr(originals, "enabled", lambda: True)
+    assert originals.remove_pending() == 1
+    video = _video(v["id"])
+    assert video.original_removed_at and not Path(video.stored_path).exists()
+
+
+def test_kept_original_shows_the_reason(client, sec_file, monkeypatch):
+    import app.db
+    from app.models import Video
+
+    cid = client.post("/api/cases", json={"name": "Motivo"}).json()["id"]
+    v = wait_extracted(client, cid, _upload(client, cid, sec_file)["id"])
+    with Session(app.db.get_engine()) as s:  # impressão registada que não corresponde à cópia
+        video = s.get(Video, v["id"])
+        video.extraction = {**video.extraction, "vcl_sha256": "0" * 64}
+        s.add(video)
+        s.commit()
+    monkeypatch.setattr(originals, "enabled", lambda: True)
+    assert originals.remove_pending() == 0
+    v = next(x for x in client.get(f"/api/cases/{cid}/videos").json() if x["id"] == v["id"])
+    assert "fatias" in v["extraction"]["original_kept_reason"] and v["original_removed_at"] is None

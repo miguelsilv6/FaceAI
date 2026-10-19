@@ -8,9 +8,10 @@ import { useNavigate } from "react-router-dom";
 
 import { api, formatBytes, formatTime } from "../api";
 import { notifyError, notifyOk } from "../notify";
-import { cameraName } from "../places";
+import { cameraName, locationAnalysis } from "../places";
+import AnalysisBadge from "./AnalysisBadge";
 import BulkImportModal from "./BulkImportModal";
-import type { EvidenceCheck, Location, Video } from "../types";
+import type { EvidenceCheck, Job, Location, Video } from "../types";
 import { usePolling } from "../usePolling";
 
 interface Props {
@@ -18,10 +19,11 @@ interface Props {
   videos: Video[];
   locations: Location[];
   onChange: () => void;
+  jobs?: Job[];
 }
 
 /** Locais do caso (estabelecimentos ou zonas de interesse). Os vídeos importam-se na página de cada local. */
-export default function VideosPanel({ caseId, videos, locations, onChange }: Props) {
+export default function VideosPanel({ caseId, videos, locations, onChange, jobs = [] }: Props) {
   const navigate = useNavigate();
   const [newName, setNewName] = useState<string | null>(null);
   const [bulk, setBulk] = useState(false);
@@ -174,6 +176,7 @@ export default function VideosPanel({ caseId, videos, locations, onChange }: Pro
                           leftSection={<IconClock size={10} />}>
                           hora real {synced}/{vs.length}
                         </Badge>
+                        <AnalysisBadge analysis={locationAnalysis(l.id, videos, jobs)} />
                         {working > 0 && (
                           <Group gap={4}><Loader size={10} /><Text size="xs" c="dimmed">a processar {working}</Text></Group>
                         )}

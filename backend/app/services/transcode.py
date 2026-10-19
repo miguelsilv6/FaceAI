@@ -134,6 +134,8 @@ def request_case_copies(s: Session, case_id: int, *, fmt: str = "mp4", actor: st
             continue
         if not Path(video.source_path).exists():
             continue
+        if fmt == "mp4" and not needs_playback_copy(video)[0]:
+            continue  # o browser já reproduz o original (ou a cópia de análise): não é precisa outra cópia
         request_playback_copy(s, video, force=True, actor=actor, fmt=fmt)
     return videos
 

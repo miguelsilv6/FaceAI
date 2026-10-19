@@ -214,8 +214,7 @@ def _finish(s: Session, video: Video, analysis: Path, info: dict[str, Any], seco
     if originals.enabled():  # antes de ficar "pronto": quem espera pelo vídeo vê já o estado final
         originals.remove_original(s, video)
     video.extraction_status, video.extraction_progress = READY, 1.0
-    s.add(video)
-    s.commit()
+    # gravado com a decisão da cópia de reprodução (quem espera por "pronto" já vê o estado da reprodução)
     request_playback_copy(s, video)
     request_auto_clock(s, video)
 

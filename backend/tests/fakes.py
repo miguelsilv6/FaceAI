@@ -180,10 +180,25 @@ def sec_block(payload: bytes, key: bool, width: int, height: int, seq: int, chan
     return bytes(head) + payload
 
 
+def dvr_style(payload: bytes, key: bool) -> bytes:
+    """Como os DVR reais: AUD no início de cada frame e start codes de 4 bytes em todas as NAL."""
+    nals, i = [], payload.find(b"\x00\x00\x01")
+    starts = []
+    while i >= 0:
+        starts.append(i)
+        i = payload.find(b"\x00\x00\x01", i + 3)
+    for a, b in zip(starts, [*starts[1:], len(payload)], strict=True):
+        nal = payload[a + 3:b]
+        nals.append(nal.rstrip(b"\x00") if b != len(payload) else nal)
+    aud = b"\x09\xf0" if key else b"\x09\x30"
+    return b"".join(b"\x00\x00\x00\x01" + n for n in [aud, *nals])
+
+
 def make_sec(path: Path, source: Path, *, sub_source: Path | None = None, garbage_after: int | None = None,
-             channel: int = 3) -> Path:
+             channel: int = 3, dvr_like: bool = False) -> Path:
     """Converte um vídeo num .sec sintético (H.264 por ffmpeg). sub_source: segundo stream (outra resolução)
-    intercalado; garbage_after: bytes corrompidos depois desse frame (para testar a ressincronização)."""
+    intercalado; garbage_after: bytes corrompidos depois desse frame (para testar a ressincronização);
+    dvr_like: SPS/PPS repetidos em cada frame-chave, AUD e start codes de 4 bytes (como num DVR real)."""
     import subprocess
 
     def encode(src: Path) -> tuple[list[tuple[bool, bytes]], int, int]:
@@ -191,9 +206,12 @@ def make_sec(path: Path, source: Path, *, sub_source: Path | None = None, garbag
         w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         cap.release()
         raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(src), "-c:v", "libx264", "-bf", "0", "-g", "10",
-                              "-x264-params", "slices=1:aud=0", "-pix_fmt", "yuv420p", "-f", "h264", "-"],
-                             check=True, capture_output=True).stdout
-        return h264_access_units(raw), w, h
+                              "-x264-params", "slices=1:aud=0" + (":repeat-headers=1" if dvr_like else ""),
+                              "-pix_fmt", "yuv420p", "-f", "h264", "-"], check=True, capture_output=True).stdout
+        units = h264_access_units(raw)
+        if dvr_like:
+            units = [(k, dvr_style(p, k)) for k, p in units]
+        return units, w, h
 
     main, w, h = encode(source)
     sub, sw, sh = encode(sub_source) if sub_source else ([], 0, 0)
