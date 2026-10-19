@@ -22,7 +22,7 @@ import SimilarModal, { type SimilarQuery } from "../components/SimilarModal";
 import TrackCard from "../components/TrackCard";
 import JobStatusBadge from "../components/JobStatusBadge";
 import Timeline from "../components/Timeline";
-import { notifyError, notifyOk } from "../notify";
+import { notifyError, notifyOk, notifyUndo } from "../notify";
 import { personColor } from "../personColors";
 import { usePolling } from "../usePolling";
 import { VIDEO_KEYS_HINT, useHtmlVideoKeys } from "../useVideoKeys";
@@ -216,6 +216,22 @@ export default function Results() {
     ?? (d.track_id != null ? trackById.get(d.track_id)?.person_id ?? null : null);
   const inPerson = (d: Detection) => personFilter == null || personOf(d) === personFilter;
   // Uma deteção conta como correspondência se estiver abaixo do limiar ou pertencer a um track com correspondência.
+  const [showRejected, setShowRejected] = useState(() => {
+    try {
+      return localStorage.getItem("faceai.showRejected") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggleRejected = (on: boolean) => {
+    setShowRejected(on);
+    try {
+      localStorage.setItem("faceai.showRejected", on ? "1" : "0");
+    } catch { /* sem armazenamento */ }
+  };
+  // Rejeitada na revisão: a própria deteção ou o track inteiro. Fica na BD e na auditoria, só deixa de se ver.
+  const isRejected = (d: Detection) => d.review_status === "rejected"
+    || (d.track_id != null && trackById.get(d.track_id)?.review_status === "rejected");
   const isEffectiveMatch = (d: Detection) => d.is_match || (d.track_id != null && !!trackById.get(d.track_id)?.is_match);
   const videoDets = useMemo(() => detections.filter((d) => d.video_id === videoId), [detections, videoId]);
   // Correspondências por vídeo (o mesmo critério dos contadores do cabeçalho; no modo descoberta, todas as faces)
@@ -248,31 +264,33 @@ export default function Results() {
   // Grelhas grandes (milhares de cartões, cada um com imagens): mostram-se por páginas.
   const [limit, setLimit] = useState(PAGE);
   useEffect(() => setLimit(PAGE),
-    [view, videoId, trackFilter, personFilter, minSim, showCandidates, order, evidenceFilter, locFilter]);
+    [view, videoId, trackFilter, personFilter, minSim, showCandidates, order, evidenceFilter, locFilter, showRejected]);
   const visible = useMemo(() => {
-    const list = videoDets.filter((d) => (trackFilter == null || d.track_id === trackFilter) && (discover
+    const list = videoDets.filter((d) => (trackFilter == null || d.track_id === trackFilter)
+      && (showRejected || !isRejected(d)) && (discover
       ? inPerson(d)
       : (showCandidates || trackFilter != null || isEffectiveMatch(d)) && d.similarity >= minSim && inPerson(d)));
     if (order === "score") return [...list].sort((a, b) => b.similarity - a.similarity);
     if (order === "quality") return [...list].sort((a, b) => b.quality - a.quality);
     return list;
-  }, [videoDets, showCandidates, minSim, order, trackFilter, trackById, discover, personFilter]);
+  }, [videoDets, showCandidates, minSim, order, trackFilter, trackById, discover, personFilter, showRejected]);
   const visibleTracks = useMemo(() => {
-    const list = tracks.filter((t) => t.video_id === videoId && (discover
+    const list = tracks.filter((t) => t.video_id === videoId && (showRejected || t.review_status !== "rejected") && (discover
       ? personFilter == null || t.person_id === personFilter
       : (showCandidates || t.is_match) && 1 - t.track_distance >= minSim
         && (personFilter == null || t.person_id === personFilter)));
     if (order === "score") return [...list].sort((a, b) => (discover ? b.n_faces - a.n_faces : a.track_distance - b.track_distance));
     if (order === "quality") return [...list].sort((a, b) => b.best_quality - a.best_quality);
     return list;
-  }, [tracks, videoId, showCandidates, minSim, order, discover, personFilter]);
+  }, [tracks, videoId, showCandidates, minSim, order, discover, personFilter, showRejected]);
   const visiblePersons = useMemo(() => {
+    const shown = showRejected ? persons : persons.filter((p) => p.review_status !== "rejected");
     if (order === "time") {
-      return [...persons].sort((a, b) => a.first.video_id - b.first.video_id || a.first.start_s - b.first.start_s);
+      return [...shown].sort((a, b) => a.first.video_id - b.first.video_id || a.first.start_s - b.first.start_s);
     }
-    if (order === "quality") return [...persons].sort((a, b) => b.best_quality - a.best_quality);
-    return persons; // por omissão: a pessoa 1 é a que mais aparece
-  }, [persons, order]);
+    if (order === "quality") return [...shown].sort((a, b) => b.best_quality - a.best_quality);
+    return shown; // por omissão: a pessoa 1 é a que mais aparece
+  }, [persons, order, showRejected]);
   const hasTracks = tracks.length > 0;
   const showPersons = discover && view === "persons" && trackFilter == null;
   const showTracks = hasTracks && view === "tracks" && trackFilter == null;
@@ -280,14 +298,19 @@ export default function Results() {
   const videoSegments = segments.filter((s) => s.video_id === videoId
     && (personFilter == null || s.person_id === personFilter)
     && (evidenceFilter === "all" || (s.evidence ?? "face").includes(evidenceFilter)));
-  const sortedBodyTracks = useMemo(() => [...bodyTracks].sort((a, b) =>
+  const sortedBodyTracks = useMemo(() => bodyTracks.filter((t) => showRejected || t.review_status !== "rejected").sort((a, b) =>
     Number(a.evidence !== "vestuário") - Number(b.evidence !== "vestuário") || a.video_id - b.video_id
-    || a.start_s - b.start_s), [bodyTracks]);
+    || a.start_s - b.start_s), [bodyTracks, showRejected]);
   const seekBody = (t: Track) => {
     if (t.video_id !== videoId) setVideoId(t.video_id);
     setTimeout(() => seek(t.start_s), 0);
   };
   const videoById = useMemo(() => new Map(videos.map((v) => [v.id, v])), [videos]);
+  // Rejeitadas ocultas na vista atual (para o interruptor "Mostrar rejeitadas").
+  const rejectedHere = view === "clothing" ? bodyTracks.filter((t) => t.review_status === "rejected").length
+    : showPersons ? persons.filter((p) => p.review_status === "rejected").length
+    : showTracks ? tracks.filter((t) => t.video_id === videoId && t.review_status === "rejected").length
+    : videoDets.filter((d) => (trackFilter == null || d.track_id === trackFilter) && isRejected(d)).length;
 
   // Guarda o frame do vídeo original no instante atual do leitor (vai para os Resultados do caso).
   const saveFrame = async () => {
@@ -316,6 +339,9 @@ export default function Results() {
       const updated = await api.review(det.id, status);
       setDetections((ds) => ds.map((d) => (d.id === updated.id ? updated : d)));
       api.segments(jobId).then(setSegments);
+      if (status === "rejected" && !showRejected) {
+        notifyUndo(`${discover ? "Face" : "Deteção"} rejeitada.`, () => void review(updated, det.review_status));
+      }
     } catch (e) {
       notifyError(e);
     }
@@ -337,6 +363,9 @@ export default function Results() {
     try {
       await api.reviewPerson(jobId, p.person_id, status);
       loadResults();
+      if (status === "rejected" && !showRejected) {
+        notifyUndo(`Pessoa #${p.person_id} rejeitada.`, () => void reviewPerson(p, "pending"));
+      }
     } catch (e) {
       notifyError(e);
     }
@@ -416,6 +445,9 @@ export default function Results() {
       const updated = await api.reviewTrack(track.id, status);
       setTracks((ts) => ts.map((t) => (t.id === updated.id ? updated : t)));
       loadResults();
+      if (status === "rejected" && !showRejected) {
+        notifyUndo(`Track #${track.id} rejeitado.`, () => void reviewTrack(updated, track.review_status));
+      }
     } catch (e) {
       notifyError(e);
     }
@@ -606,7 +638,7 @@ export default function Results() {
                 )}
                 <LiveTimeline videoRef={videoRef} videoKey={`${video.id}-${video.playback_status}-${video.playback_format}-${converting}`}
                   duration={video.duration_s} segments={videoSegments}
-                  detections={discover ? videoDets.filter(inPerson) : videoDets.filter(isEffectiveMatch)}
+                  detections={videoDets.filter((d) => !isRejected(d) && (discover ? inPerson(d) : isEffectiveMatch(d)))}
                   realTime={video.dvr_start ? (sec) => realTime(video, sec) : undefined} onSeek={seek} />
                 {!converting && (
                   <Group justify="space-between" wrap="wrap" gap="xs">
@@ -681,10 +713,10 @@ export default function Results() {
             {(hasTracks || clothing) && (
               <SegmentedControl size="xs" value={view}
                 onChange={(v) => { setView(v as "persons" | "tracks" | "detections" | "clothing"); setTrackFilter(null); }}
-                data={[...(discover ? [{ value: "persons", label: `Pessoas (${persons.length})` }] : []),
+                data={[...(discover ? [{ value: "persons", label: `Pessoas (${visiblePersons.length})` }] : []),
                   { value: "tracks", label: `Tracks (${visibleTracks.length})` },
                   { value: "detections", label: discover ? "Faces" : "Deteções" },
-                  ...(clothing ? [{ value: "clothing", label: `Vestuário (${bodyTracks.filter((t) => t.evidence === "vestuário").length})` }] : [])]} />
+                  ...(clothing ? [{ value: "clothing", label: `Vestuário (${sortedBodyTracks.filter((t) => t.evidence === "vestuário").length})` }] : [])]} />
             )}
             {!showTracks && !showPersons && view !== "clothing" && <Text fw={600}>{discover ? "Faces" : "Deteções"} ({visible.length})</Text>}
             {searched.length > 0 && view !== "clothing" && (
@@ -719,6 +751,10 @@ export default function Results() {
                 <Switch label="Mostrar candidatos abaixo do limiar" checked={showCandidates}
                   onChange={(e) => setShowCandidates(e.currentTarget.checked)} />
               </>
+            )}
+            {(rejectedHere > 0 || showRejected) && (
+              <Switch label={`Mostrar rejeitadas (${rejectedHere})`} checked={showRejected}
+                onChange={(e) => toggleRejected(e.currentTarget.checked)} />
             )}
             <SegmentedControl size="xs" value={order} onChange={(v) => setOrder(v as "time" | "score" | "quality")}
               data={[{ value: "time", label: "Tempo" }, { value: "score", label: discover ? "Presença" : "Semelhança" },
