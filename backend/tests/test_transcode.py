@@ -170,12 +170,16 @@ def test_case_wide_copies_and_delete_while_converting(client, tmp_path, with_ffm
     a = _upload(client, _h264(tmp_path / "a.mp4"), "a.mp4")
     b = _upload(client, _h264(tmp_path / "b.mp4", duration_s=2.5), "b.mp4")  # ficheiro distinto do "a"
     assert a["playback_status"] == b["playback_status"] == "not_needed"
+    # H.264/MP4 que o browser já reproduz: uma cópia MP4 não é necessária (as conversões só se fazem se precisas)
     r = client.post("/api/cases/1/playback", params={"format": "mp4"})
+    assert r.status_code == 200 and {v["playback_status"] for v in r.json()} == {"not_needed"}
+    # Browser sem H.264 (ex.: alguns Linux): cópias VP9/WebM de todos os vídeos
+    r = client.post("/api/cases/1/playback", params={"format": "webm"})
     assert r.status_code == 200 and {v["playback_status"] for v in r.json()} <= {"pending", "running", "ready"}
     for vid in (a["id"], b["id"]):
         assert _wait_status(client, vid, {"ready", "failed"})["playback_status"] == "ready"
     # Repetir não volta a converter os que já têm a cópia neste formato.
-    again = client.post("/api/cases/1/playback", params={"format": "mp4"}).json()
+    again = client.post("/api/cases/1/playback", params={"format": "webm"}).json()
     assert {v["playback_status"] for v in again} == {"ready"}
 
     # Conversão longa em curso + caso eliminado: o ffmpeg é cancelado e nada é recriado na pasta do caso.

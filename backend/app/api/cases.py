@@ -195,8 +195,8 @@ def register_video(session, case_id: int, path: Path, filename: str, size: int, 
               details={**video.model_dump(mode="json", exclude=PATH_FIELDS | {"extraction"}),
                        "location_name": loc.name})
     if not extracted and originals.enabled() and transcode.ffmpeg_available() \
-            and transcode.needs_playback_copy(video)[0]:
-        extracted = True  # formato que o browser não abre: cópia de análise sem perdas (remux) e o original sai
+            and transcode.needs_playback_copy(video)[0] and originals.remux_worthwhile(path):
+        extracted = True  # só o contentor não abre no browser: um MP4 sem perdas substitui o original
     if extracted:  # a cópia de reprodução e a leitura da hora são pedidas quando a cópia de análise estiver feita
         sec_extract.request_extraction(session, video)
         session.refresh(video)

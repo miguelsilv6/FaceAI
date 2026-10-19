@@ -31,6 +31,7 @@ from .services.face_engine import preload_models
 from .services.hashing import start_backfill
 from .services.jobs import acquire_runner_lock, recover_interrupted_jobs, release_runner_lock, runner
 from .services.locations import migrate_locations
+from .services.originals import start_pending_removal
 from .services.references import migrate_person_labels
 from .services.relocate import relocate_data_dir
 from .services.sec_extract import start_resume_pending_extractions
@@ -59,6 +60,7 @@ async def lifespan(_: FastAPI):
         start_periodic_cleanup()
         start_resume_pending_copies()
         start_resume_pending_extractions()
+        start_pending_removal()
         resume_pending_auto_clock()
         start_backfill()
     preload_models()
