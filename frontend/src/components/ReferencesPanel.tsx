@@ -3,8 +3,11 @@ import {
   Title, Tooltip,
 } from "@mantine/core";
 import { Dropzone, IMAGE_MIME_TYPE } from "@mantine/dropzone";
-import { IconDots, IconHelp, IconPhoto, IconPhotoPlus, IconPlus, IconTrash, IconUser, IconUsersGroup } from "@tabler/icons-react";
-import { useState, type DragEvent } from "react";
+import {
+  IconChevronLeft, IconChevronRight, IconDots, IconHelp, IconPhoto, IconPhotoPlus, IconPlus, IconTrash, IconUser,
+  IconUsersGroup,
+} from "@tabler/icons-react";
+import { useEffect, useState, type DragEvent } from "react";
 
 import { api } from "../api";
 import { notifyError, notifyOk } from "../notify";
@@ -76,8 +79,11 @@ export default function ReferencesPanel({ caseId, references, persons, onChange 
   });
 
   const loose = references.filter((r) => r.case_person_id == null);
+  // Foto em tamanho grande (clicar na miniatura); ← / → percorrem as fotos do mesmo grupo (pessoa ou soltas)
+  const [viewing, setViewing] = useState<ReferenceImage | null>(null);
+  const siblings = viewing ? references.filter((r) => r.case_person_id === viewing.case_person_id) : [];
   const thumb = (r: ReferenceImage) => (
-    <RefThumb key={r.id} reference={r} persons={persons} onMove={move}
+    <RefThumb key={r.id} reference={r} persons={persons} onMove={move} onOpen={setViewing}
       onSearch={(ref) => setSearch({ kind: "reference", id: ref.id, name: ref.filename })}
       onDelete={(ref) => act(() => api.deleteReference(ref.id))} />
   );
@@ -156,23 +162,78 @@ export default function ReferencesPanel({ caseId, references, persons, onChange 
       </Card>
 
       <SimilarModal query={search} defaultThreshold={0.5} onClose={() => setSearch(null)} />
+      <RefViewer reference={viewing} siblings={siblings} persons={persons} onShow={setViewing}
+        onClose={() => setViewing(null)} />
       <PersonModal caseId={caseId} person={editing} onClose={() => setEditing(null)}
         onSaved={() => { setEditing(null); onChange(); }} />
     </Stack>
   );
 }
 
-function RefThumb({ reference: r, persons, onMove, onSearch, onDelete }: {
+/** Foto de referência em tamanho grande (imagem completa) e o recorte da face usado na comparação. */
+function RefViewer({ reference: r, siblings, persons, onShow, onClose }: {
+  reference: ReferenceImage | null; siblings: ReferenceImage[]; persons: CasePerson[];
+  onShow: (r: ReferenceImage) => void; onClose: () => void;
+}) {
+  const index = r ? siblings.findIndex((x) => x.id === r.id) : -1;
+  const go = (d: number) => {
+    if (index < 0 || siblings.length < 2) return;
+    onShow(siblings[(index + d + siblings.length) % siblings.length]);
+  };
+  useEffect(() => {
+    if (!r) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowRight") { e.preventDefault(); go(1); }
+      if (e.key === "ArrowLeft") { e.preventDefault(); go(-1); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  const owner = r?.case_person_id != null ? persons.find((p) => p.id === r.case_person_id)?.name
+    : persons.length ? "Fotos soltas" : "Fotos da pessoa a procurar";
+  return (
+    <Modal opened={!!r} onClose={onClose} size="xl" centered
+      title={r ? `${owner ?? ""} · ${r.filename}${siblings.length > 1 ? ` (${index + 1}/${siblings.length})` : ""}` : ""}>
+      {r && (
+        <Stack gap="xs">
+          <Group align="flex-start" wrap="nowrap" gap="sm">
+            <Image src={api.referenceImageUrl(r.id)} alt={r.filename} mah="70vh" fit="contain" bg="black" radius="sm"
+              style={{ flex: 1, minWidth: 0 }} data-testid="reference-large" />
+            {r.face_crop_path && (
+              <Stack gap={4} w={160}>
+                <Image src={api.referenceImageUrl(r.id, true)} alt="Recorte da face" w={160} radius="sm" />
+                <Text size="xs" c="dimmed" ta="center">face usada na comparação</Text>
+              </Stack>
+            )}
+          </Group>
+          <Group justify="space-between">
+            <Badge color={r.valid ? "green" : "red"} variant="light">
+              {r.valid ? "Válida" : `Inválida: ${r.message || `${r.face_count} faces`}`}
+            </Badge>
+            {siblings.length > 1 && (
+              <Group gap="xs">
+                <ActionIcon variant="default" aria-label="Foto anterior" onClick={() => go(-1)}><IconChevronLeft size={16} /></ActionIcon>
+                <ActionIcon variant="default" aria-label="Foto seguinte" onClick={() => go(1)}><IconChevronRight size={16} /></ActionIcon>
+              </Group>
+            )}
+          </Group>
+        </Stack>
+      )}
+    </Modal>
+  );
+}
+
+function RefThumb({ reference: r, persons, onMove, onSearch, onDelete, onOpen }: {
   reference: ReferenceImage; persons: CasePerson[];
   onMove: (refId: number, personId: number | null) => void; onSearch: (r: ReferenceImage) => void;
-  onDelete: (r: ReferenceImage) => void;
+  onDelete: (r: ReferenceImage) => void; onOpen: (r: ReferenceImage) => void;
 }) {
   return (
     <Card withBorder padding={4} draggable onDragStart={(e) => {
       e.dataTransfer.setData(DRAG_TYPE, String(r.id));
       e.dataTransfer.effectAllowed = "move";
     }} style={{ cursor: "grab" }}>
-      <Card.Section>
+      <Card.Section style={{ cursor: "zoom-in" }} onClick={() => onOpen(r)} title="Abrir a foto em tamanho grande">
         <Image loading="lazy" decoding="async" src={api.referenceImageUrl(r.id, !!r.face_crop_path)} h={110} fit="cover" alt={r.filename} draggable={false} />
       </Card.Section>
       <Group justify="space-between" mt={4} gap={2} wrap="nowrap">

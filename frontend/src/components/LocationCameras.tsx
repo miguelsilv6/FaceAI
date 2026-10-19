@@ -5,10 +5,12 @@ import {
   IconArrowsExchange, IconCheck, IconClock, IconDatabase, IconDots, IconMapPin, IconMovie, IconPencil, IconPlayerPlay, IconTrash, IconX,
 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
-import { api, formatBytes, formatTime, realTime } from "../api";
+import { api, formatBytes, formatDate, formatTime, realTime } from "../api";
 import { notifyError, notifyOk } from "../notify";
-import { cameraName } from "../places";
+import { cameraName, locationAnalysis, type LocationAnalysis, videoAnalyses } from "../places";
+import AnalysisBadge from "./AnalysisBadge";
 import type { Job, Location, Video } from "../types";
 import { usePolling } from "../usePolling";
 import ClockModal from "./ClockModal";
@@ -80,8 +82,9 @@ function CameraNameInput({ video, onSaved }: { video: Video; onSaved: () => void
 }
 
 /** Cabeçalho de um local: nome (editável), n.º de câmaras e eliminação (só vazio). */
-function LocationHeader({ location, cameras, duration, onChange, onDeleted }: {
-  location: Location; cameras: number; duration: number; onChange: () => void; onDeleted: () => void;
+function LocationHeader({ location, cameras, duration, analysis, onChange, onDeleted }: {
+  location: Location; cameras: number; duration: number; analysis: LocationAnalysis; onChange: () => void;
+  onDeleted: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(location.name);
@@ -128,6 +131,7 @@ function LocationHeader({ location, cameras, duration, onChange, onDeleted }: {
         )}
         <Badge variant="light">{cameras} vídeo{cameras === 1 ? "" : "s"}</Badge>
         {cameras > 0 && <Text size="xs" c="dimmed">{formatTime(duration)} de vídeo</Text>}
+        <AnalysisBadge analysis={analysis} size="sm" />
         {cameras > 0 && (
           <Tooltip label={`Originais ${formatBytes(location.originals_bytes)} · cópias de análise e reprodução ${formatBytes(location.playback_bytes)}`}>
             <Badge variant="default" leftSection={<IconDatabase size={12} />}>{formatBytes(location.size_bytes)} em disco</Badge>
@@ -152,6 +156,7 @@ export default function LocationCameras({ caseId, location, videos, locations, j
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [fpsVideo, setFpsVideo] = useState<Video | null>(null);
   const [duplicates, setDuplicates] = useState<{ file: string; message: string }[]>([]);
+  const navigate = useNavigate();
   const vs = videos.filter((v) => v.location_id === location.id);
 
   // Atualiza o estado das conversões para o browser (e da leitura da hora por OCR) enquanto decorrem.
@@ -209,7 +214,7 @@ export default function LocationCameras({ caseId, location, videos, locations, j
   return (
     <Stack>
       <LocationHeader location={location} cameras={vs.length} duration={vs.reduce((n, v) => n + v.duration_s, 0)}
-        onChange={onChange} onDeleted={onDeleted} />
+        analysis={locationAnalysis(location.id, videos, jobs)} onChange={onChange} onDeleted={onDeleted} />
       <UploadZone accept={VIDEO_ACCEPT} onDrop={upload} progress={progress}
         icon={<IconMovie size={40} stroke={1.5} />}
         title={`Importar vídeos de CCTV para "${location.name}"`}
@@ -231,7 +236,7 @@ export default function LocationCameras({ caseId, location, videos, locations, j
             <Table>
               <Table.Thead>
                 <Table.Tr><Table.Th>#</Table.Th><Table.Th>Vídeo</Table.Th><Table.Th>Tamanho</Table.Th>
-                  <Table.Th>Duração</Table.Th><Table.Th>FPS</Table.Th><Table.Th>Resolução</Table.Th><Table.Th>Codec</Table.Th><Table.Th>Reprodução no browser</Table.Th><Table.Th>Hora real</Table.Th><Table.Th /></Table.Tr>
+                  <Table.Th>Duração</Table.Th><Table.Th>FPS</Table.Th><Table.Th>Resolução</Table.Th><Table.Th>Codec</Table.Th><Table.Th>Reprodução no browser</Table.Th><Table.Th>Hora real</Table.Th><Table.Th>Análises</Table.Th><Table.Th /></Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {vs.map((v) => (
@@ -284,6 +289,12 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                           <Badge size="xs" variant="light" color="gray">original removido</Badge>
                         </Tooltip>
                       )}
+                      {!v.original_removed_at && v.extraction?.original_kept_reason && (
+                        <Tooltip multiline w={320} label={`O original não foi removido porque a verificação da cópia falhou:
+                          ${v.extraction.original_kept_reason}. A análise usa a cópia; o original fica no servidor.`}>
+                          <Badge size="xs" variant="light" color="orange">original mantido</Badge>
+                        </Tooltip>
+                      )}
                       {(v.extraction_status === "ready" || !v.extraction_status) && v.extraction_error && (
                         <Text size="xs" c="orange" maw={260}>{v.extraction_error}</Text>
                       )}
@@ -332,6 +343,17 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                       ) : <Text size="xs" c="dimmed">não acertada</Text>}
                       <Button size="compact-xs" variant="subtle" leftSection={<IconClock size={14} />} mt={4}
                         onClick={() => setClockVideo(v)}>Acertar hora</Button>
+                    </Table.Td>
+                    <Table.Td>
+                      <Group gap={4}>
+                        {videoAnalyses(v.id, jobs).map((j) => (
+                          <Tooltip key={j.id} label={`Abrir os resultados da análise #${j.id} (${formatDate(j.finished_at)})`}>
+                            <Badge size="xs" variant="light" color="teal" style={{ cursor: "pointer" }}
+                              onClick={() => navigate(`/jobs/${j.id}?video=${v.id}`)}>#{j.id}</Badge>
+                          </Tooltip>
+                        ))}
+                        {!videoAnalyses(v.id, jobs).length && <Text size="xs" c="dimmed">por analisar</Text>}
+                      </Group>
                     </Table.Td>
                     <Table.Td w={40}>
                       <Menu position="bottom-end" withinPortal>
