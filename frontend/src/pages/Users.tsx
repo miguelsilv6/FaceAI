@@ -3,13 +3,14 @@ import {
 } from "@mantine/core";
 import { IconDots, IconUserPlus } from "@tabler/icons-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
-import { Navigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router-dom";
 
-import { formatDate, usersApi } from "../api";
+import { api, formatBytes, formatDate, usersApi } from "../api";
 import { useAuth } from "../auth";
 import AuditPanel from "../components/AuditPanel";
+import { StorageBar, STORAGE_COLORS } from "../components/StoragePanel";
 import { notifyError, notifyOk } from "../notify";
-import type { AuditEvent, UserAccount, UserRole } from "../types";
+import type { AuditEvent, SystemStorage, UserAccount, UserRole } from "../types";
 
 const ROLE_LABEL: Record<UserRole, string> = { admin: "Administrador", analyst: "Analista" };
 
@@ -49,6 +50,7 @@ export default function Users() {
         <Tabs.List>
           <Tabs.Tab value="users">Contas</Tabs.Tab>
           <Tabs.Tab value="audit">Auditoria do sistema</Tabs.Tab>
+          <Tabs.Tab value="storage">Armazenamento</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="users" pt="md">
           <Card withBorder p={0}>
@@ -116,6 +118,9 @@ export default function Users() {
         </Tabs.Panel>
         <Tabs.Panel value="audit" pt="md">
           <AuditPanel events={audit} />
+        </Tabs.Panel>
+        <Tabs.Panel value="storage" pt="md">
+          <SystemStoragePanel />
         </Tabs.Panel>
       </Tabs>
       <CreateUserModal opened={creating} onClose={() => setCreating(false)} onCreated={load} />
@@ -188,5 +193,65 @@ function CreateUserModal({ opened, onClose, onCreated }: {
         </Stack>
       </form>
     </Modal>
+  );
+}
+
+/** Disco do servidor, totais por categoria e processos que mais ocupam. */
+function SystemStoragePanel() {
+  const navigate = useNavigate();
+  const [data, setData] = useState<SystemStorage | null>(null);
+  useEffect(() => {
+    api.systemStorage().then(setData).catch(notifyError);
+  }, []);
+  if (!data) return <Text size="sm" c="dimmed">A calcular…</Text>;
+  const d = data.disk;
+  const total = data.categories.reduce((a, c) => a + c.bytes, 0);
+  const regen = data.categories.filter((c) => c.regenerable).reduce((a, c) => a + c.bytes, 0);
+  return (
+    <Stack>
+      <Card withBorder>
+        <Group justify="space-between" mb="xs">
+          <Title order={5}>Disco</Title>
+          <Badge color={d.level === "ok" ? "green" : d.level === "warning" ? "orange" : "red"}>
+            {d.percent.toFixed(0)}% usado</Badge>
+        </Group>
+        <Text size="sm">{formatBytes(d.free)} livres{d.total ? ` de ${formatBytes(d.total)}` : ""}</Text>
+        <Text size="sm" c="dimmed" mb="xs">
+          Processos: {formatBytes(total)} ({formatBytes(regen)} regenerável) · base de dados {formatBytes(data.system.database)}
+          {" "}· auditoria {formatBytes(data.system.audit_log)} · uploads em curso {formatBytes(data.system.uploads_in_progress)}
+        </Text>
+        <StorageBar categories={data.categories} total={total} />
+        <Group gap="md" mt="xs">
+          {data.categories.filter((c) => c.bytes).map((c) => (
+            <Group key={c.key} gap={4}>
+              <div style={{ width: 10, height: 10, borderRadius: 2,
+                background: `var(--mantine-color-${STORAGE_COLORS[c.key].replace(".", "-")})` }} />
+              <Text size="xs">{c.label}: {formatBytes(c.bytes)}</Text>
+            </Group>
+          ))}
+        </Group>
+      </Card>
+      <Card withBorder p={0}>
+        <Table.ScrollContainer minWidth={520}>
+          <Table striped highlightOnHover>
+            <Table.Thead>
+              <Table.Tr><Table.Th>Processo</Table.Th><Table.Th ta="right">Total</Table.Th>
+                <Table.Th ta="right">Regenerável</Table.Th></Table.Tr>
+            </Table.Thead>
+            <Table.Tbody>
+              {data.cases.map((c) => (
+                <Table.Tr key={c.case_id} style={{ cursor: "pointer" }} onClick={() => navigate(`/cases/${c.case_id}`)}>
+                  <Table.Td>#{c.case_id} · {c.name}</Table.Td>
+                  <Table.Td ta="right" ff="monospace">{formatBytes(c.total_bytes)}</Table.Td>
+                  <Table.Td ta="right" ff="monospace">{formatBytes(c.regenerable_bytes)}</Table.Td>
+                </Table.Tr>
+              ))}
+            </Table.Tbody>
+          </Table>
+        </Table.ScrollContainer>
+      </Card>
+      <Text size="xs" c="dimmed">Para libertar espaço regenerável, abra o processo (painel → Armazenamento) ou use
+        {" "}<code>python -m app.cli prune-frames</code>.</Text>
+    </Stack>
   );
 }

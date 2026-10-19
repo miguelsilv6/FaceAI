@@ -149,7 +149,7 @@ export default function CaseView() {
           <Tabs.Tab value="audit" leftSection={<IconHistory size={16} />}>Auditoria</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="dashboard" pt="md">
-          <CaseDashboard caseId={caseId} jobs={jobs} onOpenTab={setTab} />
+          <CaseDashboard caseId={caseId} jobs={jobs} onOpenTab={setTab} canManage={canManage} />
         </Tabs.Panel>
         <Tabs.Panel value="references" pt="md">
           <ReferencesPanel caseId={caseId} references={references} persons={persons} onChange={reload} />

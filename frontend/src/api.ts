@@ -1,5 +1,5 @@
 import type {
-  CaseDashboard,
+  CaseDashboard, CaseStorage, StorageKey, SystemStorage,
   Activity, AuditChainCheck, EvidenceCheck, ServerImportScan, ServerImportState, CasePerson, Location, PersonAlert, ValidatedItem, CaseRoute, SimilarResult, AuditEvent, AuthState, Case, CaseMember, Detection, MfaSetup, UserAccount, UserRole, UserSessionInfo, Job, JobParams, OcrTest, Person, ReferenceImage, ReviewStatus, Segment, SystemInfo,
   Track, Video, VideoProbe,
 } from "./types";
@@ -286,6 +286,12 @@ export const api = {
     request<SimilarResult>("GET", `/api/case-persons/${id}/search?scope=${scope}${threshold != null ? `&threshold=${threshold}` : ""}`),
   searchReference: (id: number, scope: "all" | "case", threshold?: number) =>
     request<SimilarResult>("GET", `/api/references/${id}/search?scope=${scope}${threshold != null ? `&threshold=${threshold}` : ""}`),
+  caseStorage: (caseId: number, fresh = false) =>
+    request<CaseStorage>("GET", `/api/cases/${caseId}/storage${fresh ? "?fresh=true" : ""}`),
+  freeStorage: (caseId: number, targets: StorageKey[]) =>
+    request<{ freed: Record<string, { files: number; bytes: number }>; storage: CaseStorage }>(
+      "POST", `/api/cases/${caseId}/storage/free`, { targets }),
+  systemStorage: () => request<SystemStorage>("GET", "/api/system/storage"),
   caseDashboard: (caseId: number, jobIds: number[]) =>
     request<CaseDashboard>("GET", `/api/cases/${caseId}/dashboard${jobIds.length ? `?job_ids=${jobIds.join(",")}` : ""}`),
   route: (caseId: number, jobIds: number[], only: "matches" | "confirmed") =>

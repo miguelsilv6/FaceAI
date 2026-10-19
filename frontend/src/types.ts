@@ -651,3 +651,27 @@ export interface ServerImportState {
   finished_at?: string;
   error?: string;
 }
+
+export type StorageKey = "originals" | "analysis" | "references" | "crops" | "playback" | "frames" | "caches" | "other";
+
+export interface StorageCategory {
+  key: StorageKey;
+  label: string;
+  regenerable: boolean;
+  bytes: number;
+  files?: number;
+}
+
+export interface CaseStorage {
+  case_id: number;
+  total_bytes: number;
+  regenerable_bytes: number;
+  categories: StorageCategory[];
+}
+
+export interface SystemStorage {
+  disk: DiskStatus;
+  categories: StorageCategory[];
+  system: { database: number; audit_log: number; uploads_in_progress: number };
+  cases: { case_id: number; name: string; total_bytes: number; regenerable_bytes: number }[];
+}
