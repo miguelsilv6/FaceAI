@@ -5,9 +5,10 @@ Muitos gravadores de CCTV gravam com píxeis que não são quadrados: 960×1080 
 proporção (SAR, sample aspect ratio): os outros leitores, o browser e o OpenCV mostram os píxeis como estão e a
 imagem fica quase quadrada e deformada. As faces deformadas também pioram a deteção e o reconhecimento.
 
-- O SAR indicado no próprio vídeo (ffprobe) aplica-se na importação.
-- Sem SAR, uma resolução de um modo de DVR conhecido dá uma sugestão, que o responsável confirma (ou não).
-- O responsável pode corrigir à mão (16:9, 4:3, tamanho à medida ou original); fica na auditoria.
+- Aplica-se automaticamente na importação: o SAR indicado no próprio vídeo (ffprobe) ou, sem SAR, o tamanho do
+  modo de DVR conhecido pela resolução.
+- O responsável pode alterar à mão no menu do vídeo (automática, 16:9, 4:3, à medida ou a gravada); fica na
+  auditoria, e uma escolha manual nunca é substituída pela automática.
 
 O ficheiro e o SHA-256 não mudam: a proporção é um dado de apresentação (Video.aspect). Cada análise regista o
 tamanho com que leu cada vídeo (job.environment["display"]): os frames são redimensionados para esse tamanho antes
@@ -136,41 +137,52 @@ def _now() -> str:
 
 
 def detect(s: Session, video: Video) -> None:
-    """Na importação (ou depois da extração): aplica o SAR do ficheiro ou guarda uma sugestão."""
+    """Na importação (ou depois da extração): aplica automaticamente o SAR do ficheiro ou, sem SAR, o tamanho do
+    modo de DVR conhecido. Uma escolha manual do responsável nunca é substituída."""
     a = dict(video.aspect or {})
     if a.get("source") == "manual" or not video.width or not video.height:
         return
     a["checked_at"] = _now()
     sar = probe_sar(video.source_path)
     if sar is not None:
-        size = size_for_sar(video.width, video.height, *sar)
-        a = {**a, "display": list(size), "source": f"indicada no ficheiro (SAR {sar[0]}:{sar[1]})",
-             "sar": f"{sar[0]}:{sar[1]}", "set_at": _now(), "set_by": "sistema"}
+        auto = {"display": list(size_for_sar(video.width, video.height, *sar)),
+                "mode": f"indicada no ficheiro (SAR {sar[0]}:{sar[1]})"}
+    elif known := KNOWN_MODES.get((video.width, video.height)):
+        auto = {"display": list(known[0]), "mode": f"modo de DVR {known[1]}"}
+    else:
+        auto = None
+    before = a.get("display")
+    if auto is None:
         a.pop("suggested", None)
-        video.aspect = a
-        s.add(video)
-        s.commit()
-        log_event(s, "video.aspect_set", case_id=video.case_id, actor="sistema",
-                  details={"video_id": video.id, "filename": video.filename, "recorded": [video.width, video.height],
-                           "display": list(size), "source": a["source"],
-                           "note": "o ficheiro não foi alterado; só a apresentação e a análise usam este tamanho"})
-        return
-    known = KNOWN_MODES.get((video.width, video.height))
-    if known and not a.get("display"):
-        a["suggested"] = {"display": list(known[0]), "mode": known[1]}
+        a.pop("display", None)
+    else:
+        a.update({"suggested": auto, "display": auto["display"], "source": f"automática: {auto['mode']}",
+                  "set_by": "sistema", "set_at": _now()})
     video.aspect = a
     s.add(video)
     s.commit()
+    if auto is not None and auto["display"] != before:
+        log_event(s, "video.aspect_set", case_id=video.case_id, actor="sistema",
+                  details={"video_id": video.id, "filename": video.filename, "recorded": [video.width, video.height],
+                           "display": auto["display"], "source": a["source"],
+                           "note": "o ficheiro não foi alterado; só a apresentação e a análise usam este tamanho;"
+                                   " o responsável pode alterar no menu do vídeo"})
+
+
+def _unchecked(video: Video) -> bool:
+    """Nunca verificado, ou só com a sugestão por confirmar da versão anterior (agora aplica-se sozinha)."""
+    a = video.aspect or {}
+    return not a or (a.get("source") != "manual" and a.get("suggested") and not a.get("display"))
 
 
 def backfill() -> None:
-    """Vídeos importados antes desta versão: verifica o SAR e a sugestão uma vez (no arranque, em fundo)."""
+    """Vídeos importados antes desta versão: verifica e aplica a proporção uma vez (no arranque, em fundo)."""
     from ..db import get_engine
 
     try:
         with Session(get_engine()) as s:
             ids = [v.id for v in s.exec(select(Video)).all()
-                   if not (v.aspect or {}) and v.width and v.extraction_status in ("", "ready")]
+                   if v.width and v.extraction_status in ("", "ready") and _unchecked(v)]
         for vid in ids:
             with Session(get_engine()) as s:
                 video = s.get(Video, vid)
@@ -199,7 +211,8 @@ def set_display(s: Session, video: Video, display: tuple[int, int] | None, *, re
     history = list(a.get("history") or [])
     history.append({"from": list(before) if before else None, "to": list(display) if display else None,
                     "reason": reason, "by": actor, "at": _now()})
-    a = {"history": history, "source": "manual", "set_by": actor, "set_at": _now(), "reason": reason}
+    a = {"history": history, "source": "manual", "set_by": actor, "set_at": _now(), "reason": reason,
+         **({"suggested": a["suggested"]} if a.get("suggested") else {})}
     if display is not None:
         a["display"] = list(display)
     video.aspect = a

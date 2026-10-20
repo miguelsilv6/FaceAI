@@ -57,22 +57,36 @@ def test_sar_in_file_is_applied_on_import(client, tmp_path):
 
 
 @needs_ffmpeg
-def test_known_dvr_mode_is_suggested_and_confirmed_by_manager(client, tmp_path):
+def test_known_dvr_mode_is_applied_automatically_and_manager_can_change_it(client, tmp_path):
+    from sqlmodel import Session
+
+    import app.db
+    from app.models import Video
+    from app.services import aspect
+
     cid = client.post("/api/cases", json={"name": "Lite"}).json()["id"]
     v = _upload(client, cid, _squeezed(tmp_path, "lite.mp4", (960, 1080), None))
-    assert not v["aspect"].get("display")  # sem SAR no ficheiro: não se aplica sozinho
-    assert v["aspect"]["suggested"]["display"] == [1920, 1080]
+    # sem SAR no ficheiro, mas 960×1080 é o modo 1080P Lite: aplica-se sozinho
+    assert v["aspect"]["display"] == [1920, 1080] and v["aspect"]["source"].startswith("automática: modo de DVR")
+    assert any(e["details"]["display"] == [1920, 1080] and e["actor"] == "sistema"
+               for e in _events(client, cid, "video.aspect_set"))
 
     ana = new_client("ana.a", PW)
     client.post(f"/api/cases/{cid}/members", json={"username": "ana.a", "role": "member"})
-    body = {"width": 1920, "height": 1080, "reason": "DVR em modo 1080P Lite"}
+    body = {"width": 1440, "height": 1080, "reason": "no leitor do fabricante é 4:3"}
     assert ana.post(f"/api/videos/{v['id']}/aspect", json=body).status_code == 403
     r = client.post(f"/api/videos/{v['id']}/aspect", json=body)
     assert r.status_code == 200, r.text
     a = r.json()["aspect"]
-    assert a["display"] == [1920, 1080] and a["source"] == "manual" and "suggested" not in a
-    assert a["history"][-1]["reason"] == "DVR em modo 1080P Lite"
-    assert _events(client, cid, "video.aspect_set")[0]["details"]["reason"] == "DVR em modo 1080P Lite"
+    assert a["display"] == [1440, 1080] and a["source"] == "manual"
+    assert a["suggested"]["display"] == [1920, 1080]  # a automática continua disponível no menu
+    assert a["history"][-1]["reason"] == "no leitor do fabricante é 4:3"
+    assert any(e["details"].get("reason") == "no leitor do fabricante é 4:3"
+               for e in _events(client, cid, "video.aspect_set"))
+    # a escolha manual não é substituída pela automática (ex.: nova extração ou arranque)
+    with Session(app.db.get_engine()) as s:
+        aspect.detect(s, s.get(Video, v["id"]))
+    assert client.get(f"/api/cases/{cid}/videos").json()[0]["aspect"]["display"] == [1440, 1080]
     # repor a gravada
     r = client.post(f"/api/videos/{v['id']}/aspect", json={"reason": "afinal está certo"})
     assert r.status_code == 200 and not r.json()["aspect"].get("display")
@@ -133,4 +147,12 @@ def test_backfill_checks_videos_imported_before(client, tmp_path):
         s.commit()
     aspect.backfill()
     v = client.get(f"/api/cases/{cid}/videos").json()[0]
-    assert v["aspect"]["suggested"]["mode"].startswith("1080P Lite") and v["aspect"]["checked_at"]
+    assert v["aspect"]["display"] == [1920, 1080] and v["aspect"]["checked_at"]
+    # sugestão por confirmar da versão anterior: passa a ser aplicada
+    with Session(app.db.get_engine()) as s:
+        video = s.get(Video, v["id"])
+        video.aspect = {"checked_at": "x", "suggested": {"display": [1920, 1080], "mode": "1080P Lite"}}
+        s.add(video)
+        s.commit()
+    aspect.backfill()
+    assert client.get(f"/api/cases/{cid}/videos").json()[0]["aspect"]["display"] == [1920, 1080]

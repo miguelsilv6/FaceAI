@@ -453,11 +453,12 @@ O nome do ficheiro identifica o processo, a análise, o vídeo, o frame, o tempo
 
 Muitos DVR gravam em modos "Lite" ou de meia resolução, com píxeis que não são quadrados. Por exemplo, 960×1080 deve ser mostrado como 1920×1080 e 704×288 como 4:3. O leitor do fabricante estica a imagem, mas o ficheiro muitas vezes não indica a proporção (o **SAR**). O browser, o OpenCV e os outros leitores mostram então a imagem espremida, e as faces deformadas pioram a deteção e o reconhecimento.
 
-- **Na importação** (`services/aspect.py`):
-  - se o vídeo indica o SAR (`ffprobe`), este aplica-se automaticamente;
-  - se não indica, uma resolução de um modo de DVR conhecido (1080P Lite, 4MP Lite, 720P Lite, 960H, D1, 2CIF, CIF) dá uma **sugestão**. O vídeo mostra "imagem espremida?" até alguém a confirmar.
-  - Os vídeos importados por versões anteriores são verificados uma vez no arranque.
-- **Correção:** em **Vídeos**, o botão **proporção…** (só o responsável ou um administrador) permite escolher a sugestão, 16:9, 4:3, um tamanho à medida, ou repor o tamanho gravado. Mostra uma pré-visualização, pede o motivo, e a alteração fica na auditoria (`video.aspect_set`).
+- **Ajuste automático** (`services/aspect.py`), na importação e, para os vídeos já importados, uma vez no arranque. Usa-se:
+  - o SAR indicado no vídeo (`ffprobe`), quando existe;
+  - senão, o tamanho do modo de DVR que corresponde à resolução: 1080P Lite, 4MP Lite, 720P Lite, 960H, D1, 2CIF ou CIF.
+
+  Fica na auditoria (`video.aspect_set`, ator "sistema").
+- **Alteração manual:** no menu **⋯** de cada vídeo, **Proporção da imagem…** (só o responsável ou um administrador). As opções são a automática, 16:9, 4:3, um tamanho à medida, ou a gravada. A janela mostra uma pré-visualização, pede o motivo e regista a alteração na auditoria. Uma escolha manual nunca é substituída pela automática.
 - **O ficheiro e o SHA-256 não mudam:** a proporção é só um dado de apresentação (`Video.aspect`). O leitor mostra o vídeo com a proporção certa, sem criar cópias.
 - **Análise:** cada frame é redimensionado (bicúbica) para o tamanho de apresentação antes da deteção. Por isso as caixas, os recortes, os frames (anotado e original) e os frames guardados ficam nesse tamanho.
   - A análise regista o tamanho usado (`job.environment["display"]`), e mantém-no mesmo que a proporção do vídeo mude depois. Os resultados avisam quando isso acontece; é preciso repetir a análise para aplicar a nova proporção.
