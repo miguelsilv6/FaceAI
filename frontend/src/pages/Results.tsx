@@ -33,6 +33,7 @@ import type {
 } from "../types";
 import { cameraLabel, cameraName, groupByLocation } from "../places";
 import { confirmAction } from "../confirm";
+import { displaySize, videoStyle } from "../videoAspect";
 
 const PAGE = 240;
 
@@ -53,6 +54,14 @@ const EXPORTS = [
   ["json", "Resultados (JSON)"],
   ["zip", "Pacote completo (ZIP: relatório, CSV, JSON, recortes, auditoria)"],
 ] as const;
+
+/** A proporção do vídeo mudou desde a análise (job.environment.display guarda o tamanho com que foi lido). */
+function aspectChanged(job: Job, video: Video): boolean {
+  const used = (job.environment?.display as Record<string, [number, number]> | undefined)?.[String(video.id)]
+    ?? [video.width, video.height];
+  const now = displaySize(video);
+  return job.status === "completed" && (used[0] !== now[0] || used[1] !== now[1]);
+}
 
 export default function Results() {
   const jobId = Number(useParams().jobId);
@@ -627,6 +636,12 @@ export default function Results() {
             {video && videos.length <= 1 && (
               <Text size="sm" fw={600}>{cameraLabel(video, locations)}</Text>
             )}
+            {video && job && aspectChanged(job, video) && (
+              <Alert color="yellow" icon={<IconAlertTriangle size={18} />} p="xs">
+                A proporção deste vídeo foi alterada depois desta análise (agora {displaySize(video).join("×")}).
+                Os resultados desta análise mantêm o tamanho com que foi feita; repita a análise para a aplicar.
+              </Alert>
+            )}
             {video && (
               <>
                 {converting ? (
@@ -639,7 +654,7 @@ export default function Results() {
                   </Alert>
                 ) : (
                   <video ref={videoRef} key={`${video.id}-${video.playback_status}-${video.playback_format}`} src={api.videoUrl(video)} controls
-                    preload="metadata" style={{ width: "100%", maxHeight: 420, background: "#000", borderRadius: 6 }}
+                    preload="metadata" style={videoStyle(video, "420px", { background: "#000", borderRadius: 6 })}
                     onError={(e) => onVideoError(video, e.currentTarget.error)}
                     onLoadedData={(e) => {
                       setPlayError(null);

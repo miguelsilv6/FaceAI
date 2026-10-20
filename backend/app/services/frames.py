@@ -5,6 +5,9 @@ mas pode falhar por alguns frames em ficheiros de DVR com marcas de tempo irregu
 verificado contra o recorte da face guardado durante a análise (que não tem anotações): se não coincidir,
 procuram-se os frames vizinhos e, se nenhum (ou mais de um) coincidir, lê-se o vídeo sequencialmente até ao
 frame N, exatamente como a análise (mais lento em vídeos longos). O método usado fica registado na auditoria.
+
+Com `display` (vídeos com píxeis não quadrados, services/aspect.py), o frame é redimensionado para o tamanho com
+que a análise o leu, antes de ser comparado com o recorte (as caixas estão nesse tamanho).
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from .aspect import fit
 from .imageio import read_image
 from .video_processor import crop_with_margin
 
@@ -67,8 +71,9 @@ def _read_sequential(path: str, index: int) -> np.ndarray | None:
 
 
 def extract_frame(video_path: str | Path, frame_index: int, crop_path: str | Path | None,
-                  bbox: tuple[int, int, int, int], margin: float = 0.25) -> ExtractedFrame:
-    """margin: margem do recorte guardado (faces 0.25; corpos 0.05)."""
+                  bbox: tuple[int, int, int, int], margin: float = 0.25,
+                  display: tuple[int, int] | None = None) -> ExtractedFrame:
+    """margin: margem do recorte guardado (faces 0.25; corpos 0.05); display: tamanho da análise."""
     path = str(video_path)
     expected = None
     if crop_path and Path(crop_path).exists():
@@ -81,6 +86,7 @@ def extract_frame(video_path: str | Path, frame_index: int, crop_path: str | Pat
         raise ValueError("Não foi possível abrir o vídeo.")
     try:
         frame = _read_at(cap, frame_index)
+        frame = None if frame is None else fit(frame, display)
         if expected is None:
             if frame is None:
                 raise ValueError(f"Não foi possível ler o frame {frame_index}.")
@@ -92,7 +98,8 @@ def extract_frame(video_path: str | Path, frame_index: int, crop_path: str | Pat
         # Vizinhos: o seek pode ter caído alguns frames ao lado. Só se aceita um vizinho se for o único que
         # coincide; numa cena parada vários coincidem e não há forma de saber qual é o N → leitura sequencial.
         start = max(0, frame_index - NEIGHBOURS)
-        found = [(err, f) for f in _read_range(cap, start, frame_index - start + NEIGHBOURS + 1)
+        near = (fit(f, display) for f in _read_range(cap, start, frame_index - start + NEIGHBOURS + 1))
+        found = [(err, f) for f in near
                  if (err := crop_error(f, expected, bbox, margin)) <= MAX_CROP_ERROR]
         if len(found) == 1:
             return ExtractedFrame(found[0][1], "vizinho", round(found[0][0], 2))
@@ -101,4 +108,5 @@ def extract_frame(video_path: str | Path, frame_index: int, crop_path: str | Pat
     frame = _read_sequential(path, frame_index)
     if frame is None:
         raise ValueError(f"Não foi possível ler o frame {frame_index}.")
+    frame = fit(frame, display)
     return ExtractedFrame(frame, "sequencial", round(crop_error(frame, expected, bbox, margin), 2))

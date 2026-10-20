@@ -86,6 +86,12 @@ class FpsCorrection(BaseModel):
     source: str = Field("manual", pattern="^(manual|ocr)$", description="ocr: valor sugerido pelo relógio do DVR")
 
 
+class AspectCorrection(BaseModel):
+    width: int | None = Field(None, ge=16, le=8192, description="Largura de apresentação (vazio: a gravada)")
+    height: int | None = Field(None, ge=16, le=8192, description="Altura de apresentação (vazio: a gravada)")
+    reason: str = Field(min_length=3, max_length=1000, description="Motivo da correção (fica na auditoria)")
+
+
 class CaseDelete(BaseModel):
     confirm_case_id: int = Field(description="Número do processo, repetido como confirmação do pedido")
     reason: str = Field("", max_length=1000, description="Motivo da eliminação (fica na auditoria)")

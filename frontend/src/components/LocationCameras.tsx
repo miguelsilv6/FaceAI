@@ -13,8 +13,10 @@ import { cameraName, locationAnalysis, type LocationAnalysis, videoAnalyses } fr
 import AnalysisBadge from "./AnalysisBadge";
 import type { Job, Location, Video } from "../types";
 import { usePolling } from "../usePolling";
+import { aspectCorrected, displaySize } from "../videoAspect";
 import ClockModal from "./ClockModal";
 import DeleteVideoModal from "./DeleteVideoModal";
+import AspectModal from "./AspectModal";
 import FpsModal from "./FpsModal";
 import PlaybackBadge from "./PlaybackBadge";
 import UploadZone from "./UploadZone";
@@ -172,6 +174,7 @@ export default function LocationCameras({ caseId, location, videos, locations, j
   const [playId, setPlayId] = useState<number | null>(null);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [fpsVideo, setFpsVideo] = useState<Video | null>(null);
+  const [aspectVideo, setAspectVideo] = useState<Video | null>(null);
   const [duplicates, setDuplicates] = useState<{ file: string; message: string }[]>([]);
   const navigate = useNavigate();
   const vs = videos.filter((v) => v.location_id === location.id);
@@ -340,6 +343,22 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                         && v.extraction_status === "ready" && (
                         <Button size="compact-xs" variant="subtle" onClick={() => setFpsVideo(v)}>corrigir fps…</Button>
                       )}
+                      {aspectCorrected(v) && (
+                        <Tooltip multiline w={320} label={`Gravado em ${v.width}×${v.height} com píxeis não quadrados; mostrado
+                          e analisado como ${displaySize(v).join("×")} (${v.aspect?.source === "manual"
+                            ? `corrigido por ${v.aspect?.set_by}: ${v.aspect?.reason}` : v.aspect?.source}). O ficheiro não muda.`}>
+                          <Badge size="xs" variant="light" color="teal">{displaySize(v).join("×")}</Badge>
+                        </Tooltip>
+                      )}
+                      {!aspectCorrected(v) && v.aspect?.suggested && (
+                        <Text size="xs" c="orange" title={`${v.width}×${v.height} é a resolução do modo ${v.aspect.suggested.mode}: fora do leitor do fabricante a imagem aparece espremida.`}>
+                          imagem espremida? ({v.aspect.suggested.mode.split(" (")[0]})
+                        </Text>
+                      )}
+                      {canManage && v.width > 0 && (tech || aspectCorrected(v) || v.aspect?.suggested)
+                        && (v.extraction_status === "ready" || !v.extraction_status) && (
+                        <Button size="compact-xs" variant="subtle" onClick={() => setAspectVideo(v)}>proporção…</Button>
+                      )}
                     </Table.Td>
                     <Table.Td><PlaybackBadge video={v} onCreate={createCopy} /></Table.Td>
                     <Table.Td>
@@ -418,6 +437,10 @@ export default function LocationCameras({ caseId, location, videos, locations, j
       {fpsVideo && (
         <FpsModal key={fpsVideo.id} video={fpsVideo} jobs={jobs} onClose={() => setFpsVideo(null)}
           onSaved={() => { setFpsVideo(null); onChange(); }} />
+      )}
+      {aspectVideo && (
+        <AspectModal key={aspectVideo.id} video={aspectVideo} jobs={jobs} onClose={() => setAspectVideo(null)}
+          onSaved={() => { setAspectVideo(null); onChange(); }} />
       )}
       {clockVideo && (
         <ClockModal key={clockVideo.id} video={clockVideo} opened onClose={() => setClockVideo(null)} locations={locations}

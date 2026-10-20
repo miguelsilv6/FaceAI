@@ -11,6 +11,7 @@ import { api } from "../api";
 import { cameraLabel, cameraName, groupByLocation } from "../places";
 import { VIDEO_KEYS_HINT, useVideoKeys } from "../useVideoKeys";
 import type { Location, RouteSegment, Video } from "../types";
+import { aspectCorrected, displaySize } from "../videoAspect";
 
 /** Hora "de parede" do DVR em segundos (sem fuso, tratada como UTC só para fazer contas). */
 export function wallSeconds(iso: string): number {
@@ -216,14 +217,14 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
                     </Tooltip>
                   </Group>
                 </Group>
-                <Box style={{ position: "relative", background: "#000", borderRadius: 4, aspectRatio: `${v.width || 16} / ${v.height || 9}` }}>
+                <Box style={{ position: "relative", background: "#000", borderRadius: 4, aspectRatio: displaySize(v).join(" / ") }}>
                   {preparing ? (
                     <Text c="gray.4" size="xs" p="sm">A preparar a cópia de reprodução deste vídeo…</Text>
                   ) : (
                     <video ref={(el) => { if (el) els.current.set(v.id, el); else els.current.delete(v.id); }}
                       src={api.videoUrl(v)} muted playsInline preload="auto"
                       onError={() => setBroken((b) => new Set(b).add(v.id))}
-                      style={{ width: "100%", height: "100%", display: "block", objectFit: "contain", opacity: inside ? 1 : 0.15 }} />
+                      style={{ width: "100%", height: "100%", display: "block", objectFit: aspectCorrected(v) ? "fill" : "contain", opacity: inside ? 1 : 0.15 }} />
                   )}
                   {!inside && !preparing && (
                     <Text c="gray.3" size="xs" ta="center" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>

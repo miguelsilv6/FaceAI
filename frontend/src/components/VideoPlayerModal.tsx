@@ -7,6 +7,7 @@ import { notifyError } from "../notify";
 import { cameraLabel, cameraName } from "../places";
 import { VIDEO_KEYS_HINT, useHtmlVideoKeys } from "../useVideoKeys";
 import type { Location, Video } from "../types";
+import { aspectCorrected, displaySize, videoStyle } from "../videoAspect";
 
 /** Leitor de um vídeo importado, com o tempo do vídeo e a hora real do DVR (se acertada). Só visualização. */
 export default function VideoPlayerModal({ video, onClose, onChange, locations = [] }: {
@@ -40,7 +41,7 @@ export default function VideoPlayerModal({ video, onClose, onChange, locations =
             controls autoPlay preload="metadata" aria-label={`Leitor de ${video.filename}`}
             onTimeUpdate={(e) => setT(e.currentTarget.currentTime)} onError={() => setError(true)}
             onLoadedData={() => setError(false)}
-            style={{ width: "100%", maxHeight: "70vh", background: "#000", borderRadius: 6 }} />
+            style={videoStyle(video, "70vh", { background: "#000", borderRadius: 6 })} />
         )}
         {error && !preparing && (
           <Alert color="orange" icon={<IconAlertTriangle size={18} />}>
@@ -63,7 +64,7 @@ export default function VideoPlayerModal({ video, onClose, onChange, locations =
           ) : <Text size="xs" c="dimmed">Hora real não acertada</Text>}
         </Group>
         <Text size="xs" c="dimmed">
-          {video.width}×{video.height} · {video.fps.toFixed(2)} fps · {video.codec || "codec ?"}
+          {video.width}×{video.height}{aspectCorrected(video) ? ` (mostrado como ${displaySize(video).join("×")})` : ""} · {video.fps.toFixed(2)} fps · {video.codec || "codec ?"}
           {video.playback_status === "ready" ? ` · a reproduzir a cópia ${video.playback_format === "webm" ? "VP9/WebM" : "H.264"} (o original não é alterado)` : ""}
         </Text>
       </Stack>

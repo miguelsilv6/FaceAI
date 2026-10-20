@@ -22,6 +22,7 @@ from sqlmodel import Session, select
 from ..config import settings
 from ..db import get_engine as get_db_engine
 from ..models import Alert, Detection, Job, JobStatus, ReferenceImage, Track, Video, utcnow
+from .aspect import job_display, job_displays
 from .audit import log_event
 from .body_analysis import BodyCollector, ClothingParams, FaceLink
 from .body_engine import get_body_engine
@@ -353,6 +354,8 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
             videos = [v for v in (s.get(Video, vid) for vid in job.video_ids) if v is not None]
             if not videos:
                 raise ValueError("Nenhum vídeo selecionado.")
+            if displays := job_displays(videos):  # píxeis não quadrados: tamanho com que cada vídeo é lido
+                job.environment = {**job.environment, "display": displays}
             body = None
             if p.get("clothing") and not discover:
                 body_engine = get_body_engine()
@@ -384,7 +387,7 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
                     body.start_video(video, ctx.track_gap_s)
                 analyzer = _VideoAnalyzer(ctx, s, job, video, body)
                 frames_iter = sample_frames(video.source_path, ctx.sample_fps, fps=video.fps or None,
-                                            prefetch=DECODE_PREFETCH)
+                                            prefetch=DECODE_PREFETCH, display=job_display(job, video.id))
                 last_commit = time.monotonic()
                 try:
                     while True:

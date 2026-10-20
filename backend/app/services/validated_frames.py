@@ -26,6 +26,7 @@ import cv2
 from sqlmodel import Session, select
 
 from ..models import Detection, Job, ReviewStatus, SavedFrame, Video
+from .aspect import job_display
 from .clock import format_real, real_time
 from .frames import extract_frame
 from .jobs import job_dir
@@ -45,7 +46,7 @@ def original_frame_png(job: Job, video: Video, det: Detection) -> tuple[bytes, s
         except (OSError, ValueError, KeyError):
             return body, "cache", None
     extracted = extract_frame(video.source_path, det.frame_index, det.crop_path, (det.x, det.y, det.w, det.h),
-                              margin=0.05 if det.kind == "body" else 0.25)
+                              margin=0.05 if det.kind == "body" else 0.25, display=job_display(job, video.id))
     ok, buf = cv2.imencode(".png", extracted.image)
     if not ok:
         raise ValueError("Falha ao codificar o frame.")
@@ -128,8 +129,14 @@ class _Sink(io.RawIOBase):
 MANIFEST_FIELDS = [
     "ficheiro", "sha256", "analise", "deteccao", "tipo", "track", "video_id", "video", "local", "camara", "frame",
     "tempo_video", "hora_real", "semelhanca", "distancia", "revisto_por", "revisto_em", "nota", "extracao",
-    "erro_recorte",
+    "erro_recorte", "proporcao",
 ]
+
+
+def _resized(job: Job, video: Video) -> str:
+    """Coluna "proporcao": vazio, ou o redimensionamento aplicado (píxeis não quadrados, services/aspect.py)."""
+    size = job_display(job, video.id)
+    return f"{video.width}x{video.height} -> {size[0]}x{size[1]} (bicubica)" if size else ""
 
 
 def stream_zip(validated: ValidatedSet, *, scope: str, actor: str) -> Iterator[bytes]:
@@ -168,7 +175,7 @@ def stream_zip(validated: ValidatedSet, *, scope: str, actor: str) -> Iterator[b
                 "hora_real": format_real(rt), "semelhanca": round(det.similarity, 4),
                 "distancia": round(det.distance, 4), "revisto_por": det.reviewed_by,
                 "revisto_em": det.reviewed_at.isoformat() if det.reviewed_at else "", "nota": det.review_note,
-                "extracao": method, "erro_recorte": "" if err is None else err,
+                "extracao": method, "erro_recorte": "" if err is None else err, "proporcao": _resized(job, video),
             })
         for sf, job, video in validated.frames:
             name = (f"analise{job.id:05d}/video{video.id:04d}_frame{sf.frame_index:07d}_"
@@ -193,7 +200,7 @@ def stream_zip(validated: ValidatedSet, *, scope: str, actor: str) -> Iterator[b
                 "frame": sf.frame_index, "tempo_video": format_timestamp(sf.timestamp_s),
                 "hora_real": format_real(rt), "semelhanca": "", "distancia": "", "revisto_por": sf.created_by,
                 "revisto_em": sf.created_at.isoformat() if sf.created_at else "", "nota": sf.note,
-                "extracao": "guardado no leitor", "erro_recorte": "",
+                "extracao": "guardado no leitor", "erro_recorte": "", "proporcao": _resized(job, video),
             })
         zf.writestr("manifesto.csv", "﻿" + manifest.getvalue())
         frames = sum(1 for v in done.values() if v[0])
@@ -208,6 +215,8 @@ def stream_zip(validated: ValidatedSet, *, scope: str, actor: str) -> Iterator[b
             "Cada PNG é o frame completo do vídeo original, sem anotações, extraído e verificado contra o recorte",
             "guardado na análise (coluna \"extracao\" do manifesto). Frames com várias deteções aparecem uma só vez.",
             "Frames guardados no leitor (tipo \"frame guardado\"): frame original no instante escolhido pelo analista.",
+            "Vídeos com píxeis não quadrados (coluna \"proporcao\"): o frame foi redimensionado do tamanho gravado",
+            "para o de apresentação, como na análise; o frame exato pode ser obtido do vídeo pelo n.º de frame.",
             "",
             f"Deteções: {len(validated.items)} · frames: {frames} · frames guardados: {len(validated.frames)} · "
             f"falhas: {len(failures)}",

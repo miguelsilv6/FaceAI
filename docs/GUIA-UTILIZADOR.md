@@ -30,6 +30,7 @@ Este guia segue o trabalho num processo, do início ao relatório. Detalhes de c
 - Na importação é calculado o **SHA-256** de cada ficheiro, e os duplicados são recusados.
 - Os ficheiros `.sec` e os formatos que o browser não abre são preparados automaticamente. O estado aparece na lista de vídeos.
 - **Acertar hora** (só o responsável): lê a data/hora gravada na imagem (OCR), ou acerta-a à mão, para os resultados virem em **hora real**.
+- **Imagem espremida?** Alguns DVR gravam com píxeis que não são quadrados (modos "Lite"): fora do leitor do fabricante a imagem fica quase quadrada e deformada. Quando o ficheiro indica a proporção, é corrigida sozinha. Quando não indica, o vídeo mostra "imagem espremida?" e o responsável confirma em **proporção…**. O ficheiro não muda, mas as análises novas passam a ver as caras com a forma real.
 - **Detalhes técnicos** mostra o tamanho, fps, resolução, codec e o início do SHA-256 de cada vídeo.
 
 ## 4. Análise

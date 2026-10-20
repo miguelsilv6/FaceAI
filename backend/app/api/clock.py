@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 from ..models import Video
 from ..schemas import ClockManual, ClockOcr, ClockOcrTest, ClockOffset
-from ..services import fps_fix, ocr, sec_extract
+from ..services import aspect, fps_fix, ocr, sec_extract
 from ..services.audit import log_event
 from .deps import ActorDep, CurrentUser, SessionDep, authorize_objects, require_case_manager
 
@@ -38,6 +38,7 @@ def video_frame(video_id: int, session: SessionDep, t: float = 0.0) -> Response:
         frame = ocr.read_frame(v.source_path, max(0.0, min(t, v.duration_s)), v.fps)
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
+    frame = aspect.fit(frame, aspect.display_size(v))  # a zona da hora é guardada em frações: não muda
     ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
     return Response(content=buf.tobytes(), media_type="image/jpeg")
 

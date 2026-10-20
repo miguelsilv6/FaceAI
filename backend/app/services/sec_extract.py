@@ -23,7 +23,7 @@ from sqlmodel import Session, select
 
 from ..db import get_engine
 from ..models import Video
-from . import originals, sec_format
+from . import aspect, originals, sec_format
 from .audit import log_event
 
 log = logging.getLogger(__name__)
@@ -213,6 +213,7 @@ def _finish(s: Session, video: Video, analysis: Path, info: dict[str, Any], seco
                        "note": "o original não foi alterado; a análise usa a cópia sem recodificação"})
     if originals.enabled():  # antes de ficar "pronto": quem espera pelo vídeo vê já o estado final
         originals.remove_original(s, video)
+    aspect.detect(s, video)  # SAR da cópia de análise, ou sugestão pela resolução (antes de ficar "pronto")
     video.extraction_status, video.extraction_progress = READY, 1.0
     # gravado com a decisão da cópia de reprodução (quem espera por "pronto" já vê o estado da reprodução)
     request_playback_copy(s, video)
@@ -248,5 +249,6 @@ def _fail(video_id: int, message: str, correction: dict[str, Any] | None, sec: b
             from .clock_auto import request_auto_clock
             from .transcode import request_playback_copy
 
+            aspect.detect(s, video)
             request_playback_copy(s, video)
             request_auto_clock(s, video)

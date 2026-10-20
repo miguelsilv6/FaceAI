@@ -449,6 +449,21 @@ No frame completo de uma deteção (🔍) há dois downloads:
 
 O nome do ficheiro identifica o processo, a análise, o vídeo, o frame, o tempo e a deteção. Cada download fica na auditoria com o **SHA-256** do ficheiro entregue e o método de extração.
 
+### Proporção (píxeis não quadrados)
+
+Muitos DVR gravam em modos "Lite" ou de meia resolução, com píxeis que não são quadrados. Por exemplo, 960×1080 deve ser mostrado como 1920×1080 e 704×288 como 4:3. O leitor do fabricante estica a imagem, mas o ficheiro muitas vezes não indica a proporção (o **SAR**). O browser, o OpenCV e os outros leitores mostram então a imagem espremida, e as faces deformadas pioram a deteção e o reconhecimento.
+
+- **Na importação** (`services/aspect.py`):
+  - se o vídeo indica o SAR (`ffprobe`), este aplica-se automaticamente;
+  - se não indica, uma resolução de um modo de DVR conhecido (1080P Lite, 4MP Lite, 720P Lite, 960H, D1, 2CIF, CIF) dá uma **sugestão**. O vídeo mostra "imagem espremida?" até alguém a confirmar.
+  - Os vídeos importados por versões anteriores são verificados uma vez no arranque.
+- **Correção:** em **Vídeos**, o botão **proporção…** (só o responsável ou um administrador) permite escolher a sugestão, 16:9, 4:3, um tamanho à medida, ou repor o tamanho gravado. Mostra uma pré-visualização, pede o motivo, e a alteração fica na auditoria (`video.aspect_set`).
+- **O ficheiro e o SHA-256 não mudam:** a proporção é só um dado de apresentação (`Video.aspect`). O leitor mostra o vídeo com a proporção certa, sem criar cópias.
+- **Análise:** cada frame é redimensionado (bicúbica) para o tamanho de apresentação antes da deteção. Por isso as caixas, os recortes, os frames (anotado e original) e os frames guardados ficam nesse tamanho.
+  - A análise regista o tamanho usado (`job.environment["display"]`), e mantém-no mesmo que a proporção do vídeo mude depois. Os resultados avisam quando isso acontece; é preciso repetir a análise para aplicar a nova proporção.
+  - O relatório indica a resolução gravada e o tamanho analisado. No ZIP de frames validados, a coluna `proporcao` do manifesto indica o redimensionamento. O frame exato, sem redimensionamento, pode sempre ser extraído do vídeo pelo n.º de frame.
+- A zona da hora (OCR) é guardada em frações do frame, por isso não muda com a proporção.
+
 ### Hora real do CCTV
 
 Por omissão, os tempos são relativos ao início do ficheiro (`00:01:23.400`). Em **Vídeos → Acertar hora** há três formas de os converter em hora real:

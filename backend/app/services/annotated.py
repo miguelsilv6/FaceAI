@@ -17,6 +17,7 @@ import numpy as np
 from sqlmodel import Session
 
 from ..models import Detection, Job, Video
+from .aspect import job_display
 from .frames import extract_frame
 from .imageio import read_image, write_jpeg
 from .video_processor import annotate, format_timestamp
@@ -47,7 +48,8 @@ def clean_frame(job: Job, video: Video, det: Detection) -> np.ndarray:
             return read_image(cache)
         if not Path(video.source_path).exists():
             raise ValueError("o vídeo desta deteção já não está disponível")
-        image = extract_frame(video.source_path, det.frame_index, det.crop_path, (det.x, det.y, det.w, det.h)).image
+        image = extract_frame(video.source_path, det.frame_index, det.crop_path, (det.x, det.y, det.w, det.h),
+                              display=job_display(job, video.id)).image
         cache.parent.mkdir(parents=True, exist_ok=True)
         part = cache.with_name(cache.stem + ".part.jpg")
         write_jpeg(part, image, QUALITY)
