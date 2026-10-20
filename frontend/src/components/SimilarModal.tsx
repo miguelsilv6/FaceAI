@@ -52,7 +52,7 @@ export default function SimilarModal({ query, defaultThreshold, onClose }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, scope, threshold, perJob]);
 
-  const title = !query ? "" : query.kind === "track" ? `Track #${query.trackId} noutras análises`
+  const title = !query ? "" : query.kind === "track" ? `Aparição #${query.trackId} noutras análises`
     : query.kind === "person" ? `Pessoa #${query.personId} noutras análises`
       : query.kind === "casePerson" ? `«${query.name}» noutros processos` : `Foto «${query.name}» noutros processos`;
   return (
@@ -74,8 +74,8 @@ export default function SimilarModal({ query, defaultThreshold, onClose }: {
         </Group>
         <Text size="xs" c="dimmed">
           {byPhoto
-            ? `Compara ${query?.kind === "casePerson" ? `as ${query.photos} foto(s) da pessoa` : "a foto"} com os tracks de todas as análises já feitas (sem reprocessar vídeo), com o modelo de cada análise; conta a foto mais parecida.`
-            : "Compara o embedding do track (média das melhores faces) com os tracks de outras análises feitas com o mesmo modelo."}
+            ? `Compara ${query?.kind === "casePerson" ? `as ${query.photos} foto(s) da pessoa` : "a foto"} com as aparições de todas as análises já feitas (sem reprocessar vídeo), com o modelo de cada análise; conta a foto mais parecida.`
+            : "Compara as melhores faces desta aparição com as aparições de outras análises feitas com o mesmo modelo."}
           {" "}São candidatos: confirme sempre visualmente. A pesquisa fica na auditoria.</Text>
         {data?.warnings?.map((w) => <Alert key={w} color="yellow" p="xs">{w}</Alert>)}
         {error && <Alert color="red">{error}</Alert>}

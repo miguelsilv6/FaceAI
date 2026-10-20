@@ -52,7 +52,7 @@ export default function PersonCard({ person, selected, others, firstRealTime, on
         <Group justify="space-between" wrap="nowrap">
           <Badge color={color} variant="light" size="sm">{label}</Badge>
           <Group gap={4} wrap="nowrap">
-            <Tooltip label="Confirmar a pessoa (todos os tracks)">
+            <Tooltip label="Confirmar a pessoa (todas as aparições)">
               <ActionIcon variant={status === "confirmed" ? "filled" : "light"} color="green" size="sm"
                 aria-label="Confirmar pessoa"
                 onClick={() => onReview(person, status === "confirmed" ? "pending" : "confirmed")}>

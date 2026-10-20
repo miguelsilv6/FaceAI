@@ -2,7 +2,7 @@ import {
   Accordion, ActionIcon, Alert, Badge, Button, Card, Checkbox, Chip, Group, Input, MultiSelect, NumberInput, Progress, SegmentedControl, Select, SimpleGrid, Stack,
   Menu, Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
-import { IconBellRinging, IconDownload, IconInfoCircle, IconRefresh, IconMapPin, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
+import { IconBellRinging, IconInfoCircle, IconRefresh, IconMapPin, IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
@@ -46,20 +46,6 @@ interface Props {
 
 export default function JobsPanel({ caseId, jobs, videos, locations, references, persons, onChange }: Props) {
   const navigate = useNavigate();
-  const downloadValidated = async () => {
-    try {
-      const sum = await api.validatedSummary(caseId);
-      if (!sum.detections && !sum.saved_frames) {
-        notifyError(new Error("Ainda não há deteções confirmadas nem frames guardados neste processo."));
-        return;
-      }
-      notifyOk(`A preparar ${sum.frames} frame(s) de ${sum.detections} deteção(ões) confirmada(s)`
-        + `${sum.saved_frames ? ` e ${sum.saved_frames} frame(s) guardado(s)` : ""}…`, "Download");
-      window.location.href = api.validatedFramesUrl("cases", caseId);
-    } catch (e) {
-      notifyError(e);
-    }
-  };
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [params, setParams] = useState<JobParams | null>(null);
   // Locais escolhidos (todas as câmaras de cada um) e câmaras retiradas individualmente
@@ -174,7 +160,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                 `${discover ? "Todas as faces" : personsCount(choices)} × ${nLocs} ${nLocs === 1 ? "local" : "locais"} (${videoIds.length} vídeo${videoIds.length === 1 ? "" : "s"})`}>
                 <Stack gap={6} mt={6}>
                   {withVideos.length === 0 ? (
-                    <Text size="sm" c="dimmed">Sem vídeos: importe-os no separador "Locais e vídeos".</Text>
+                    <Text size="sm" c="dimmed">Sem vídeos: importe-os no separador "Vídeos".</Text>
                   ) : (
                     <Chip.Group multiple value={locIds} onChange={setLocIds}>
                       <Group gap={6}>
@@ -221,7 +207,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                         <Text size="xs">
                           {notReady.map((v) => cameraName(v)).join(", ")}:{" "}
                           {notReady.some((v) => v.extraction_status === "failed")
-                            ? "a extração falhou (ver Locais e vídeos); retire o vídeo ou tente de novo."
+                            ? "a extração falhou (ver Vídeos); retire o vídeo ou tente de novo."
                             : "ainda a extrair o vídeo do .sec; aguarde que termine para iniciar a análise."}
                         </Text>
                       </Alert>
@@ -295,7 +281,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                         checked={params.motion_filter} onChange={(e) => set("motion_filter", e.currentTarget.checked)} />
                       <Switch label="Cascata de deteção" description="Detetor rápido primeiro; o principal só se houver faces"
                         checked={params.cascade} onChange={(e) => set("cascade", e.currentTarget.checked)} />
-                      <Switch label="Tracking de faces"
+                      <Switch label="Seguir a mesma face entre frames"
                         description={discover ? "Obrigatório na descoberta" : "Agrupa a mesma face entre frames"}
                         checked={params.tracking || discover} disabled={discover}
                         onChange={(e) => set("tracking", e.currentTarget.checked)} />
@@ -346,7 +332,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                           <Select label="Detetor rápido (cascata)" disabled={!params.cascade} data={system.detectors}
                             value={params.fast_detector} allowDeselect={false}
                             onChange={(d) => d && set("fast_detector", d)} />
-                          <NumberInput label="Intervalo máx. no track (s)" disabled={!params.tracking && !discover} min={0} step={0.5}
+                          <NumberInput label="Intervalo máx. numa aparição (s)" disabled={!params.tracking && !discover} min={0} step={0.5}
                             decimalScale={1} value={params.track_gap_s} onChange={(v) => set("track_gap_s", num(v, 2))} />
                           <NumberInput label="Intervalo máx. no segmento (s)" min={0} step={0.5} decimalScale={1}
                             value={params.segment_gap_s} onChange={(v) => set("segment_gap_s", num(v, 2))} />
@@ -366,13 +352,6 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
         )}
       </Card>
 
-      {jobs.length > 0 && (
-        <Group justify="flex-end">
-          <Button variant="light" size="xs" leftSection={<IconDownload size={16} />} onClick={downloadValidated}>
-            Descarregar frames originais validados do processo (ZIP)
-          </Button>
-        </Group>
-      )}
       <Card withBorder p={0}>
         {jobs.length === 0 ? (
           <Text c="dimmed" p="md">Ainda não foram feitas análises neste processo.</Text>

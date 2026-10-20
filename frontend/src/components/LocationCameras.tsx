@@ -1,5 +1,5 @@
 import {
-  ActionIcon, Alert, Badge, Button, Card, Group, Loader, Menu, Stack, Table, Text, TextInput, Title, Tooltip,
+  ActionIcon, Alert, Badge, Button, Card, Group, Loader, Menu, Stack, Switch, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import {
   IconArrowsExchange, IconCheck, IconClock, IconDatabase, IconDots, IconMapPin, IconMovie, IconPencil, IconPlayerPlay, IconTrash, IconX,
@@ -150,6 +150,18 @@ function LocationHeader({ location, cameras, duration, analysis, onChange, onDel
 
 /** Página de um local: importação dos vídeos das câmaras desse local e a tabela das câmaras. */
 export default function LocationCameras({ caseId, location, videos, locations, jobs, canManage, onChange, onDeleted }: Props) {
+  const [tech, setTech] = useState(() => {
+    try {
+      return localStorage.getItem("faceai.videoTech") === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("faceai.videoTech", tech ? "1" : "0");
+    } catch { /* sem armazenamento */ }
+  }, [tech]);
   const [progress, setProgress] = useState<number | null>(null);
   const [clockVideo, setClockVideo] = useState<Video | null>(null);
   const [playId, setPlayId] = useState<number | null>(null);
@@ -229,19 +241,25 @@ export default function LocationCameras({ caseId, location, videos, locations, j
         </Alert>
       )}
       <Card withBorder p={0}>
+        {vs.length > 0 && (
+          <Group justify="flex-end" px="sm" pt="xs">
+            <Switch size="xs" label="Detalhes técnicos" checked={tech} onChange={(e) => setTech(e.currentTarget.checked)} />
+          </Group>
+        )}
         {vs.length === 0 ? (
           <Text c="dimmed" p="md">Sem vídeos neste local. Importe-os acima.</Text>
         ) : (
-          <Table.ScrollContainer minWidth={1000}>
+          <Table.ScrollContainer minWidth={tech ? 1000 : 760}>
             <Table>
               <Table.Thead>
-                <Table.Tr><Table.Th>#</Table.Th><Table.Th>Vídeo</Table.Th><Table.Th>Tamanho</Table.Th>
-                  <Table.Th>Duração</Table.Th><Table.Th>FPS</Table.Th><Table.Th>Resolução</Table.Th><Table.Th>Codec</Table.Th><Table.Th>Reprodução no browser</Table.Th><Table.Th>Hora real</Table.Th><Table.Th>Análises</Table.Th><Table.Th /></Table.Tr>
+                <Table.Tr>{tech && <Table.Th>#</Table.Th>}<Table.Th>Vídeo</Table.Th>{tech && <Table.Th>Tamanho</Table.Th>}
+                  <Table.Th>Duração</Table.Th>{tech && <><Table.Th>FPS</Table.Th><Table.Th>Resolução</Table.Th></>}
+                  <Table.Th>{tech ? "Codec" : "Estado"}</Table.Th><Table.Th>Reprodução no browser</Table.Th><Table.Th>Hora real</Table.Th><Table.Th>Análises</Table.Th><Table.Th /></Table.Tr>
               </Table.Thead>
               <Table.Tbody>
                 {vs.map((v) => (
                   <Table.Tr key={v.id}>
-                    <Table.Td>{v.id}</Table.Td>
+                    {tech && <Table.Td>{v.id}</Table.Td>}
                     <Table.Td>
                       <Group gap={6} wrap="nowrap">
                         <Tooltip label="Ver o vídeo">
@@ -253,14 +271,15 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                           <CameraNameInput video={v} onSaved={onChange} />
                           <Text size="xs" c="dimmed" truncate maw={260}
                             title={v.sha256 ? `${v.filename}\nSHA-256 ${v.sha256}` : v.filename}>
-                            {v.filename}{v.sha256 ? ` · ${v.sha256.slice(0, 12)}…` : ""}
+                            {v.filename}{tech && v.sha256 ? ` · ${v.sha256.slice(0, 12)}…` : ""}
                           </Text>
                         </Stack>
                       </Group>
-                    </Table.Td><Table.Td>{formatBytes(v.size_bytes)}</Table.Td>
-                    <Table.Td>{formatTime(v.duration_s)}</Table.Td><Table.Td>{v.fps.toFixed(2)}</Table.Td>
-                    <Table.Td>{v.width}×{v.height}</Table.Td><Table.Td>
-                      {v.codec || "—"}
+                    </Table.Td>{tech && <Table.Td>{formatBytes(v.size_bytes)}</Table.Td>}
+                    <Table.Td>{formatTime(v.duration_s)}</Table.Td>
+                    {tech && <><Table.Td>{v.fps.toFixed(2)}</Table.Td><Table.Td>{v.width}×{v.height}</Table.Td></>}
+                    <Table.Td>
+                      {tech ? v.codec || "—" : null}
                       {(v.extraction_status === "pending" || v.extraction_status === "running") && (
                         <Group gap={4} wrap="nowrap">
                           <Loader size={10} />

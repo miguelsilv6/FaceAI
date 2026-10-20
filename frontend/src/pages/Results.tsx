@@ -821,7 +821,7 @@ export default function Results() {
           )
         ) : showTracks ? (
           visibleTracks.length === 0 ? (
-            <Text c="dimmed">Sem tracks com os filtros atuais.</Text>
+            <Text c="dimmed">Sem aparições com os filtros atuais.</Text>
           ) : (
             <><SimpleGrid cols={{ base: 2, sm: 3, md: 4, lg: 6 }}>
               {visibleTracks.slice(0, limit).map((t) => (

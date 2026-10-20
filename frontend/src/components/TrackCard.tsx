@@ -27,8 +27,8 @@ interface Props {
 
 const REVIEW: Record<ReviewStatus, [string, string]> = {
   pending: ["Por rever", "gray"],
-  confirmed: ["Confirmado", "green"],
-  rejected: ["Rejeitado", "red"],
+  confirmed: ["Confirmada", "green"],
+  rejected: ["Rejeitada", "red"],
 };
 
 /** Um track = a mesma face em vários frames. A revisão aplica-se a todas as deteções do track. */
@@ -41,7 +41,7 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
       <Card.Section style={{ cursor: "pointer" }} onClick={() => onSeek(track.start_s)}>
         <Group gap={0} wrap="nowrap" grow>
           {track.best_detection_id != null && (
-            <Image loading="lazy" decoding="async" src={api.detectionImageUrl(track.best_detection_id, "crop")} h={120} fit="cover" alt={`Track ${track.id}`} />
+            <Image loading="lazy" decoding="async" src={api.detectionImageUrl(track.best_detection_id, "crop")} h={120} fit="cover" alt={`Aparição ${track.id}`} />
           )}
           {track.reference_id != null && (
             <Image loading="lazy" decoding="async" src={api.referenceImageUrl(track.reference_id, true)} h={120} fit="cover" alt="Referência" />
@@ -56,7 +56,7 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
               <Badge color="blue" variant="filled" size="sm">Pessoa #{track.person_id}</Badge>
             </Tooltip>
           ) : (
-            <Tooltip label="Similaridade do track (média das 3 melhores distâncias)">
+            <Tooltip label="Semelhança da aparição (média das 3 faces mais parecidas)">
               <Badge color={track.is_match ? "red" : "orange"} variant="filled" size="sm">{(sim * 100).toFixed(1)}%</Badge>
             </Tooltip>
           )}
@@ -102,7 +102,7 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
               <Menu position="bottom-end" withinPortal>
                 <Menu.Target>
                   <Tooltip label="Mover para outra pessoa (corrigir o agrupamento)">
-                    <ActionIcon variant="subtle" size="sm" aria-label="Mover track"><IconUserShare size={16} /></ActionIcon>
+                    <ActionIcon variant="subtle" size="sm" aria-label="Mover aparição"><IconUserShare size={16} /></ActionIcon>
                   </Tooltip>
                 </Menu.Target>
                 <Menu.Dropdown mah={300} style={{ overflowY: "auto" }}>
@@ -114,23 +114,23 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
                 </Menu.Dropdown>
               </Menu>
             )}
-            <Tooltip label="Confirmar o track inteiro">
+            <Tooltip label="Confirmar a aparição inteira">
               <ActionIcon variant={track.review_status === "confirmed" ? "filled" : "light"} color="green" size="sm"
-                aria-label="Confirmar track"
+                aria-label="Confirmar aparição"
                 onClick={() => onReview(track, track.review_status === "confirmed" ? "pending" : "confirmed")}>
                 <IconCheck size={16} />
               </ActionIcon>
             </Tooltip>
-            <Tooltip label="Rejeitar o track inteiro">
+            <Tooltip label="Rejeitar a aparição inteira">
               <ActionIcon variant={track.review_status === "rejected" ? "filled" : "light"} color="red" size="sm"
-                aria-label="Rejeitar track"
+                aria-label="Rejeitar aparição"
                 onClick={() => onReview(track, track.review_status === "rejected" ? "pending" : "rejected")}>
                 <IconX size={16} />
               </ActionIcon>
             </Tooltip>
           </Group>
         </Group>
-        <Button size="compact-xs" variant="subtle" onClick={() => onShowDetections(track)}>Ver deteções</Button>
+        <Button size="compact-xs" variant="subtle" onClick={() => onShowDetections(track)}>Ver faces</Button>
       </Stack>
     </Card>
   );

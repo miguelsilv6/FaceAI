@@ -1,8 +1,10 @@
 import {
-  ActionIcon, Anchor, Badge, Breadcrumbs, Button, Group, Modal, Stack, Tabs, Text, TextInput, Textarea, Title, Tooltip,
+  ActionIcon, Anchor, Badge, Breadcrumbs, Button, Group, Menu, Modal, SegmentedControl, Stack, Tabs, Text, TextInput,
+  Textarea, Title,
 } from "@mantine/core";
 import {
-  IconActivity, IconHistory, IconLayoutDashboard, IconMovie, IconPencil, IconPhoto, IconPhotoCheck, IconRoute, IconTrash,
+  IconActivity, IconDots, IconHistory, IconLayoutDashboard, IconMovie, IconPencil, IconPhotoCheck, IconTrash, IconUsers,
+  IconUsersGroup,
 } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
@@ -13,6 +15,7 @@ import CaseDashboard from "../components/CaseDashboard";
 import { useAuth } from "../auth";
 import DeleteCaseModal from "../components/DeleteCaseModal";
 import JobsPanel from "../components/JobsPanel";
+import MembersPanel from "../components/MembersPanel";
 import RouteTimeline from "../components/RouteTimeline";
 import ReferencesPanel from "../components/ReferencesPanel";
 import ValidatedFramesPanel from "../components/ValidatedFramesPanel";
@@ -32,7 +35,17 @@ export default function CaseView() {
   const [persons, setPersons] = useState<CasePerson[]>([]);
   const { user, isAdmin } = useAuth();
   const [search] = useSearchParams();
-  const [tab, setTab] = useState<string | null>(search.get("tab") ?? "dashboard");
+  // Separadores pela ordem do trabalho; "route" e "audit" (ligações antigas) passam a vista de Resultados e menu Mais.
+  const initial = search.get("tab") ?? "dashboard";
+  const [tab, setTab] = useState<string | null>(initial === "route" ? "results" : initial === "audit" ? "dashboard" : initial);
+  const [resultsView, setResultsView] = useState<"images" | "route">(initial === "route" ? "route" : "images");
+  const [auditOpen, setAuditOpen] = useState(initial === "audit");
+  const [teamOpen, setTeamOpen] = useState(false);
+  const openTab = (t: string) => {
+    if (t === "audit") setAuditOpen(true);
+    else if (t === "route") { setResultsView("route"); setTab("results"); }
+    else setTab(t);
+  };
   const [editing, setEditing] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const navigate = useNavigate();
@@ -70,8 +83,8 @@ export default function CaseView() {
   useEffect(reload, [reload]);
   useEffect(reloadMembers, [reloadMembers]);
   useEffect(() => {
-    if (tab === "audit") api.audit(caseId).then(setAudit).catch(notifyError);
-  }, [tab, caseId]);
+    if (auditOpen) api.audit(caseId).then(setAudit).catch(notifyError);
+  }, [auditOpen, caseId]);
 
   const startEdit = () => {
     if (!kase) return;
@@ -86,7 +99,7 @@ export default function CaseView() {
       setCase(updated);
       setEditing(false);
       notifyOk("Processo atualizado. A alteração fica registada na auditoria.");
-      if (tab === "audit") api.audit(caseId).then(setAudit);
+      if (auditOpen) api.audit(caseId).then(setAudit);
     } catch (e) {
       notifyError(e, "Não foi possível guardar");
     } finally {
@@ -104,16 +117,21 @@ export default function CaseView() {
       <div>
         <Group gap="xs" wrap="nowrap">
           <Title order={2}>{kase.name}</Title>
-          {canManage && <>
-          <Tooltip label="Editar nome e descrição do processo">
-            <ActionIcon variant="subtle" onClick={startEdit} aria-label="Editar processo"><IconPencil size={18} /></ActionIcon>
-          </Tooltip>
-          <Tooltip label="Eliminar o processo (vídeos, cópias, referências e análises)">
-            <ActionIcon variant="subtle" color="red" onClick={() => setDeleting(true)} aria-label="Eliminar processo">
-              <IconTrash size={18} />
-            </ActionIcon>
-          </Tooltip>
-          </>}
+          <Menu position="bottom-start" withinPortal>
+            <Menu.Target>
+              <ActionIcon variant="subtle" aria-label="Mais opções do processo"><IconDots size={18} /></ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item leftSection={<IconHistory size={16} />} onClick={() => setAuditOpen(true)}>Auditoria</Menu.Item>
+              <Menu.Item leftSection={<IconUsersGroup size={16} />} onClick={() => setTeamOpen(true)}>Equipa</Menu.Item>
+              {canManage && <>
+                <Menu.Divider />
+                <Menu.Item leftSection={<IconPencil size={16} />} onClick={startEdit}>Editar nome e descrição</Menu.Item>
+                <Menu.Item leftSection={<IconTrash size={16} />} color="red" onClick={() => setDeleting(true)}>
+                  Eliminar processo</Menu.Item>
+              </>}
+            </Menu.Dropdown>
+          </Menu>
         </Group>
         <Text c="dimmed" size="sm">{kase.description || "Sem descrição"} · criado em {formatDate(kase.created_at)}
           {kase.analyst ? ` por ${kase.analyst}` : ""}</Text>
@@ -132,24 +150,29 @@ export default function CaseView() {
           </Group>
         </Stack>
       </Modal>
+      <Modal opened={auditOpen} onClose={() => setAuditOpen(false)} title="Auditoria do processo" size="90%">
+        <AuditPanel caseId={caseId} events={audit} />
+      </Modal>
+      <Modal opened={teamOpen} onClose={() => setTeamOpen(false)} title="Equipa do processo" size="lg">
+        <MembersPanel caseId={caseId} members={members} canManage={canManage} onChange={reloadMembers} />
+      </Modal>
       <Tabs value={tab} onChange={setTab} keepMounted={false}>
         <Tabs.List>
-          <Tabs.Tab value="dashboard" leftSection={<IconLayoutDashboard size={16} />}>Painel</Tabs.Tab>
-          <Tabs.Tab value="references" leftSection={<IconPhoto size={16} />}>
-            <Group gap={6}>Referências/Pessoas <Badge size="sm" variant="light">{references.length}</Badge></Group>
+          <Tabs.Tab value="dashboard" leftSection={<IconLayoutDashboard size={16} />}>Resumo</Tabs.Tab>
+          <Tabs.Tab value="references" leftSection={<IconUsers size={16} />}>
+            <Group gap={6}>1 · Pessoas <Badge size="sm" variant="light">{persons.length || references.length}</Badge></Group>
           </Tabs.Tab>
           <Tabs.Tab value="videos" leftSection={<IconMovie size={16} />}>
-            <Group gap={6}>Locais e vídeos <Badge size="sm" variant="light">{locations.length} · {videos.length}</Badge></Group>
+            <Group gap={6}>2 · Vídeos <Badge size="sm" variant="light">{videos.length}</Badge></Group>
           </Tabs.Tab>
           <Tabs.Tab value="jobs" leftSection={<IconActivity size={16} />}>
-            <Group gap={6}>Análises <Badge size="sm" variant="light">{jobs.length}</Badge></Group>
+            <Group gap={6}>3 · Análises <Badge size="sm" variant="light">{jobs.length}</Badge></Group>
           </Tabs.Tab>
-          <Tabs.Tab value="results" leftSection={<IconPhotoCheck size={16} />}>Resultados</Tabs.Tab>
-          <Tabs.Tab value="route" leftSection={<IconRoute size={16} />}>Percurso/Multi View</Tabs.Tab>
-          <Tabs.Tab value="audit" leftSection={<IconHistory size={16} />}>Auditoria</Tabs.Tab>
+          <Tabs.Tab value="results" leftSection={<IconPhotoCheck size={16} />}>4 · Resultados</Tabs.Tab>
         </Tabs.List>
         <Tabs.Panel value="dashboard" pt="md">
-          <CaseDashboard caseId={caseId} jobs={jobs} onOpenTab={setTab} canManage={canManage} />
+          <CaseDashboard caseId={caseId} jobs={jobs} onOpenTab={openTab} canManage={canManage}
+            photos={references.filter((r) => r.valid).length} videos={videos.length} />
         </Tabs.Panel>
         <Tabs.Panel value="references" pt="md">
           <ReferencesPanel caseId={caseId} references={references} persons={persons} onChange={reload} />
@@ -162,13 +185,13 @@ export default function CaseView() {
             onChange={reloadJobs} />
         </Tabs.Panel>
         <Tabs.Panel value="results" pt="md">
-          <ValidatedFramesPanel caseId={caseId} jobs={jobs} locations={locations} onOpenTab={setTab} />
-        </Tabs.Panel>
-        <Tabs.Panel value="route" pt="md">
-          <RouteTimeline caseId={caseId} jobs={jobs} videos={videos} locations={locations} />
-        </Tabs.Panel>
-        <Tabs.Panel value="audit" pt="md">
-          <AuditPanel caseId={caseId} events={audit} />
+          <Stack>
+            <SegmentedControl w="fit-content" value={resultsView} onChange={(v) => setResultsView(v as "images" | "route")}
+              data={[{ value: "images", label: "Imagens validadas" }, { value: "route", label: "Percurso" }]} />
+            {resultsView === "images"
+              ? <ValidatedFramesPanel caseId={caseId} jobs={jobs} locations={locations} onOpenTab={openTab} />
+              : <RouteTimeline caseId={caseId} jobs={jobs} videos={videos} locations={locations} />}
+          </Stack>
         </Tabs.Panel>
       </Tabs>
     </Stack>
