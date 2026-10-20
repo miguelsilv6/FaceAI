@@ -593,13 +593,21 @@ export interface ValidatedItem {
   review_note: string;
 }
 
-/** Alerta: uma pessoa do processo pode ter aparecido na análise (descoberta) ou aparece em vários locais. */
+/** Alerta da análise (indício para rever):
+ * person: uma pessoa do processo pode ter aparecido (descoberta) ou aparece em vários locais (procurar);
+ * places: uma pessoa desconhecida aparece em vários locais; linked: parece-se com uma pessoa de outra análise. */
 export interface PersonAlert {
   id: number;
   case_id: number;
   job_id: number;
-  case_person_id: number;
-  case_person_name: string;
+  kind: "person" | "places" | "linked";
+  case_person_id: number | null;
+  case_person_name: string | null;
+  linked_job_id: number | null;
+  linked_person_id: number | null;
+  linked_track_id: number | null;
+  linked_mode: JobMode | null;
+  linked_track: { video_id: number; start_s: number; best_detection_id: number | null } | null;
   reference_id: number | null;
   reference_has_crop: boolean;
   discovered_person_id: number | null;

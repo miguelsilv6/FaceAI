@@ -384,12 +384,14 @@ Os embeddings dos tracks ficam em `jobs/job_NNNNN/track_embeddings.npz`. O relat
 
 > O agrupamento é uma ferramenta de **triagem**. A mesma pessoa pode surgir em mais de um grupo (ângulos, iluminação, oclusões) e pessoas parecidas podem ficar juntas. Um limiar mais baixo separa mais.
 
-### Alertas: pessoas do processo em vários locais
+### Alertas: pessoas em vários locais e entre análises
 
 Em *Nova análise → Opções avançadas*, a opção **Alertar se aparecerem pessoas do processo** está ligada por omissão quando há pessoas com fotos válidas. Pode escolher **Destacar a partir de N locais** (por omissão 2) e, na descoberta, as **pessoas a vigiar** (por omissão, todas).
 
 - **Modo descoberta:** no fim, cada pessoa descoberta é comparada com as fotos de cada pessoa do processo. Usa o mesmo modelo e detetor da análise e conta a menor de duas distâncias: ao centro da pessoa e à média dos 3 tracks mais próximos. O limiar é o de **correspondência do modelo**, não o de agrupamento. Abaixo dele, cria-se um alerta "Pessoa A pode ser a Pessoa #3".
 - **Modo procurar:** cria-se um alerta quando uma pessoa do processo tem correspondências em ≥ N locais.
+- **Pessoas desconhecidas em vários locais (descoberta, automático):** uma pessoa descoberta vista em ≥ N locais da mesma análise dá um alerta "Pessoa #3 aparece em 3 locais", mesmo sem fotos no processo. Não se repete para as pessoas que já têm um alerta de pessoa do processo. No cartão da pessoa aparece o emblema **N locais**, e em **Filtros** há "Só pessoas vistas em vários locais".
+- **Ligação a outras análises do processo (descoberta, automático):** no fim, cada pessoa descoberta é comparada com as aparições das outras análises concluídas **do mesmo processo**, feitas com o mesmo modelo (descoberta ou procurar), com o limiar de correspondência do modelo. Por cada outra análise fica o resultado mais próximo: "Pessoa #3 pode ser a Pessoa #2 da análise #5", com o botão **Abrir análise #5** no vídeo e instante dessa aparição. No máximo 50 ligações por análise. Assim, uma análise por local liga sozinha as pessoas que se repetem entre locais.
 - Um alerta é **destacado** quando a pessoa aparece em ≥ N locais. Indica os locais, o n.º de aparições e a hora real da primeira e da última.
 - **Onde aparecem:**
   - numa notificação, quando a análise termina;
@@ -398,7 +400,7 @@ Em *Nova análise → Opções avançadas*, a opção **Alertar se aparecerem pe
   - num badge na lista de processos;
   - numa secção do relatório.
 - **Revisão:**
-  - **Confirmar** confirma todos os tracks da pessoa descoberta;
+  - **Confirmar** um alerta de pessoa do processo confirma todos os tracks da pessoa descoberta. Nos alertas de locais e de ligação, confirmar regista só a decisão sobre o alerta;
   - também se pode **descartar** ou **reabrir**;
   - tudo fica na auditoria (`alert.created`, `alert.confirmed`, `alert.dismissed`, `alert.reopened`).
 

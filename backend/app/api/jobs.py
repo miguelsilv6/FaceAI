@@ -258,7 +258,8 @@ def delete_job(job_id: int, body: JobDelete, session: SessionDep, user: CurrentU
     }
     saved = list(session.exec(select(SavedFrame).where(SavedFrame.job_id == job_id)))
     summary["saved_frames"] = [{"id": f.id, "sha256": f.sha256} for f in saved]
-    alerts = list(session.exec(select(Alert).where(Alert.job_id == job_id)))
+    # os alertas da análise e os de outras análises que apontam para ela (ligações)
+    alerts = list(session.exec(select(Alert).where((Alert.job_id == job_id) | (Alert.linked_job_id == job_id))))
     summary["alerts"] = [{"id": a.id, "case_person_id": a.case_person_id, "status": a.status} for a in alerts]
     folder = job_dir(job)
     for row in (*saved, *alerts):
@@ -636,15 +637,29 @@ def review_person(job_id: int, person_id: int, body: ReviewUpdate, session: Sess
 
 # ---------------------------------------------------------------- alertas (pessoas do processo)
 def _alert_out(session, a: Alert, locs: dict, persons: dict) -> dict:
-    cp = persons.get(a.case_person_id)
-    if cp is None:
-        cp = persons[a.case_person_id] = session.get(CasePerson, a.case_person_id)
-    ref = session.exec(select(ReferenceImage).where(ReferenceImage.case_person_id == a.case_person_id,
-                                                    ReferenceImage.valid == True)  # noqa: E712
-                       .order_by(ReferenceImage.id)).first()
-    return {**a.model_dump(mode="json"), "case_person_name": cp.name if cp else f"#{a.case_person_id}",
+    cp = ref = None
+    if a.case_person_id is not None:
+        cp = persons.get(a.case_person_id)
+        if cp is None:
+            cp = persons[a.case_person_id] = session.get(CasePerson, a.case_person_id)
+        ref = session.exec(select(ReferenceImage).where(ReferenceImage.case_person_id == a.case_person_id,
+                                                        ReferenceImage.valid == True)  # noqa: E712
+                           .order_by(ReferenceImage.id)).first()
+    linked = session.get(Job, a.linked_job_id) if a.linked_job_id else None
+    return {**a.model_dump(mode="json"),
+            "case_person_name": (cp.name if cp else f"#{a.case_person_id}") if a.case_person_id else None,
             "reference_id": ref.id if ref else None, "reference_has_crop": bool(ref and ref.face_crop_path),
-            "location_names": [locs[i].name for i in a.location_ids if i in locs]}
+            "location_names": [locs[i].name for i in a.location_ids if i in locs],
+            "linked_mode": (linked.params or {}).get("mode", "match") if linked else None,
+            "linked_track": _linked_track(session, a)}
+
+
+def _linked_track(session, a: Alert) -> dict | None:
+    """Onde está a aparição ligada na outra análise (para a abrir no vídeo e no instante certos)."""
+    if not a.linked_track_id:
+        return None
+    t = session.get(Track, a.linked_track_id)
+    return {"video_id": t.video_id, "start_s": t.start_s, "best_detection_id": t.best_detection_id} if t else None
 
 
 @router.get("/jobs/{job_id}/alerts")
@@ -676,7 +691,7 @@ def review_alert(alert_id: int, body: AlertUpdate, session: SessionDep, actor: A
         raise HTTPException(404, "Alerta não encontrado.")
     old = a.status
     tracks: list[Track] = []
-    if body.status == "confirmed" and a.discovered_person_id is not None:
+    if body.status == "confirmed" and a.kind == "person" and a.discovered_person_id is not None:
         tracks = _person_tracks(session, a.job_id, a.discovered_person_id)
         _review_tracks(session, tracks, ReviewUpdate(status=ReviewStatus.confirmed,
                                                      note=body.note or "confirmado pelo alerta"), actor)

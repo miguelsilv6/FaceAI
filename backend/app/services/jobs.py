@@ -439,10 +439,15 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
             from .alerts import compute_alerts  # import local: alerts → linking → jobs
 
             alerts = compute_alerts(s, job, engine)
-            if alerts:
-                top = sum(1 for a in alerts if a.highlighted)
-                summary += (f"; {len(alerts)} alerta(s) de pessoas do processo"
+            person_alerts = [a for a in alerts if a.kind == "person"]
+            if person_alerts:
+                top = sum(1 for a in person_alerts if a.highlighted)
+                summary += (f"; {len(person_alerts)} alerta(s) de pessoas do processo"
                             + (f" ({top} em vários locais)" if top else ""))
+            if n_places := sum(1 for a in alerts if a.kind == "places"):
+                summary += f"; {n_places} pessoa(s) desconhecida(s) em vários locais"
+            if n_linked := sum(1 for a in alerts if a.kind == "linked"):
+                summary += f"; {n_linked} ligação(ões) a outras análises do processo"
             job.progress = 1.0
             _finish(s, job, JobStatus.completed, (job.message + " " if job.message else "") + summary + ".")
         except JobCancelled:

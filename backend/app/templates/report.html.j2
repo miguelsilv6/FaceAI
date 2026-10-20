@@ -122,10 +122,10 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
 </table>
 
 {% if alerts %}
-{{ h("Alertas — pessoas do processo") }}
-<p class="muted">Indícios para revisão (não identificação): pessoas do processo cujas fotos se aproximam de {% if discover %}uma pessoa descoberta{% else %}correspondências em vários locais{% endif %}, abaixo do limiar de correspondência do modelo. "Destacado" = aparece em {{ job.params.get("alert_min_locations", 2) }} ou mais locais.</p>
+{{ h("Alertas") }}
+<p class="muted">Indícios para revisão (não identificação): pessoas do processo cujas fotos se aproximam de {% if discover %}uma pessoa descoberta{% else %}correspondências em vários locais{% endif %}, abaixo do limiar de correspondência do modelo{% if discover %}; pessoas desconhecidas vistas em vários locais; e pessoas parecidas com pessoas ou aparições de outras análises do mesmo processo (mesmo modelo){% endif %}. "Destacado" = aparece em {{ job.params.get("alert_min_locations", 2) }} ou mais locais.</p>
 <table class="det">
-  <tr><th>Pessoa do processo</th>{% if discover %}<th>Pessoa descoberta</th>{% endif %}<th>Semelhança</th><th>Locais</th><th>Hora real</th><th>Destacado</th><th>Decisão</th></tr>
+  <tr><th>Alerta</th>{% if discover %}<th>Pessoa descoberta</th>{% endif %}<th>Semelhança</th><th>Locais</th><th>Hora real</th><th>Destacado</th><th>Decisão</th></tr>
   {% for x in alerts %}{% set a = x.alert %}
   <tr><td>{{ x.person }}</td>{% if discover %}<td>#{{ a.discovered_person_id }}</td>{% endif %}<td>{{ "%.3f"|format(a.similarity) }}</td>
       <td>{% for lid in a.location_ids %}{{ locations[lid].name if lid in locations else lid }}{% if not loop.last %}, {% endif %}{% endfor %}</td>

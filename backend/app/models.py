@@ -231,13 +231,19 @@ class SavedFrame(SQLModel, table=True):
 
 
 class Alert(SQLModel, table=True):
-    """Alerta de uma análise: uma pessoa do processo (com fotos) pode ter aparecido — no modo descoberta, numa das
-    pessoas descobertas; no modo procurar, em vários locais. É um indício para revisão, não uma identificação."""
+    """Alerta de uma análise, um indício para revisão (não uma identificação):
+    - person: uma pessoa do processo (com fotos) pode ter aparecido — numa pessoa descoberta, ou em vários locais;
+    - places: uma pessoa descoberta (desconhecida) aparece em vários locais;
+    - linked: uma pessoa descoberta parece-se com uma pessoa/aparição de outra análise do mesmo processo."""
 
     id: int | None = Field(default=None, primary_key=True)
     case_id: int = Field(foreign_key="case.id", index=True)
     job_id: int = Field(foreign_key="job.id", index=True)
-    case_person_id: int = Field(foreign_key="caseperson.id", index=True)
+    kind: str = "person"
+    case_person_id: int | None = Field(default=None, foreign_key="caseperson.id", index=True)
+    linked_job_id: int | None = None
+    linked_person_id: int | None = None
+    linked_track_id: int | None = None
     discovered_person_id: int | None = None  # modo descoberta: n.º da pessoa descoberta na análise
     distance: float = 2.0
     similarity: float = 0.0
