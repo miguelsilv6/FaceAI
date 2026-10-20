@@ -301,14 +301,19 @@ export default function Results() {
     if (order === "quality") return [...list].sort((a, b) => b.best_quality - a.best_quality);
     return list;
   }, [tracks, videoId, showCandidates, minSim, order, discover, personFilter, showRejected, reviewFilter]);
+  // Nomes dos locais onde a pessoa aparece (pelos vídeos das suas aparições).
+  const placesOf = (p: Person) => [...new Set(p.video_ids.map((v) => videos.find((x) => x.id === v)?.location_id)
+    .filter((l): l is number => l != null))].map((l) => locations.find((x) => x.id === l)?.name ?? `#${l}`);
+  const [multiPlace, setMultiPlace] = useState(false);
   const visiblePersons = useMemo(() => {
-    const shown = persons.filter((p) => (showRejected || p.review_status !== "rejected") && inReview(p.review_status));
+    const shown = persons.filter((p) => (showRejected || p.review_status !== "rejected") && inReview(p.review_status)
+      && (!multiPlace || placesOf(p).length > 1));
     if (order === "time") {
       return [...shown].sort((a, b) => a.first.video_id - b.first.video_id || a.first.start_s - b.first.start_s);
     }
     if (order === "quality") return [...shown].sort((a, b) => b.best_quality - a.best_quality);
     return shown; // por omissão: a pessoa 1 é a que mais aparece
-  }, [persons, order, showRejected, reviewFilter]);
+  }, [persons, order, showRejected, reviewFilter, multiPlace, videos, locations]);
   const hasTracks = tracks.length > 0;
   const showPersons = discover && view === "persons" && trackFilter == null;
   const showTracks = hasTracks && view === "tracks" && trackFilter == null;
@@ -785,7 +790,8 @@ export default function Results() {
           <ResultsFilters discover={discover} clothingView={view === "clothing"} review={reviewFilter}
             onReview={setReviewFilter} minSim={minSim} onMinSim={setMinSim} showCandidates={showCandidates}
             onShowCandidates={setShowCandidates} showRejected={showRejected} onShowRejected={toggleRejected}
-            rejectedCount={rejectedHere} order={order} onOrder={setOrder} />
+            rejectedCount={rejectedHere} order={order} onOrder={setOrder}
+            multiPlace={showPersons ? multiPlace : undefined} onMultiPlace={setMultiPlace} />
         </Group>
         {view === "clothing" && clothing ? (
           <Stack gap="xs">
@@ -817,6 +823,7 @@ export default function Results() {
             <><SimpleGrid cols={{ base: 1, xs: 2, sm: 3, md: 4, xl: 5 }}>
               {visiblePersons.slice(0, limit).map((p) => (
                 <PersonCard key={p.person_id} person={p} selected={personFilter === p.person_id}
+                  locations={placesOf(p)}
                   others={persons.filter((o) => o.person_id !== p.person_id)}
                   firstRealTime={realTime(videoById.get(p.first.video_id), p.first.start_s)}
                   onSelect={selectPerson} onReview={reviewPerson} onMerge={mergePerson}

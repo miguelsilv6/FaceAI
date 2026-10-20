@@ -63,7 +63,8 @@ Ao abrir uma análise, a faixa no topo diz **quantas aparições** há e quantas
 - **Filtros:** semelhança mínima, candidatos abaixo do limiar, rejeitadas e ordenação.
 - **Guardar frame:** no leitor, guarda o frame original do instante atual como imagem validada.
 - **Modo descoberta:**
-  - a vista **Pessoas** agrupa as faces;
+  - a vista **Pessoas** agrupa as faces de todos os vídeos e locais da análise; o emblema **N locais** mostra quem aparece em vários;
+  - **Alertas automáticos:** pessoas desconhecidas vistas em vários locais e pessoas parecidas com as de outras análises do processo ("pode ser a Pessoa #2 da análise #5", com **Abrir análise #5**). São indícios para confirmar ou descartar;
   - pode juntar duas pessoas que sejam a mesma;
   - pode usar uma face como foto para procurar essa pessoa noutros vídeos.
 

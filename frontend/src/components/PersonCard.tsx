@@ -1,5 +1,5 @@
 import { ActionIcon, Badge, Button, Card, Group, Image, Menu, Stack, Text, Tooltip } from "@mantine/core";
-import { IconArrowsJoin, IconCheck, IconUserPlus, IconUsersGroup, IconX } from "@tabler/icons-react";
+import { IconArrowsJoin, IconCheck, IconMapPin, IconUserPlus, IconUsersGroup, IconX } from "@tabler/icons-react";
 
 import { api, formatTime } from "../api";
 import type { Person, ReviewStatus } from "../types";
@@ -10,6 +10,7 @@ interface Props {
   selected: boolean;
   others: Person[];
   firstRealTime?: string;
+  locations?: string[]; // nomes dos locais onde aparece
   onSelect: (p: Person) => void;
   onReview: (p: Person, status: ReviewStatus) => void;
   onMerge: (p: Person, into: Person) => void;
@@ -25,7 +26,7 @@ const REVIEW: Record<Person["review_status"], [string, string]> = {
 };
 
 /** Pessoa distinta encontrada no modo descoberta (grupo de tracks com faces semelhantes). */
-export default function PersonCard({ person, selected, others, firstRealTime, onSelect, onReview, onMerge,
+export default function PersonCard({ person, selected, others, firstRealTime, locations = [], onSelect, onReview, onMerge,
   onUseAsReference, onFindSimilar }: Props) {
   const [label, color] = REVIEW[person.review_status];
   const status = person.review_status;
@@ -41,10 +42,17 @@ export default function PersonCard({ person, selected, others, firstRealTime, on
       <Stack gap={4} mt={6}>
         <Group justify="space-between" wrap="nowrap">
           <Text size="sm" fw={600}>Pessoa #{person.person_id}</Text>
-          <QualityBadge quality={person.best_quality} />
+          <Group gap={4} wrap="nowrap">
+            {locations.length > 1 && (
+              <Tooltip label={locations.join(" · ")}>
+                <Badge size="xs" color="orange" leftSection={<IconMapPin size={9} />}>{locations.length} locais</Badge>
+              </Tooltip>
+            )}
+            <QualityBadge quality={person.best_quality} />
+          </Group>
         </Group>
         <Text size="xs" c="dimmed">
-          {person.n_tracks} track(s) · {person.n_faces} faces · {person.video_ids.length} vídeo(s)
+          {person.n_tracks} aparição(ões) · {person.n_faces} faces · {person.video_ids.length} vídeo(s)
         </Text>
         <Text size="xs" ff="monospace" title="Primeira aparição">
           {firstRealTime || `vídeo #${person.first.video_id} · ${formatTime(person.first.start_s)}`}

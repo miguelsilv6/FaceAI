@@ -7,7 +7,7 @@ export type Order = "time" | "score" | "quality";
 /** Filtros e ordenação da grelha de resultados, reunidos num só botão. */
 export default function ResultsFilters({
   discover, clothingView, review, onReview, minSim, onMinSim, showCandidates, onShowCandidates,
-  showRejected, onShowRejected, rejectedCount, order, onOrder,
+  showRejected, onShowRejected, rejectedCount, order, onOrder, multiPlace, onMultiPlace,
 }: {
   discover: boolean;
   clothingView: boolean;
@@ -22,16 +22,19 @@ export default function ResultsFilters({
   rejectedCount: number;
   order: Order;
   onOrder: (v: Order) => void;
+  multiPlace?: boolean; // vista Pessoas (descoberta): só as vistas em vários locais
+  onMultiPlace?: (v: boolean) => void;
 }) {
   const similarity = !discover && !clothingView;
   const active = Number(review !== "all") + Number(similarity && minSim > 0) + Number(similarity && showCandidates)
-    + Number(showRejected) + Number(order !== "time");
+    + Number(showRejected) + Number(order !== "time") + Number(!!multiPlace);
   const reset = () => {
     onReview("all");
     onMinSim(0);
     onShowCandidates(false);
     onShowRejected(false);
     onOrder("time");
+    onMultiPlace?.(false);
   };
   return (
     <Popover width={300} position="bottom-end" withArrow shadow="md">
@@ -58,6 +61,10 @@ export default function ResultsFilters({
               <Switch size="xs" label="Mostrar candidatos abaixo do limiar" checked={showCandidates}
                 onChange={(e) => onShowCandidates(e.currentTarget.checked)} />
             </>
+          )}
+          {multiPlace !== undefined && onMultiPlace && (
+            <Switch size="xs" label="Só pessoas vistas em vários locais" checked={multiPlace}
+              onChange={(e) => onMultiPlace(e.currentTarget.checked)} />
           )}
           <Switch size="xs" label={`Mostrar rejeitadas (${rejectedCount})`} checked={showRejected}
             onChange={(e) => onShowRejected(e.currentTarget.checked)} />

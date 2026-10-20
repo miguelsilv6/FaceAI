@@ -4,6 +4,8 @@
   modelo e detetor da análise). Abaixo do limiar de correspondência do modelo → alerta "a Pessoa #3 pode ser a
   Pessoa A". Destacado se aparecer em ≥ N locais.
 - Modo procurar: alerta destacado quando uma pessoa procurada tem correspondências em ≥ N locais.
+- Modo descoberta, sem fotos: alerta "places" quando uma pessoa descoberta aparece em ≥ N locais, e "linked" quando
+  se parece com uma pessoa ou aparição de outra análise do mesmo processo (mesmo modelo).
 
 São indícios para revisão humana (confirmar/descartar), não identificações.
 """
@@ -128,27 +130,113 @@ def _match_alerts(s: Session, job: Job, min_locations: int) -> list[Alert]:
     return alerts
 
 
+MAX_LINKED = 50  # ligações a outras análises por análise (as mais próximas)
+
+
+def _person_tracks(s: Session, job: Job) -> dict[int, list[Track]]:
+    out: dict[int, list[Track]] = {}
+    for t in s.exec(select(Track).where(Track.job_id == job.id, Track.kind == "face")):
+        if t.person_id:
+            out.setdefault(t.person_id, []).append(t)
+    return out
+
+
+def _places_alerts(s: Session, job: Job, min_locations: int, covered: set[int]) -> list[Alert]:
+    """Pessoas descobertas (desconhecidas) vistas em ≥ N locais; as já associadas a uma pessoa do processo não."""
+    alerts = []
+    for pid, ts in sorted(_person_tracks(s, job).items()):
+        if pid in covered:
+            continue
+        locs, vids, first, last = _places(s, ts)
+        if len(locs) < min_locations:
+            continue
+        best = max(ts, key=lambda t: (t.best_quality, t.n_faces))
+        alerts.append(Alert(case_id=job.case_id, job_id=job.id, kind="places", discovered_person_id=pid,
+                            location_ids=locs, video_ids=vids, n_tracks=len(ts), first_real=first, last_real=last,
+                            best_detection_id=best.best_detection_id))
+    return alerts
+
+
+def _linked_alerts(s: Session, job: Job, engine) -> list[Alert]:
+    """Pessoas descobertas parecidas com pessoas/aparições de outras análises concluídas do mesmo processo."""
+    from .face_engine import default_threshold
+    from .linking import _indexed_jobs, _search, load_index
+
+    idx = load_index(job)
+    if idx is None or not len(idx.track_ids):
+        return []
+    others, _ = _indexed_jobs(s, case_ids={job.case_id}, exclude_job_id=job.id)
+    others = [(j, i) for j, i in others if i.model == idx.model]
+    if not others:
+        return []
+    threshold = default_threshold((job.params or {}).get("model", ""), engine)
+    by_person = _person_tracks(s, job)
+    found: list[tuple[float, int, Job, int]] = []  # (distância, pessoa desta análise, outra análise, track)
+    for pid in sorted(by_person):
+        rows = np.flatnonzero(idx.person_ids == pid)
+        if not len(rows):
+            continue
+        # Como nos alertas de pessoas do processo: centróide e cada um dos tracks; conta o mais próximo.
+        embs = idx.embeddings[rows]
+        centroid = embs.mean(axis=0)
+        query = np.vstack([centroid / (np.linalg.norm(centroid) or 1.0), embs])
+        hits, *_ = _search(others, lambda _j, _i, q=query: q, threshold=threshold)
+        best: dict[int, tuple[float, Job, int]] = {}
+        for dist, other, tid in hits:  # já ordenados pela distância: o primeiro de cada análise é o melhor
+            best.setdefault(other.id, (dist, other, tid))
+        found += [(d, pid, o, t) for d, o, t in best.values()]
+    alerts = []
+    for dist, pid, other, tid in sorted(found, key=lambda x: x[0])[:MAX_LINKED]:
+        t_other = s.get(Track, tid)
+        if t_other is None:
+            continue
+        locs_here, vids_here, first, last = _places(s, by_person[pid])
+        locs_other, vids_other, _, _ = _places(s, [t_other])
+        best_here = max(by_person[pid], key=lambda t: (t.best_quality, t.n_faces))
+        alerts.append(Alert(case_id=job.case_id, job_id=job.id, kind="linked", discovered_person_id=pid,
+                            linked_job_id=other.id, linked_track_id=tid, linked_person_id=t_other.person_id,
+                            distance=round(dist, 4), similarity=round(1.0 - dist, 4),
+                            location_ids=list(dict.fromkeys(locs_here + locs_other)),
+                            video_ids=list(dict.fromkeys(vids_here + vids_other)),
+                            n_tracks=len(by_person[pid]), first_real=first, last_real=last,
+                            best_detection_id=best_here.best_detection_id))
+    return alerts
+
+
 def compute_alerts(s: Session, job: Job, engine) -> list[Alert]:
     """Cria (e grava) os alertas de uma análise acabada de concluir. Nunca faz a análise falhar."""
     p = job.params or {}
-    if not p.get("watch_persons", True):
-        return []
     min_locations = int(p.get("alert_min_locations") or 2)
+    alerts: list[Alert] = []
+    # Cada tipo à parte: uma falha num deles não apaga os outros (os alertas são complementares).
     try:
-        if p.get("mode") == "discover":
-            alerts = _discover_alerts(s, job, engine)
-        else:
-            alerts = _match_alerts(s, job, min_locations)
-    except Exception:  # noqa: BLE001 - os alertas são complementares
-        log.exception("Falha a calcular os alertas da análise %s", job.id)
-        return []
+        if p.get("watch_persons", True):
+            alerts = (_discover_alerts(s, job, engine) if p.get("mode") == "discover"
+                      else _match_alerts(s, job, min_locations))
+        for a in alerts:
+            a.highlighted = len(a.location_ids) >= min_locations
+    except Exception:  # noqa: BLE001
+        log.exception("Falha a calcular os alertas de pessoas do processo da análise %s", job.id)
+        alerts = []
+    if p.get("mode") == "discover":
+        covered = {a.discovered_person_id for a in alerts if a.discovered_person_id is not None}
+        try:
+            for a in _places_alerts(s, job, min_locations, covered):
+                a.highlighted = True
+                alerts.append(a)
+        except Exception:  # noqa: BLE001
+            log.exception("Falha a calcular os alertas de locais da análise %s", job.id)
+        try:
+            alerts += _linked_alerts(s, job, engine)
+        except Exception:  # noqa: BLE001
+            log.exception("Falha a ligar a análise %s às outras análises do processo", job.id)
     for a in alerts:
-        a.highlighted = len(a.location_ids) >= min_locations
         s.add(a)
     s.flush()
     for a in alerts:
         log_event(s, "alert.created", case_id=job.case_id, actor="sistema",
-                  details={"alert_id": a.id, "job_id": job.id, "case_person_id": a.case_person_id,
+                  details={"alert_id": a.id, "kind": a.kind, "job_id": job.id, "case_person_id": a.case_person_id,
+                           "linked_job_id": a.linked_job_id, "linked_track_id": a.linked_track_id,
                            "discovered_person_id": a.discovered_person_id, "similarity": a.similarity,
                            "location_ids": a.location_ids, "highlighted": a.highlighted})
     return alerts

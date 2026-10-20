@@ -6,6 +6,7 @@ import { IconBellRinging, IconCheck, IconClock, IconMapPin, IconX } from "@table
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { alertText } from "../alerts";
 import { api, formatBytes, formatDate, formatDuration, formatTime } from "../api";
 import { notifyError } from "../notify";
 import { personColor } from "../personColors";
@@ -204,10 +205,9 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab, canManage = fal
           <Stack gap={4}>
             {alerts.slice(0, 8).map((a) => (
               <Group key={a.id} gap="xs" wrap="nowrap" style={{ cursor: "pointer" }} onClick={() => navigate(`/jobs/${a.job_id}`)}>
-                <Text size="sm" fw={600}>{a.case_person_name}</Text>
+                <Text size="sm" fw={600}>{alertText(a).title}</Text>
                 <Text size="sm" c="dimmed">
-                  {a.discovered_person_id != null ? `pode ser a Pessoa #${a.discovered_person_id}` : "correspondências"}
-                  {" "}· análise #{a.job_id} · {(a.similarity * 100).toFixed(0)}%
+                  {alertText(a).text} · análise #{a.job_id}{a.kind !== "places" ? ` · ${(a.similarity * 100).toFixed(0)}%` : ""}
                 </Text>
                 {a.highlighted && <Badge size="xs" color="red" leftSection={<IconMapPin size={9} />}>
                   {a.location_ids.length} locais</Badge>}

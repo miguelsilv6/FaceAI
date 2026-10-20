@@ -96,8 +96,15 @@ def load_job_data(s: Session, job: Job) -> dict[str, Any]:
     audit = list(s.exec(select(AuditEvent).where(AuditEvent.case_id == job.case_id).order_by(AuditEvent.id)))
     alerts = []
     for a in s.exec(select(Alert).where(Alert.job_id == job.id).order_by(Alert.highlighted.desc(), Alert.distance)):
-        cp = s.get(CasePerson, a.case_person_id)
-        alerts.append({"alert": a, "person": cp.name if cp else f"#{a.case_person_id}"})
+        if a.kind == "places":
+            label = "Pessoa desconhecida em vários locais"
+        elif a.kind == "linked":
+            other = (f"Pessoa #{a.linked_person_id}" if a.linked_person_id else f"aparição #{a.linked_track_id}")
+            label = f"Pode ser {other} da análise #{a.linked_job_id}"
+        else:
+            cp = s.get(CasePerson, a.case_person_id) if a.case_person_id else None
+            label = cp.name if cp else f"#{a.case_person_id}"
+        alerts.append({"alert": a, "person": label})
     return {"case": case, "job": job, "videos": videos, "references": refs, "detections": detections,
             "tracks": tracks, "audit": audit, "locations": locations_by_id(s, job.case_id), "alerts": alerts,
             "audit_chain": verify_chain(s)}
