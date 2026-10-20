@@ -21,9 +21,10 @@ export default function AspectModal({ video, jobs, onClose, onSaved }: {
 }) {
   const suggested = video.aspect?.suggested;
   const current = displaySize(video);
-  const [choice, setChoice] = useState<Choice>(suggested ? "suggested" : aspectCorrected(video) ? "custom" : "16:9");
+  const isAuto = !!suggested && suggested.display[0] === current[0] && suggested.display[1] === current[1];
+  const [choice, setChoice] = useState<Choice>(isAuto ? "suggested" : aspectCorrected(video) ? "custom" : "recorded");
   const [custom, setCustom] = useState<[number | string, number | string]>(current);
-  const [reason, setReason] = useState(suggested ? `DVR em modo ${suggested.mode}` : "");
+  const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const usedBy = jobs.filter((j) => j.video_ids.includes(video.id));
 
@@ -54,8 +55,10 @@ export default function AspectModal({ video, jobs, onClose, onSaved }: {
     <Modal opened onClose={onClose} title={`Proporção do vídeo #${video.id}`} size="lg">
       <Stack>
         <Text size="sm">
-          {video.filename}: gravado em <b>{video.width}×{video.height}</b>. Alguns DVR gravam com píxeis que não são
-          quadrados (modos "Lite"/meia resolução): fora do leitor do fabricante a imagem aparece espremida.
+          {video.filename}: gravado em <b>{video.width}×{video.height}</b>, mostrado como <b>{current.join("×")}</b>
+          {video.aspect?.source ? ` (${video.aspect.source === "manual" ? `escolhido por ${video.aspect.set_by}` : video.aspect.source})` : ""}.
+          Alguns DVR gravam com píxeis que não são quadrados (modos "Lite"/meia resolução): a proporção é ajustada
+          automaticamente quando é conhecida; altere-a aqui se a imagem continuar deformada.
         </Text>
         <Image src={api.videoFrameUrl(video.id, Math.min(5, video.duration_s / 2 || 0))} alt="Pré-visualização"
           style={{ aspectRatio: `${shown[0]} / ${shown[1]}`, objectFit: "fill", maxHeight: 260, width: "auto",
@@ -64,7 +67,7 @@ export default function AspectModal({ video, jobs, onClose, onSaved }: {
           <Stack gap={6} mt={6}>
             {suggested && (
               <Radio value="suggested"
-                label={`${suggested.display[0]}×${suggested.display[1]} — sugerido: ${suggested.mode}`} />
+                label={`Automática: ${suggested.display[0]}×${suggested.display[1]} (${suggested.mode})`} />
             )}
             <Radio value="16:9" label={`16:9 (${sizeForRatio(video.width, video.height, 16 / 9).join("×")})`} />
             <Radio value="4:3" label={`4:3 (${sizeForRatio(video.width, video.height, 4 / 3).join("×")})`} />

@@ -2,7 +2,7 @@ import {
   ActionIcon, Alert, Badge, Button, Card, Group, Loader, Menu, Stack, Switch, Table, Text, TextInput, Title, Tooltip,
 } from "@mantine/core";
 import {
-  IconArrowsExchange, IconCheck, IconClock, IconDatabase, IconDots, IconMapPin, IconMovie, IconPencil, IconPlayerPlay, IconTrash, IconX,
+  IconArrowsExchange, IconAspectRatio, IconCheck, IconClock, IconDatabase, IconDots, IconMapPin, IconMovie, IconPencil, IconPlayerPlay, IconTrash, IconX,
 } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -350,15 +350,6 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                           <Badge size="xs" variant="light" color="teal">{displaySize(v).join("×")}</Badge>
                         </Tooltip>
                       )}
-                      {!aspectCorrected(v) && v.aspect?.suggested && (
-                        <Text size="xs" c="orange" title={`${v.width}×${v.height} é a resolução do modo ${v.aspect.suggested.mode}: fora do leitor do fabricante a imagem aparece espremida.`}>
-                          imagem espremida? ({v.aspect.suggested.mode.split(" (")[0]})
-                        </Text>
-                      )}
-                      {canManage && v.width > 0 && (tech || aspectCorrected(v) || v.aspect?.suggested)
-                        && (v.extraction_status === "ready" || !v.extraction_status) && (
-                        <Button size="compact-xs" variant="subtle" onClick={() => setAspectVideo(v)}>proporção…</Button>
-                      )}
                     </Table.Td>
                     <Table.Td><PlaybackBadge video={v} onCreate={createCopy} /></Table.Td>
                     <Table.Td>
@@ -416,6 +407,10 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                           {locations.length < 2 && <Menu.Item disabled>Crie outro local primeiro</Menu.Item>}
                           {canManage && <>
                             <Menu.Divider />
+                            <Menu.Item leftSection={<IconAspectRatio size={14} />} onClick={() => setAspectVideo(v)}
+                              disabled={!v.width || !(v.extraction_status === "ready" || !v.extraction_status)}>
+                              Proporção da imagem…
+                            </Menu.Item>
                             <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={() => setDeleteId(v.id)}>
                               Eliminar vídeo
                             </Menu.Item>
