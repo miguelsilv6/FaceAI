@@ -11,6 +11,7 @@ import AuditPanel from "../components/AuditPanel";
 import { StorageBar, STORAGE_COLORS } from "../components/StoragePanel";
 import { notifyError, notifyOk } from "../notify";
 import type { AuditEvent, SystemStorage, UserAccount, UserRole } from "../types";
+import { confirmAction } from "../confirm";
 
 const ROLE_LABEL: Record<UserRole, string> = { admin: "Administrador", analyst: "Analista" };
 
@@ -91,8 +92,9 @@ export default function Users() {
                               {u.role === "admin" ? "Tornar analista" : "Tornar administrador"}
                             </Menu.Item>
                             <Menu.Item onClick={() => setResetting(u)}>Repor password…</Menu.Item>
-                            <Menu.Item disabled={!u.totp_enabled} onClick={() => {
-                              if (window.confirm(`Repor o MFA de ${u.username}? As sessões terminam e o MFA fica desativado até o voltar a ativar.`)) {
+                            <Menu.Item disabled={!u.totp_enabled} onClick={async () => {
+                              if (await confirmAction({ title: `Repor o MFA de ${u.username}?`, confirmLabel: "Repor MFA",
+                                danger: true, message: "As sessões terminam e o MFA fica desativado até o voltar a ativar." })) {
                                 void act(() => usersApi.resetMfa(u.id), "MFA reposto.");
                               }
                             }}>Repor MFA (telemóvel perdido)</Menu.Item>

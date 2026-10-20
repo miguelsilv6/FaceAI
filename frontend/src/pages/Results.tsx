@@ -32,6 +32,7 @@ import type {
   CasePerson, Detection, Job, Location, Person, ReferenceImage, ReviewStatus, Segment, Track, Video, VideoProbe,
 } from "../types";
 import { cameraLabel, cameraName, groupByLocation } from "../places";
+import { confirmAction } from "../confirm";
 
 const PAGE = 240;
 
@@ -389,7 +390,8 @@ export default function Results() {
   };
 
   const mergePerson = async (p: Person, into: Person) => {
-    if (!window.confirm(`Juntar a pessoa #${p.person_id} com a pessoa #${into.person_id}? Fica registado na auditoria.`)) return;
+    if (!await confirmAction({ title: `Juntar a pessoa ${p.person_id} com a pessoa ${into.person_id}?`,
+      message: "As aparições passam para uma só pessoa. Fica registado na auditoria.", confirmLabel: "Juntar" })) return;
     try {
       await api.mergePersons(jobId, [p.person_id, into.person_id]);
       setPersonFilter(null);
@@ -520,11 +522,16 @@ export default function Results() {
         <Group>
           {running && (
             <Button color="orange" variant="light" leftSection={<IconPlayerStop size={18} />}
-              onClick={() => api.cancelJob(job.id).then(setJob).catch(notifyError)}>Cancelar</Button>
+              onClick={async () => {
+                if (!await confirmAction({ title: "Cancelar a análise?", confirmLabel: "Cancelar análise", danger: true,
+                  message: "Os resultados obtidos até agora ficam incompletos; pode repetir a análise mais tarde." })) return;
+                api.cancelJob(job.id).then(setJob).catch(notifyError);
+              }}>Cancelar</Button>
           )}
           {(job.status === "failed" || job.status === "cancelled") && (
-            <Button variant="light" leftSection={<IconRefresh size={18} />} onClick={() => {
-              if (!window.confirm("Repetir a análise com os mesmos parâmetros e vídeos? Os resultados atuais e as revisões desta análise são substituídos.")) return;
+            <Button variant="light" leftSection={<IconRefresh size={18} />} onClick={async () => {
+              if (!await confirmAction({ title: "Repetir a análise?", confirmLabel: "Repetir",
+                message: "Corre de novo com os mesmos parâmetros e vídeos. Os resultados atuais e as revisões desta análise são substituídos." })) return;
               api.retryJob(job.id).then((j) => { setJob(j); loadResults(); }).catch(notifyError);
             }}>Repetir análise</Button>
           )}

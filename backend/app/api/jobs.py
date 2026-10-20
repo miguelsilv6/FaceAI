@@ -698,6 +698,9 @@ def merge_persons(job_id: int, body: PersonMerge, session: SessionDep, actor: Ac
     ids = sorted(set(body.person_ids))
     if len(ids) < 2:
         raise HTTPException(422, "Indique pelo menos duas pessoas diferentes.")
+    unknown = sorted(set(ids) - _person_ids(session, job_id))
+    if unknown:
+        raise HTTPException(404, f"Pessoa(s) inexistente(s) nesta análise: {', '.join(map(str, unknown))}.")
     target = ids[0]
     moved = []
     for pid in ids[1:]:

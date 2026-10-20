@@ -206,6 +206,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
   - cookie `HttpOnly`, `SameSite=Strict`, com `Secure` e prefixo `__Host-` em HTTPS. Na base de dados só fica o SHA-256 do token;
   - expiram ao fim de **30 min de inatividade** e de **12 h no máximo**; o token é renovado a cada passo do login;
   - **CSRF:** os pedidos que alteram dados exigem o cabeçalho `X-CSRF-Token` e uma origem permitida.
+- **Uploads:** os envios de uma só vez seguem os mesmos limites do envio por blocos (fotos até 50 MB, espaço livre mínimo no disco, verificado antes e durante a cópia).
 - **Força bruta:** a conta é bloqueada 1, 5 e 15 min após 5, 10 e 15 falhas seguidas, e há um limite de 30 falhas por IP a cada 15 min. A mensagem de erro é sempre genérica.
 - **Papéis:**
   - **Administrador:** gere utilizadores (menu do utilizador → *Utilizadores*), vê todos os processos e a auditoria do sistema (logins, falhas, bloqueios, contas);
@@ -214,6 +215,8 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
   - quem cria o processo fica **responsável**;
   - o responsável, ou um administrador, dá acesso a outros utilizadores como **membro** ou responsável;
   - só o responsável e o administrador editam ou eliminam o processo; uma análise pode ser eliminada também por quem a criou;
+  - **o que só o responsável (ou um administrador) pode fazer**, por alterar a evidência ou a hora real: acertar, corrigir ou repor o relógio dos vídeos, corrigir o fps, eliminar vídeos, fotos, pessoas e locais, libertar armazenamento e gerir a equipa. Na interface, estes botões não aparecem aos membros;
+  - **o que um membro pode fazer:** importar fotos e vídeos, iniciar análises, rever (confirmar/rejeitar, juntar pessoas), guardar frames e exportar. Um envio em curso só pode ser cancelado por quem o iniciou, pelo responsável ou por um administrador;
   - o acesso a qualquer objeto (vídeo, referência, análise, deteção, track, upload) é verificado pelo processo a que pertence. Sem acesso, a resposta é sempre **404**.
 - **Auditoria:** o utilizador registado é a conta autenticada, com o **IP** do pedido. Os processos criados antes das contas não têm equipa: só os administradores os veem, até lhes atribuírem um responsável.
 - **Cabeçalhos de segurança:** CSP restritiva, `X-Frame-Options: DENY`, `nosniff`, `Referrer-Policy` e HSTS em HTTPS.

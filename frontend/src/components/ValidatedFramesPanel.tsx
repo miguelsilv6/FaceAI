@@ -13,6 +13,7 @@ import { api, formatDate, formatTime } from "../api";
 import { notifyError, notifyOk } from "../notify";
 import { jobLocations } from "../places";
 import type { Job, Location, ValidatedItem } from "../types";
+import { confirmAction } from "../confirm";
 
 /** Chave única de um item: deteção confirmada ("d:…") ou frame guardado no leitor ("f:…"). */
 const keyOf = (i: ValidatedItem) => (i.type === "saved_frame" ? `f:${i.saved_frame_id}` : `d:${i.detection_id}`);
@@ -250,6 +251,8 @@ export default function ValidatedFramesPanel({ caseId, jobs, locations: caseLoca
     });
   };
   const removeSaved = async (i: ValidatedItem) => {
+    if (!await confirmAction({ title: "Retirar este frame guardado?", confirmLabel: "Retirar", danger: true,
+      message: "Deixa de aparecer nas imagens validadas. O registo fica na auditoria." })) return;
     try {
       await api.deleteSavedFrame(i.saved_frame_id!);
       notifyOk("Frame guardado retirado. O registo fica na auditoria.");
