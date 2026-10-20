@@ -71,7 +71,8 @@ def test_cancel_request_from_another_process(client, tmp_path):
     import app.db
     from app.models import Job
 
-    cid, _ = _case_video(client, tmp_path, duration_s=60)
+    # vídeo longo (2400 frames): mesmo numa máquina rápida a análise ainda corre quando o pedido chega
+    cid, _ = _case_video(client, tmp_path, duration_s=240)
     jid = _job(client, cid)
     deadline = time.time() + 30
     while client.get(f"/api/jobs/{jid}").json()["status"] != "running":
@@ -82,8 +83,8 @@ def test_cancel_request_from_another_process(client, tmp_path):
         job.cancel_requested = True
         s.add(job)
         s.commit()
-    job = wait_for_job(client, jid, timeout=60)
-    assert job["status"] == "cancelled" and job["frames_sampled"] < 600
+    job = wait_for_job(client, jid, timeout=120)
+    assert job["status"] == "cancelled" and job["frames_sampled"] < 2400
 
 
 def test_stuck_pending_states_are_resolved(client, tmp_path):

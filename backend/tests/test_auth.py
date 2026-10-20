@@ -86,7 +86,37 @@ def test_setup_gate(client, monkeypatch):
     anon = _anon()
     assert anon.get("/api/auth/status").json() == {"setup_required": True}
     r = anon.post("/api/auth/login", json={"username": "a", "password": "b"})
-    assert r.status_code == 503 and "create-admin" in r.json()["detail"]
+    assert r.status_code == 503 and "create-admin" in r.json()["detail"] and "browser" in r.json()["detail"]
+
+
+def test_first_admin_from_browser(client, monkeypatch):
+    import os
+
+    import app.main
+    from app.models import AuditEvent, User
+    from app.services import auth as auth_svc
+
+    with _db() as s:
+        for u in s.exec(select(User)):
+            u.active = False
+            s.add(u)
+        s.commit()
+    monkeypatch.setitem(app.main._setup_state, "done", False)
+    code = auth_svc.ensure_setup_code()
+    assert os.stat(auth_svc.setup_code_path()).st_mode & 0o777 == 0o600
+    anon = _anon()
+    body = {"code": "ERRADO", "username": "chefe.novo", "display_name": "Chefe",
+            "password": "girassol-trovoada-marmelo-9"}
+    assert anon.post("/api/auth/setup", json=body).status_code == 403
+    assert anon.post("/api/auth/setup", json={**body, "code": code, "password": "curta"}).status_code == 422
+    assert anon.post("/api/auth/setup", json={**body, "code": code.lower()}).status_code == 201
+    assert not auth_svc.setup_code_path().exists()  # uso único
+    assert anon.post("/api/auth/setup", json={**body, "code": code, "username": "outro"}).status_code == 409
+    r = anon.post("/api/auth/login", json={"username": "chefe.novo", "password": body["password"]})
+    assert r.status_code == 200 and r.json()["user"]["role"] == "admin"
+    with _db() as s:
+        ev = s.exec(select(AuditEvent).where(AuditEvent.action == "user.created")).all()[-1]
+        assert ev.details["via"] == "configuração inicial no browser"
 
 
 def test_unauthenticated_is_rejected(client):

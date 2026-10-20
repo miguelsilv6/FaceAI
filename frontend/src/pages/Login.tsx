@@ -61,20 +61,56 @@ export default function LoginFlow({ state, setupRequired, expired, onState, onCa
       onState(next);
     }} />;
   }
-  if (setupRequired && !state) {
-    return (
-      <Frame title="Configuração inicial">
-        <Text>Ainda não existe nenhum administrador. Na consola do servidor, execute:</Text>
-        <Code block>python -m app.cli create-admin</Code>
-        <Text size="sm" c="dimmed">Com Docker: <Code>docker compose exec faceai python -m app.cli create-admin</Code>.
-          Depois recarregue esta página.</Text>
-      </Frame>
-    );
-  }
+  if (setupRequired && !state) return <SetupStep onState={onState} />;
   if (!state) return <PasswordStep expired={expired} onState={onState} />;
   if (state.stage === "mfa_setup") return <MfaSetupStep onState={setPending} onCancel={onCancel} />;
   if (state.stage === "mfa") return <MfaStep onState={onState} onCancel={onCancel} />;
   return <ForcedPasswordChange state={state} onState={onState} onCancel={onCancel} />;
+}
+
+/** Primeiro arranque: cria o administrador no browser com o código de configuração do servidor. */
+function SetupStep({ onState }: { onState: (s: AuthState) => void }) {
+  const [code, setCode] = useState("");
+  const [username, setUsername] = useState("");
+  const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
+  const [repeat, setRepeat] = useState("");
+  const { busy, error, run } = useSubmit();
+  const mismatch = repeat.length > 0 && repeat !== password;
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (mismatch) return;
+    void run(async () => {
+      await authApi.setup({ code, username, display_name: name, password });
+      onState(await authApi.login(username, password));
+    });
+  };
+  return (
+    <Frame title="Configuração inicial" icon={<IconShieldLock size={28} />}>
+      <Text size="sm">Ainda não existe nenhum administrador. Crie-o aqui.</Text>
+      <Text size="sm" c="dimmed">
+        O <b>código de configuração</b> está no ficheiro <Code>setup-code.txt</Code> da pasta de dados (com Docker:
+        {" "}<Code>./data/setup-code.txt</Code>) e nos registos do servidor. Só quem tem acesso ao servidor o vê; deixa de
+        valer depois de criado o administrador.
+      </Text>
+      <form onSubmit={submit}>
+        <Stack>
+          <TextInput label="Código de configuração" placeholder="XXXXXX-XXXXXX-XXXXXX-XXXXXX" required autoFocus
+            autoComplete="off" value={code} onChange={(e) => setCode(e.currentTarget.value)} />
+          <TextInput label="Utilizador" description="3–32 caracteres: letras minúsculas, dígitos, '.', '_' ou '-'"
+            autoComplete="username" required value={username} onChange={(e) => setUsername(e.currentTarget.value)} />
+          <TextInput label="Nome" value={name} onChange={(e) => setName(e.currentTarget.value)} />
+          <PasswordInput label="Password" autoComplete="new-password" required value={password}
+            onChange={(e) => setPassword(e.currentTarget.value)} />
+          <PasswordInput label="Repetir a password" autoComplete="new-password" required value={repeat}
+            error={mismatch ? "As passwords não coincidem" : undefined} onChange={(e) => setRepeat(e.currentTarget.value)} />
+          {error && <Alert color="red" icon={<IconAlertTriangle size={16} />}>{error}</Alert>}
+          <Button type="submit" loading={busy} disabled={mismatch}>Criar administrador e entrar</Button>
+          <Text size="xs" c="dimmed">Alternativa na consola: <Code>python -m app.cli create-admin</Code>.</Text>
+        </Stack>
+      </form>
+    </Frame>
+  );
 }
 
 function PasswordStep({ expired, onState }: { expired: boolean; onState: (s: AuthState) => void }) {

@@ -291,3 +291,33 @@ def admins_active(s: Session) -> int:
 
 def setup_required(s: Session) -> bool:
     return admins_active(s) == 0
+
+
+def setup_code_path() -> Path:
+    return settings.data_dir / "setup-code.txt"
+
+
+def ensure_setup_code() -> str:
+    """Código de uso único para criar o primeiro administrador no browser.
+
+    Só quem tem acesso ao servidor o vê (ficheiro na pasta de dados, com permissões 600, e registos do arranque):
+    assim, quem chega primeiro à página não fica administrador por acaso."""
+    path = setup_code_path()
+    if path.exists():
+        code = path.read_text(encoding="utf-8").strip()
+        if code:
+            return code
+    code = "-".join(secrets.token_hex(3).upper() for _ in range(4))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as fh:
+        fh.write(code + "\n")
+    return code
+
+
+def check_setup_code(code: str) -> bool:
+    path = setup_code_path()
+    if not path.exists():
+        return False
+    expected = path.read_text(encoding="utf-8").strip().upper()
+    return bool(expected) and hmac.compare_digest(expected, code.strip().upper())

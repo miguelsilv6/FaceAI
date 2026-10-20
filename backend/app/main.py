@@ -43,6 +43,8 @@ for _noisy in ("weasyprint", "fontTools"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 
+log = logging.getLogger("faceai")
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings.ensure_dirs()
@@ -52,6 +54,9 @@ async def lifespan(_: FastAPI):
         migrate_person_labels(s)
         migrate_locations(s)
         disk.report_orphan_folders(s)
+        if auth.setup_required(s):
+            log.warning("Configuração inicial: crie o primeiro administrador no browser com o código %s "
+                        "(também em %s).", auth.ensure_setup_code(), auth.setup_code_path())
     # Só o processo com o bloqueio do executor recupera análises e retoma tarefas de fundo (vários workers).
     runner.enabled = is_runner = acquire_runner_lock()
     if is_runner:
@@ -84,7 +89,7 @@ SECURITY_HEADERS = [
     (b"cross-origin-opener-policy", b"same-origin"),
 ]
 # Respondem mesmo antes de existir o primeiro administrador.
-SETUP_EXEMPT = {"/api/auth/status", "/api/health"}
+SETUP_EXEMPT = {"/api/auth/status", "/api/auth/setup", "/api/health"}
 _setup_state = {"done": False}
 
 
@@ -108,7 +113,7 @@ class SecurityMiddleware:
                 return
             if path not in SETUP_EXEMPT and not self._setup_done():
                 await self._reject(scope, send, 503, "Configuração inicial pendente: crie o primeiro administrador "
-                                                     "com 'python -m app.cli create-admin'.", https)
+                                                     "no browser ou com 'python -m app.cli create-admin'.", https)
                 return
         token = request_ip.set(client_ip(request))
 

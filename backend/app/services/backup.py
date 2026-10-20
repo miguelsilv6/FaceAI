@@ -82,6 +82,15 @@ def backup(dest: Path, *, include_files: bool = False) -> dict[str, Any]:
         if settings.audit_log_path.exists():
             shutil.copy2(settings.audit_log_path, files / "audit.jsonl")
         manifest["files"] = {"folder": "files", "copied": copied, "unchanged": skipped}
+    # Sem a chave, os segredos MFA da cópia não se decifram (os utilizadores teriam de repor o MFA).
+    key = settings.data_dir / "secret.key"
+    if not settings.secret_key and key.exists():
+        key_out = dest / "secret.key"
+        shutil.copy2(key, key_out)
+        key_out.chmod(0o600)
+        manifest["secret_key"] = {"file": key_out.name, "note": "chave dos segredos MFA: guardar em local seguro"}
+    elif settings.secret_key:
+        manifest["secret_key"] = {"note": "definida em FACEAI_SECRET_KEY: guarde essa variável à parte"}
     (dest / f"manifest_{stamp}.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2),
                                                  encoding="utf-8")
     return manifest

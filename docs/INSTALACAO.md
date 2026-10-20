@@ -62,7 +62,6 @@ node --version    # deve ser v20 ou superior
 ```bash
 git clone https://github.com/miguelsilv6/FaceAI.git
 cd FaceAI
-git checkout claude/determined-cannon-c2q29b    # até existir um branch main
 ```
 
 ### 4. Backend (Python)
@@ -205,13 +204,12 @@ Requisitos: Docker Engine com o plugin Compose.
 ```bash
 git clone https://github.com/miguelsilv6/FaceAI.git
 cd FaceAI
-git checkout claude/determined-cannon-c2q29b
+cp .env.example .env                  # opcional: configuração (MFA obrigatório, Cloudflare, CPU…)
 
 docker compose up --build -d          # CPU
-docker compose logs -f
 ```
 
-Cria o primeiro administrador e abre **http://localhost:8000**:
+Abre **http://localhost:8000** e cria o primeiro administrador no browser. O ecrã pede o **código de configuração**, que está em `./data/setup-code.txt` (ou em `docker compose logs faceai`). Só quem tem acesso ao servidor o vê, e deixa de valer depois de criado o administrador. Alternativa na consola:
 
 ```bash
 docker compose exec faceai python -m app.cli create-admin chefe --name "Nome Apelido"
@@ -219,25 +217,26 @@ docker compose exec faceai python -m app.cli create-admin chefe --name "Nome Ape
 
 - Os dados ficam em `./data`, incluindo `secret.key` (a chave dos segredos MFA): faz backup da pasta inteira.
   Com o servidor ligado, usa `docker compose exec faceai python -m app.cli backup /data/backups --files`: dá uma cópia
-  consistente da base de dados (copiar o `faceai.db` à mão pode perder as últimas escritas) e copia os ficheiros de
-  forma incremental. Junta o `secret.key` à cópia.
+  consistente da base de dados (copiar o `faceai.db` à mão pode perder as últimas escritas), copia os ficheiros de
+  forma incremental e inclui o `secret.key`. Ver [OPERACAO.md](OPERACAO.md) para o restauro e backups agendados.
 - Os modelos ficam no volume `faceai-models` e são descarregados na primeira análise.
 - **Saúde e reinício.**
   - `docker compose ps` mostra o estado da verificação de saúde (`healthy`/`unhealthy`), que usa `GET /api/health`. Atenção: o Docker reinicia sozinho o contentor quando o processo termina (`restart: unless-stopped`), mas **não** por ficar `unhealthy`. Para isso use uma ferramenta de monitorização, ou um *autoheal*, que consulte `/api/health`.
   - Ao parar (`docker compose stop`, atualização), a análise em curso volta à fila e recomeça no arranque seguinte. Há 60 s para isso (`stop_grace_period`).
 - **Mover a pasta de dados.** Pode copiar a pasta `data` para outro disco ou outra máquina e apontar `FACEAI_DATA_DIR` (ou o volume) para o novo sítio. No arranque, o FaceAI corrige os caminhos dos ficheiros e regista a mudança na auditoria.
 - **Importação em bloco a partir do servidor (opcional).** Para importar diretamente de um disco USB ou de uma partilha
-  (cada pasta passa a ser um local), monta a pasta só de leitura e indica-a ao FaceAI no `docker-compose.yml`, no
-  serviço `faceai`:
+  (cada pasta passa a ser um local), monta a pasta só de leitura num `docker-compose.override.yml` e indica-a no `.env`:
 
   ```yaml
+  services:
+    faceai:
       volumes:
         - /mnt/usb:/import:ro
-      environment:
-        FACEAI_IMPORT_DIR: /import
   ```
 
-  Depois: `docker compose up -d`. Em *Locais e vídeos* → **Importar pastas** → *Da pasta do servidor*. Os ficheiros são
+  e no `.env`: `FACEAI_IMPORT_DIR=/import`.
+
+  Depois: `docker compose up -d`. Em *2 · Vídeos* → **Importar pastas** → *Da pasta do servidor*. Os ficheiros são
   copiados para o processo e os originais não são alterados (o `:ro` garante-o).
 
 **GPU NVIDIA:** instala o driver NVIDIA e o [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html), e depois:
@@ -308,7 +307,7 @@ A aplicação não envia imagens nem vídeos para fora. A rede só é usada para
 
 A base de dados é migrada automaticamente no arranque: as colunas novas são acrescentadas e nenhum dado é apagado. Os casos e as análises anteriores mantêm-se.
 
-**Ao atualizar para a versão com contas:** depois do arranque, a API responde 503 até criares o primeiro administrador (`python -m app.cli create-admin`, ou com `docker compose exec faceai …`). Os casos antigos não têm equipa: só os administradores os veem. Atribui-lhes um responsável no separador *Equipa*. Os eventos de auditoria antigos mantêm o nome livre que era indicado no navegador.
+**Ao atualizar para a versão com contas:** depois do arranque, a API responde 503 até criares o primeiro administrador (no browser, com o código de `data/setup-code.txt`, ou com `python -m app.cli create-admin`). Os casos antigos não têm equipa: só os administradores os veem. Atribui-lhes um responsável no menu **⋯ → Equipa** do processo. Os eventos de auditoria antigos mantêm o nome livre que era indicado no navegador.
 
 **Instalação nativa:**
 ```bash
@@ -319,7 +318,7 @@ sudo systemctl restart faceai         # ou volta a arrancar o uvicorn
 ```
 Opcional: `pip uninstall -y tensorflow tf-keras deepface retina-face` liberta ~2,3 GB, se não fores usar o motor DeepFace.
 
-**Docker:** se alteraste o `docker-compose.yml` (portas, redes), passa essas alterações para um `docker-compose.override.yml`, que é ignorado pelo git, e repõe o original:
+**Docker:** as definições ficam no `.env` (ignorado pelo git). Se alteraste o `docker-compose.yml` (portas, redes), passa essas alterações para um `docker-compose.override.yml`, que também não é versionado, e repõe o original:
 ```bash
 cd ~/FaceAI
 cp docker-compose.yml /tmp/compose.meu.yml       # cópia de segurança

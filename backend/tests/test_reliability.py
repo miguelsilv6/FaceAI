@@ -191,3 +191,18 @@ def test_backup_snapshot(client, tmp_path):
     with sqlite3.connect(tmp_path / "bk" / m["database"]["file"]) as db:
         assert db.execute("SELECT count(*) FROM 'case' WHERE name = 'Backup'").fetchone()[0] == 1
     assert (tmp_path / "bk" / f"manifest_{m['created_at']}.json").exists()
+
+
+def test_backup_includes_secret_key(client, tmp_path):
+    import stat
+
+    from app.config import settings
+    from app.services import auth
+    from app.services.backup import backup
+
+    auth.encrypt("x")  # cria data/secret.key se ainda não existir
+    m = backup(tmp_path / "bk2")
+    key = tmp_path / "bk2" / "secret.key"
+    assert m["secret_key"]["file"] == "secret.key"
+    assert key.read_bytes() == (settings.data_dir / "secret.key").read_bytes()
+    assert stat.S_IMODE(key.stat().st_mode) == 0o600

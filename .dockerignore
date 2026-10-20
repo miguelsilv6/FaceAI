@@ -5,3 +5,10 @@ backend/data
 frontend/node_modules
 frontend/dist
 .git
+**/.ruff_cache
+**/.pytest_cache
+**/*.egg-info
+backend/tests
+docs
+tools
+.env

@@ -239,6 +239,8 @@ async function uploadMany<T>(caseId: number, kind: "video" | "reference", files:
 
 export const authApi = {
   status: () => request<{ setup_required: boolean }>("GET", "/api/auth/status"),
+  setup: (body: { code: string; username: string; display_name: string; password: string }) =>
+    request<{ username: string }>("POST", "/api/auth/setup", body),
   me: () => request<AuthState>("GET", "/api/auth/me"),
   login: (username: string, password: string) => request<AuthState>("POST", "/api/auth/login", { username, password }),
   mfaSetup: () => request<MfaSetup>("POST", "/api/auth/mfa/setup"),

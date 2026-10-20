@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlmodel import Session, select
 
 from ..config import settings
-from ..models import User, UserSession
+from ..models import User, UserRole, UserSession
 from ..services import auth
 from ..services.audit import log_event
 from .deps import COOKIE, SECURE_COOKIE, SessionDep, client_ip, cookie_secure, load_auth, session_token
@@ -28,6 +28,13 @@ ALL_STAGES = ("mfa_setup", "mfa", "password", "ok")
 
 class LoginBody(BaseModel):
     username: str = Field(max_length=64)
+    password: str = Field(max_length=auth.MAX_PASSWORD)
+
+
+class SetupBody(BaseModel):
+    code: str = Field(max_length=64)
+    username: str = Field(max_length=32)
+    display_name: str = Field("", max_length=100)
     password: str = Field(max_length=auth.MAX_PASSWORD)
 
 
@@ -91,6 +98,33 @@ def _state(sess: UserSession, user: User) -> dict:
 def status(session: SessionDep) -> dict:
     """Público: só diz se falta criar o primeiro administrador (pela linha de comandos)."""
     return {"setup_required": auth.setup_required(session)}
+
+
+@router.post("/setup", status_code=201)
+def setup(body: SetupBody, session: SessionDep) -> dict:
+    """Primeiro administrador, no browser, com o código de configuração do servidor (só enquanto não há nenhum)."""
+    if not auth.setup_required(session):
+        raise HTTPException(409, "A configuração inicial já foi feita. Inicie sessão.")
+    if not auth.check_setup_code(body.code):
+        log_event(session, "auth.setup_failed", actor="?", details={"username": body.username})
+        raise HTTPException(403, "Código de configuração inválido. Veja o ficheiro setup-code.txt na pasta de dados "
+                                 "ou os registos do servidor.")
+    username = body.username.strip().lower()
+    if not auth.USERNAME_RE.fullmatch(username):
+        raise HTTPException(422, "Nome de utilizador inválido: 3–32 caracteres (a-z, 0-9, '.', '_', '-').")
+    problem = auth.password_problem(body.password, username)
+    if problem:
+        raise HTTPException(422, problem)
+    if session.exec(select(User).where(User.username == username)).first() is not None:
+        raise HTTPException(409, "Já existe um utilizador com esse nome.")
+    session.add(User(username=username, display_name=body.display_name.strip(), role=UserRole.admin,
+                     password_hash=auth.hash_password(body.password), must_change_password=False,
+                     password_changed_at=auth.now()))
+    session.commit()
+    auth.setup_code_path().unlink(missing_ok=True)  # uso único
+    log_event(session, "user.created", actor=username,
+              details={"user": username, "role": "admin", "via": "configuração inicial no browser"})
+    return {"username": username}
 
 
 @router.post("/login")
