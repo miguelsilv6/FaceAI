@@ -129,6 +129,12 @@ def can_manage_case(session: Session, user: User, case_id: int) -> bool:
     return m is not None and m.role == "owner"
 
 
+def require_case_manager(session: Session, user: User, case_id: int) -> None:
+    """Ações que alteram evidência, relógio ou estrutura do processo: só o responsável ou um administrador."""
+    if not can_manage_case(session, user, case_id):
+        raise HTTPException(403, "Só o responsável do processo ou um administrador pode fazer isto.")
+
+
 def accessible_case_ids(session: Session, user: User) -> set[int] | None:
     """None = todos (admin)."""
     if user.role == UserRole.admin:

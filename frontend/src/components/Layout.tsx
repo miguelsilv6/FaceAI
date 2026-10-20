@@ -12,6 +12,7 @@ import ActivityBar from "./ActivityBar";
 import ErrorBoundary from "./ErrorBoundary";
 import Signature from "./Signature";
 import type { SystemInfo } from "../types";
+import { confirmAction } from "../confirm";
 
 export default function Layout() {
   const { user, isAdmin, logout } = useAuth();
@@ -59,7 +60,10 @@ export default function Layout() {
                 {isAdmin && <Menu.Item leftSection={<IconUsers size={16} />} onClick={() => navigate("/users")}>
                   Utilizadores</Menu.Item>}
                 <Menu.Divider />
-                <Menu.Item color="red" leftSection={<IconLogout size={16} />} onClick={() => { if (!uploading || window.confirm(LEAVE_WARNING)) void logout(); }}>
+                <Menu.Item color="red" leftSection={<IconLogout size={16} />} onClick={async () => {
+                  if (!uploading || await confirmAction({ title: "Terminar sessão?", message: LEAVE_WARNING,
+                    confirmLabel: "Terminar sessão", danger: true })) void logout();
+                }}>
                   Terminar sessão</Menu.Item>
               </Menu.Dropdown>
             </Menu>

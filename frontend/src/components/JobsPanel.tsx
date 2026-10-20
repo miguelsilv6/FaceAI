@@ -14,6 +14,7 @@ import { usePolling } from "../usePolling";
 import DeleteJobModal from "./DeleteJobModal";
 import JobStatusBadge from "./JobStatusBadge";
 import ReferencePicker, { allChoices, choicesToRefIds, type RefChoice } from "./ReferencePicker";
+import { confirmAction } from "../confirm";
 
 type Preset = NonNullable<JobParams["preset"]>;
 // Perfis de rigor: só mudam estes parâmetros (o resto fica nas opções avançadas).
@@ -124,7 +125,8 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
   };
 
   const retry = async (j: Job) => {
-    if (!window.confirm(`Repetir a análise #${j.id}? Os resultados atuais (incompletos) e as revisões feitas nesta análise são substituídos.`)) return;
+    if (!await confirmAction({ title: `Repetir a análise #${j.id}?`, confirmLabel: "Repetir",
+      message: "Os resultados atuais (incompletos) e as revisões feitas nesta análise são substituídos." })) return;
     try {
       await api.retryJob(j.id);
       notifyOk(`Análise #${j.id} em fila para repetir.`);

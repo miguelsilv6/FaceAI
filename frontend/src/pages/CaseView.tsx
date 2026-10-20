@@ -175,7 +175,8 @@ export default function CaseView() {
             photos={references.filter((r) => r.valid).length} videos={videos.length} />
         </Tabs.Panel>
         <Tabs.Panel value="references" pt="md">
-          <ReferencesPanel caseId={caseId} references={references} persons={persons} onChange={reload} />
+          <ReferencesPanel caseId={caseId} references={references} persons={persons} onChange={reload}
+            canManage={canManage} />
         </Tabs.Panel>
         <Tabs.Panel value="videos" pt="md">
           <VideosPanel caseId={caseId} videos={videos} locations={locations} onChange={reloadVideos} jobs={jobs} />

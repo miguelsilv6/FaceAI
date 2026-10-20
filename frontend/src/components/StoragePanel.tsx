@@ -3,6 +3,7 @@ import { IconRefresh } from "@tabler/icons-react";
 import { useCallback, useEffect, useState } from "react";
 
 import { api, formatBytes } from "../api";
+import { confirmAction } from "../confirm";
 import { notifyError, notifyOk } from "../notify";
 import type { CaseStorage, StorageCategory, StorageKey } from "../types";
 
@@ -46,7 +47,8 @@ export default function StoragePanel({ caseId, canManage }: { caseId: number; ca
   useEffect(() => load(), [load]);
 
   const free = async (key: StorageKey, confirm: string) => {
-    if (!window.confirm(`${confirm}\n\nA evidência (vídeos, fotos de referência e recortes) não é tocada. Continuar?`)) return;
+    if (!await confirmAction({ title: "Libertar espaço", confirmLabel: "Libertar",
+      message: `${confirm}\n\nA evidência (vídeos, fotos de referência e recortes) não é tocada.` })) return;
     setBusy(key);
     try {
       const r = await api.freeStorage(caseId, [key]);

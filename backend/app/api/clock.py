@@ -11,7 +11,7 @@ from ..models import Video
 from ..schemas import ClockManual, ClockOcr, ClockOcrTest, ClockOffset
 from ..services import fps_fix, ocr, sec_extract
 from ..services.audit import log_event
-from .deps import ActorDep, SessionDep, authorize_objects
+from .deps import ActorDep, CurrentUser, SessionDep, authorize_objects, require_case_manager
 
 # Todas as rotas exigem sessão; os objetos do caminho têm de pertencer a um caso acessível (ver deps).
 router = APIRouter(prefix="/api", tags=["hora real"], dependencies=[Depends(authorize_objects)])
@@ -62,8 +62,9 @@ def clock_ocr_test(video_id: int, body: ClockOcrTest, session: SessionDep) -> di
 
 
 @router.post("/videos/{video_id}/clock/ocr", response_model=Video)
-def clock_ocr(video_id: int, body: ClockOcr, session: SessionDep, actor: ActorDep) -> Video:
+def clock_ocr(video_id: int, body: ClockOcr, session: SessionDep, actor: ActorDep, user: CurrentUser) -> Video:
     v = _video(session, video_id)
+    require_case_manager(session, user, v.case_id)  # altera a hora real (evidência)
     try:
         cal = ocr.calibrate(v.source_path, v.fps, v.duration_s, roi=body.roi, samples=body.samples,
                             date_order=body.date_order)
@@ -91,8 +92,9 @@ def clock_ocr(video_id: int, body: ClockOcr, session: SessionDep, actor: ActorDe
 
 
 @router.put("/videos/{video_id}/clock", response_model=Video)
-def clock_manual(video_id: int, body: ClockManual, session: SessionDep, actor: ActorDep) -> Video:
+def clock_manual(video_id: int, body: ClockManual, session: SessionDep, actor: ActorDep, user: CurrentUser) -> Video:
     v = _video(session, video_id)
+    require_case_manager(session, user, v.case_id)  # altera a hora real (evidência)
     dvr_time = body.dvr_time.replace(tzinfo=None)  # hora "de parede" do DVR, sem fuso
     v.dvr_start = (dvr_time - timedelta(seconds=body.video_s)).isoformat(timespec="milliseconds")
     v.dvr_rate = 1.0
@@ -108,8 +110,9 @@ def clock_manual(video_id: int, body: ClockManual, session: SessionDep, actor: A
 
 
 @router.patch("/videos/{video_id}/clock/offset", response_model=Video)
-def clock_offset(video_id: int, body: ClockOffset, session: SessionDep, actor: ActorDep) -> Video:
+def clock_offset(video_id: int, body: ClockOffset, session: SessionDep, actor: ActorDep, user: CurrentUser) -> Video:
     v = _video(session, video_id)
+    require_case_manager(session, user, v.case_id)  # altera a hora real (evidência)
     previous = v.clock_offset_s
     v.clock_offset_s = body.clock_offset_s
     if body.note is not None:
@@ -123,8 +126,9 @@ def clock_offset(video_id: int, body: ClockOffset, session: SessionDep, actor: A
 
 
 @router.delete("/videos/{video_id}/clock", response_model=Video)
-def clock_reset(video_id: int, session: SessionDep, actor: ActorDep) -> Video:
+def clock_reset(video_id: int, session: SessionDep, actor: ActorDep, user: CurrentUser) -> Video:
     v = _video(session, video_id)
+    require_case_manager(session, user, v.case_id)  # altera a hora real (evidência)
     before = _clock_details(v)
     v.dvr_start, v.dvr_rate, v.clock_offset_s, v.time_source, v.time_note = None, 1.0, 0.0, "", ""
     v.time_calibration = {}

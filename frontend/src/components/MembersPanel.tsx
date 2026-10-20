@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 
 import { api, formatDate } from "../api";
 import { useAuth } from "../auth";
+import { confirmAction } from "../confirm";
 import { notifyError, notifyOk } from "../notify";
 import type { CaseMember } from "../types";
 
@@ -29,7 +30,9 @@ export default function MembersPanel({ caseId, members, canManage, onChange }: {
 
   const remove = async (m: CaseMember) => {
     const self = m.user_id === user.id;
-    if (!window.confirm(self ? "Remover o seu próprio acesso a este processo?" : `Remover o acesso de ${m.username}?`)) return;
+    if (!await confirmAction({ title: self ? "Remover o seu próprio acesso?" : `Remover o acesso de ${m.username}?`,
+      message: self ? "Deixa de ver este processo." : "Deixa de ver este processo; fica registado na auditoria.",
+      confirmLabel: "Remover", danger: true })) return;
     try {
       await api.removeMember(caseId, m.user_id);
       onChange();

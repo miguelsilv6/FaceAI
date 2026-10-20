@@ -67,9 +67,9 @@ from .deps import (
     SessionDep,
     accessible_case_ids,
     authorize_objects,
-    can_manage_case,
     get_case_or_404,
     membership,
+    require_case_manager,
 )
 
 # Todas as rotas exigem sessão; os objetos do caminho têm de pertencer a um caso acessível (ver deps).
@@ -83,16 +83,43 @@ VIDEO_EXT = {
 EXTRACTED_EXT = {".sec"}  # formatos proprietários: o vídeo é extraído para uma cópia de trabalho (sec_format)
 
 
-def _store_upload(upload: UploadFile, dest_dir: Path, allowed: set[str]) -> tuple[Path, int]:
+MAX_REFERENCE_BYTES = 50 * 1024 * 1024  # igual ao upload por blocos
+_COPY_BLOCK = 4 * 1024 * 1024
+_SPACE_EVERY = 256 * 1024 * 1024
+
+
+def _store_upload(upload: UploadFile, dest_dir: Path, allowed: set[str],
+                  max_bytes: int | None = None) -> tuple[Path, int]:
+    """Grava um ficheiro enviado de uma vez, com o mesmo limite de tamanho e de espaço livre do upload por blocos."""
     original = Path(upload.filename or "ficheiro").name
     ext = Path(original).suffix.lower()
     if ext not in allowed:
         raise HTTPException(415, f"Extensão não suportada: '{ext or original}'.")
+    too_big = f"{original}: ficheiro demasiado grande (máximo {(max_bytes or 0) // 1024**2} MB)."
+    if upload.size is not None:
+        if max_bytes is not None and upload.size > max_bytes:
+            raise HTTPException(413, too_big)
+        disk.check_space(upload.size)
+    else:
+        disk.check_space(0)
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / f"{uuid.uuid4().hex}{ext}"
-    with dest.open("wb") as fh:
-        shutil.copyfileobj(upload.file, fh, length=4 * 1024 * 1024)
-    return dest, dest.stat().st_size
+    written = since_check = 0
+    try:
+        with dest.open("wb") as fh:
+            while block := upload.file.read(_COPY_BLOCK):
+                written += len(block)
+                if max_bytes is not None and written > max_bytes:
+                    raise HTTPException(413, too_big)
+                since_check += len(block)
+                if since_check >= _SPACE_EVERY:  # tamanho desconhecido à partida: confirma o espaço pelo caminho
+                    disk.check_space(0)
+                    since_check = 0
+                fh.write(block)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+    return dest, written
 
 
 def register_reference(session, case_id: int, path: Path, filename: str, size: int, actor: str) -> ReferenceImage:
@@ -343,8 +370,7 @@ def delete_case(case_id: int, body: CaseDelete, session: SessionDep, user: Curre
 
 
 def _require_manager(session, user: User, case_id: int) -> None:
-    if not can_manage_case(session, user, case_id):
-        raise HTTPException(403, "Só o responsável do processo ou um administrador pode fazer isto.")
+    require_case_manager(session, user, case_id)
 
 
 # ---------------------------------------------------------------- membros do caso (need-to-know)
@@ -436,7 +462,7 @@ def upload_references(
     ref_dir = settings.case_dir(case_id) / "references"
     created: list[ReferenceImage] = []
     for upload in files:
-        path, size = _store_upload(upload, ref_dir, IMAGE_EXT)
+        path, size = _store_upload(upload, ref_dir, IMAGE_EXT, MAX_REFERENCE_BYTES)
         created.append(register_reference(session, case_id, path, Path(upload.filename or "").name, size, actor))
     return created
 
@@ -571,11 +597,12 @@ def update_case_person(case_person_id: int, body: CasePersonUpdate, session: Ses
 
 
 @router.delete("/case-persons/{case_person_id}", status_code=204)
-def delete_case_person(case_person_id: int, session: SessionDep, actor: ActorDep) -> None:
+def delete_case_person(case_person_id: int, session: SessionDep, actor: ActorDep, user: CurrentUser) -> None:
     """Elimina a pessoa; as suas fotos não são apagadas, passam a fotos soltas."""
     p = session.get(CasePerson, case_person_id)
     if p is None:
         raise HTTPException(404, "Pessoa não encontrada.")
+    _require_manager(session, user, p.case_id)
     refs = session.exec(select(ReferenceImage).where(ReferenceImage.case_person_id == p.id)).all()
     for r in refs:
         r.case_person_id = None
@@ -592,10 +619,11 @@ def delete_case_person(case_person_id: int, session: SessionDep, actor: ActorDep
 
 
 @router.delete("/references/{ref_id}", status_code=204)
-def delete_reference(ref_id: int, session: SessionDep, actor: ActorDep) -> None:
+def delete_reference(ref_id: int, session: SessionDep, actor: ActorDep, user: CurrentUser) -> None:
     ref = session.get(ReferenceImage, ref_id)
     if ref is None:
         raise HTTPException(404, "Referência não encontrada.")
+    _require_manager(session, user, ref.case_id)
     if session.exec(select(Detection).where(Detection.reference_id == ref_id)).first():
         raise HTTPException(409, "A referência já foi usada numa análise e não pode ser removida.")
     session.delete(ref)
@@ -732,11 +760,12 @@ def update_location(location_id: int, body: LocationCreate, session: SessionDep,
 
 
 @router.delete("/locations/{location_id}", status_code=204)
-def delete_location(location_id: int, session: SessionDep, actor: ActorDep) -> None:
+def delete_location(location_id: int, session: SessionDep, actor: ActorDep, user: CurrentUser) -> None:
     """Elimina um local vazio (os vídeos nunca são apagados por esta via)."""
     loc = session.get(Location, location_id)
     if loc is None:
         raise HTTPException(404, "Local não encontrado.")
+    _require_manager(session, user, loc.case_id)
     if session.exec(select(Video).where(Video.location_id == loc.id)).first():
         raise HTTPException(409, "O local tem vídeos. Mova-os para outro local ou elimine-os primeiro.")
     if session.exec(select(Upload).where(Upload.location_id == loc.id, Upload.completed_at == None)).first():  # noqa: E711

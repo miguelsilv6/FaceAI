@@ -29,6 +29,7 @@ import segno
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from sqlalchemy import func
 from sqlmodel import Session, select
 
 from ..config import settings
@@ -216,9 +217,9 @@ def ip_blocked(s: Session, ip: str) -> bool:
     if not ip:
         return False
     since = now() - IP_WINDOW
-    failures = s.exec(select(LoginAttempt).where(LoginAttempt.ip == ip, LoginAttempt.success == False,  # noqa: E712
-                                                 LoginAttempt.at >= since)).all()
-    return len(failures) >= IP_MAX_FAILURES
+    failures = s.exec(select(func.count()).select_from(LoginAttempt).where(
+        LoginAttempt.ip == ip, LoginAttempt.success == False, LoginAttempt.at >= since)).one()  # noqa: E712
+    return failures >= IP_MAX_FAILURES
 
 
 # ----------------------------------------------------------------------------- sessões

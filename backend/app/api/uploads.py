@@ -40,7 +40,7 @@ from .cases import (
     register_reference,
     register_video,
 )
-from .deps import ActorDep, SessionDep, authorize_objects, get_case_or_404
+from .deps import ActorDep, CurrentUser, SessionDep, authorize_objects, can_manage_case, get_case_or_404
 
 # Todas as rotas exigem sessão; os objetos do caminho têm de pertencer a um caso acessível (ver deps).
 router = APIRouter(prefix="/api", tags=["uploads"], dependencies=[Depends(authorize_objects)])
@@ -106,8 +106,11 @@ def cleanup_stale_uploads() -> int:
         for u in s.exec(select(Upload).where(Upload.completed_at == None)):  # noqa: E711
             created = u.created_at if u.created_at.tzinfo else u.created_at.replace(tzinfo=cutoff.tzinfo)
             if created < cutoff:
+                lock = _locks.get(u.id)
+                if lock is not None and lock.locked():
+                    continue  # está a receber um bloco agora: não é abandonado
                 Path(u.temp_path).unlink(missing_ok=True)
-                _locks.pop(u.id, None)
+                _forget(u.id)
                 s.delete(u)
                 removed += 1
         s.commit()
@@ -330,8 +333,10 @@ def _mark_completed(upload_id: str, result_id: int) -> None:
 
 
 @router.delete("/uploads/{upload_id}", status_code=204)
-def cancel_upload(upload_id: str, session: SessionDep, actor: ActorDep) -> None:
+def cancel_upload(upload_id: str, session: SessionDep, actor: ActorDep, user: CurrentUser) -> None:
     u = _get_open(session, upload_id)
+    if u.created_by and u.created_by != actor and not can_manage_case(session, user, u.case_id):
+        raise HTTPException(403, "Só quem iniciou o envio, o responsável do processo ou um administrador o cancela.")
     Path(u.temp_path).unlink(missing_ok=True)
     _forget(upload_id)
     session.delete(u)

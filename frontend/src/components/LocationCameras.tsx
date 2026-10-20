@@ -19,6 +19,7 @@ import FpsModal from "./FpsModal";
 import PlaybackBadge from "./PlaybackBadge";
 import UploadZone from "./UploadZone";
 import VideoPlayerModal from "./VideoPlayerModal";
+import { confirmAction } from "../confirm";
 
 /** Resumo da extração de um formato proprietário (.sec), para a dica do vídeo. */
 function extractionTitle(v: Video): string {
@@ -82,9 +83,9 @@ function CameraNameInput({ video, onSaved }: { video: Video; onSaved: () => void
 }
 
 /** Cabeçalho de um local: nome (editável), n.º de câmaras e eliminação (só vazio). */
-function LocationHeader({ location, cameras, duration, analysis, onChange, onDeleted }: {
-  location: Location; cameras: number; duration: number; analysis: LocationAnalysis; onChange: () => void;
-  onDeleted: () => void;
+function LocationHeader({ location, cameras, duration, analysis, canManage, onChange, onDeleted }: {
+  location: Location; cameras: number; duration: number; analysis: LocationAnalysis; canManage: boolean;
+  onChange: () => void; onDeleted: () => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(location.name);
@@ -98,6 +99,8 @@ function LocationHeader({ location, cameras, duration, analysis, onChange, onDel
     }
   };
   const remove = async () => {
+    if (!await confirmAction({ title: `Eliminar o local "${location.name}"?`, message: "O local está vazio. Fica registado na auditoria.",
+      confirmLabel: "Eliminar", danger: true })) return;
     try {
       await api.deleteLocation(location.id);
       notifyOk(`Local "${location.name}" eliminado.`);
@@ -138,12 +141,14 @@ function LocationHeader({ location, cameras, duration, analysis, onChange, onDel
           </Tooltip>
         )}
       </Group>
-      <Tooltip label={cameras ? "Mova ou elimine os vídeos para poder eliminar o local" : "Eliminar o local"}>
-        <span>
-          <ActionIcon variant="subtle" color="red" disabled={cameras > 0} onClick={remove}
-            aria-label={`Eliminar o local ${location.name}`}><IconTrash size={16} /></ActionIcon>
-        </span>
-      </Tooltip>
+      {canManage && (
+        <Tooltip label={cameras ? "Mova ou elimine os vídeos para poder eliminar o local" : "Eliminar o local"}>
+          <span>
+            <ActionIcon variant="subtle" color="red" disabled={cameras > 0} onClick={remove}
+              aria-label={`Eliminar o local ${location.name}`}><IconTrash size={16} /></ActionIcon>
+          </span>
+        </Tooltip>
+      )}
     </Group>
   );
 }
@@ -226,7 +231,8 @@ export default function LocationCameras({ caseId, location, videos, locations, j
   return (
     <Stack>
       <LocationHeader location={location} cameras={vs.length} duration={vs.reduce((n, v) => n + v.duration_s, 0)}
-        analysis={locationAnalysis(location.id, videos, jobs)} onChange={onChange} onDeleted={onDeleted} />
+        analysis={locationAnalysis(location.id, videos, jobs)} canManage={canManage} onChange={onChange}
+        onDeleted={onDeleted} />
       <UploadZone accept={VIDEO_ACCEPT} onDrop={upload} progress={progress}
         icon={<IconMovie size={40} stroke={1.5} />}
         title={`Importar vídeos de CCTV para "${location.name}"`}
@@ -360,8 +366,10 @@ export default function LocationCameras({ caseId, location, videos, locations, j
                           </Badge>
                         </Tooltip>
                       ) : <Text size="xs" c="dimmed">não acertada</Text>}
-                      <Button size="compact-xs" variant="subtle" leftSection={<IconClock size={14} />} mt={4}
-                        onClick={() => setClockVideo(v)}>Acertar hora</Button>
+                      {canManage && (
+                        <Button size="compact-xs" variant="subtle" leftSection={<IconClock size={14} />} mt={4}
+                          onClick={() => setClockVideo(v)}>Acertar hora</Button>
+                      )}
                     </Table.Td>
                     <Table.Td>
                       <Group gap={4}>

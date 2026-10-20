@@ -10,6 +10,7 @@ import {
 import { useEffect, useState, type DragEvent } from "react";
 
 import { api } from "../api";
+import { confirmAction } from "../confirm";
 import { notifyError, notifyOk } from "../notify";
 import { personColor } from "../personColors";
 import type { CasePerson, ReferenceImage } from "../types";
@@ -20,13 +21,14 @@ interface Props {
   caseId: number;
   references: ReferenceImage[];
   persons: CasePerson[];
+  canManage?: boolean; // apagar fotos e pessoas: só o responsável ou um administrador
   onChange: () => void;
 }
 
 const DRAG_TYPE = "application/x-faceai-reference";
 
 /** Pessoas do caso (cada uma com as suas fotos, de vários ângulos) e fotos soltas. */
-export default function ReferencesPanel({ caseId, references, persons, onChange }: Props) {
+export default function ReferencesPanel({ caseId, references, persons, onChange, canManage = true }: Props) {
   const [progress, setProgress] = useState<{ target: number | null; value: number } | null>(null);
   const [editing, setEditing] = useState<CasePerson | "new" | null>(null);
   const [dropTarget, setDropTarget] = useState<number | "loose" | null>(null);
@@ -85,7 +87,11 @@ export default function ReferencesPanel({ caseId, references, persons, onChange 
   const thumb = (r: ReferenceImage) => (
     <RefThumb key={r.id} reference={r} persons={persons} onMove={move} onOpen={setViewing}
       onSearch={(ref) => setSearch({ kind: "reference", id: ref.id, name: ref.filename })}
-      onDelete={(ref) => act(() => api.deleteReference(ref.id))} />
+      onDelete={canManage ? async (ref) => {
+        if (await confirmAction({ title: "Eliminar esta foto?", message: ref.filename, confirmLabel: "Eliminar", danger: true })) {
+          void act(() => api.deleteReference(ref.id));
+        }
+      } : undefined} />
   );
 
   return (
@@ -126,11 +132,12 @@ export default function ReferencesPanel({ caseId, references, persons, onChange 
                   </Menu.Item>
                   <Menu.Divider />
                   <Menu.Item onClick={() => setEditing(p)}>Mudar nome / notas</Menu.Item>
-                  <Menu.Item color="red" onClick={() => {
-                    if (window.confirm(`Eliminar a pessoa "${p.name}"? As fotos não são apagadas: passam a fotos soltas.`)) {
+                  {canManage && <Menu.Item color="red" onClick={async () => {
+                    if (await confirmAction({ title: `Eliminar a pessoa "${p.name}"?`, danger: true,
+                      message: "As fotos não são apagadas: passam a fotos sem pessoa.", confirmLabel: "Eliminar" })) {
                       void act(() => api.deletePerson(p.id));
                     }
-                  }}>Eliminar pessoa</Menu.Item>
+                  }}>Eliminar pessoa</Menu.Item>}
                 </Menu.Dropdown>
               </Menu>
             </Group>
@@ -226,7 +233,7 @@ function RefViewer({ reference: r, siblings, persons, onShow, onClose }: {
 function RefThumb({ reference: r, persons, onMove, onSearch, onDelete, onOpen }: {
   reference: ReferenceImage; persons: CasePerson[];
   onMove: (refId: number, personId: number | null) => void; onSearch: (r: ReferenceImage) => void;
-  onDelete: (r: ReferenceImage) => void; onOpen: (r: ReferenceImage) => void;
+  onDelete?: (r: ReferenceImage) => void; onOpen: (r: ReferenceImage) => void;
 }) {
   return (
     <Card withBorder padding={4} draggable onDragStart={(e) => {
@@ -256,7 +263,8 @@ function RefThumb({ reference: r, persons, onMove, onSearch, onDelete, onOpen }:
             <Menu.Item leftSection={<IconUsersGroup size={14} />} disabled={!r.valid} onClick={() => onSearch(r)}>
               Procurar esta foto noutros processos
             </Menu.Item>
-            <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={() => onDelete(r)}>Eliminar foto</Menu.Item>
+            {onDelete && <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={() => onDelete(r)}>
+              Eliminar foto</Menu.Item>}
           </Menu.Dropdown>
         </Menu>
       </Group>

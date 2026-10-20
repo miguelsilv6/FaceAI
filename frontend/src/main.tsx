@@ -4,6 +4,7 @@ import "@mantine/notifications/styles.css";
 
 import { Center, Loader, MantineProvider, createTheme } from "@mantine/core";
 import { Notifications } from "@mantine/notifications";
+import { ConfirmHost } from "./confirm";
 import { StrictMode, Suspense, lazy } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
@@ -36,6 +37,7 @@ createRoot(document.getElementById("root")!).render(
       {/* O router envolve também as notificações: algumas têm links ("Ver resultados"). */}
       <BrowserRouter>
         <Notifications position="top-right" />
+        <ConfirmHost />
         <ErrorBoundary>
           <AuthGate>
             <Suspense fallback={loading}>
