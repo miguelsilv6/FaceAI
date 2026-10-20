@@ -1,6 +1,6 @@
 import {
   ActionIcon, Alert, Anchor, Badge, Breadcrumbs, Button, Card, Chip, Group, Image, Menu, Modal, Progress, SegmentedControl, Select,
-  SimpleGrid, Slider, Stack, Switch, Table, Text, Title, Tooltip,
+  SimpleGrid, Stack, Switch, Table, Text, Title, Tooltip,
 } from "@mantine/core";
 import {
   IconAlertTriangle, IconChevronLeft, IconChevronRight, IconDeviceFloppy, IconDownload, IconInfoCircle, IconPhoto,
@@ -9,7 +9,7 @@ import {
 import { type ComponentProps, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 
-import { api, browserCodecs, formatEta, formatTime, realTime } from "../api";
+import { api, browserCodecs, formatTime, realTime } from "../api";
 import AlertsCard from "../components/AlertsCard";
 import DeleteJobModal from "../components/DeleteJobModal";
 import BodyTrackCard from "../components/BodyTrackCard";
@@ -19,6 +19,8 @@ import NewPersonModal from "../components/NewPersonModal";
 import PersonAssignMenu from "../components/PersonAssignMenu";
 import PersonCard from "../components/PersonCard";
 import SimilarModal, { type SimilarQuery } from "../components/SimilarModal";
+import ResultsFilters, { type ReviewFilter } from "../components/ResultsFilters";
+import ResultsSummary from "../components/ResultsSummary";
 import TrackCard from "../components/TrackCard";
 import JobStatusBadge from "../components/JobStatusBadge";
 import Timeline from "../components/Timeline";
@@ -85,6 +87,7 @@ export default function Results() {
   const [frameVariant, setFrameVariant] = useState<"annotated" | "original" | "enhanced">("annotated");
   const [deleting, setDeleting] = useState(false);
   // Erro de reprodução no browser (por vídeo), com o diagnóstico mostrado ao analista.
+  const [playDetails, setPlayDetails] = useState(false);
   const [playError, setPlayError] = useState<{ videoId: number; detail: string } | null>(null);
   const autoCopyRequested = useRef(new Set<string>());
   const navigate = useNavigate();
@@ -208,6 +211,14 @@ export default function Results() {
     }
   };
   const discover = job?.params.mode === "discover";
+  const viewSetFor = useRef<number | null>(null);
+  useEffect(() => { // vista inicial: pessoas na descoberta, aparições no modo procurar
+    if (job && viewSetFor.current !== job.id) {
+      viewSetFor.current = job.id;
+      setView(job.params.mode === "discover" ? "persons" : "tracks");
+    }
+  }, [job]);
+  const gridRef = useRef<HTMLDivElement>(null);
   const trackById = useMemo(() => new Map(tracks.map((t) => [t.id, t])), [tracks]);
   // Modo procurar com várias pessoas: n.º e nome de cada uma (job.params.persons).
   const searched = !discover && (job?.params.persons?.length ?? 0) > 1 ? job!.params.persons! : [];
@@ -263,34 +274,40 @@ export default function Results() {
   };
   // Grelhas grandes (milhares de cartões, cada um com imagens): mostram-se por páginas.
   const [limit, setLimit] = useState(PAGE);
+  const [reviewFilter, setReviewFilter] = useState<ReviewFilter>("all");
+  // "Por rever" inclui as pessoas com revisão mista; "Confirmadas" só o que foi confirmado.
+  const inReview = (status: string) => reviewFilter === "all"
+    || (reviewFilter === "confirmed" ? status === "confirmed" : status !== "confirmed" && status !== "rejected");
   useEffect(() => setLimit(PAGE),
-    [view, videoId, trackFilter, personFilter, minSim, showCandidates, order, evidenceFilter, locFilter, showRejected]);
+    [view, videoId, trackFilter, personFilter, minSim, showCandidates, order, evidenceFilter, locFilter, showRejected,
+      reviewFilter]);
   const visible = useMemo(() => {
     const list = videoDets.filter((d) => (trackFilter == null || d.track_id === trackFilter)
-      && (showRejected || !isRejected(d)) && (discover
+      && (showRejected || !isRejected(d)) && inReview(d.review_status) && (discover
       ? inPerson(d)
       : (showCandidates || trackFilter != null || isEffectiveMatch(d)) && d.similarity >= minSim && inPerson(d)));
     if (order === "score") return [...list].sort((a, b) => b.similarity - a.similarity);
     if (order === "quality") return [...list].sort((a, b) => b.quality - a.quality);
     return list;
-  }, [videoDets, showCandidates, minSim, order, trackFilter, trackById, discover, personFilter, showRejected]);
+  }, [videoDets, showCandidates, minSim, order, trackFilter, trackById, discover, personFilter, showRejected, reviewFilter]);
   const visibleTracks = useMemo(() => {
-    const list = tracks.filter((t) => t.video_id === videoId && (showRejected || t.review_status !== "rejected") && (discover
+    const list = tracks.filter((t) => t.video_id === videoId && (showRejected || t.review_status !== "rejected")
+      && inReview(t.review_status) && (discover
       ? personFilter == null || t.person_id === personFilter
       : (showCandidates || t.is_match) && 1 - t.track_distance >= minSim
         && (personFilter == null || t.person_id === personFilter)));
     if (order === "score") return [...list].sort((a, b) => (discover ? b.n_faces - a.n_faces : a.track_distance - b.track_distance));
     if (order === "quality") return [...list].sort((a, b) => b.best_quality - a.best_quality);
     return list;
-  }, [tracks, videoId, showCandidates, minSim, order, discover, personFilter, showRejected]);
+  }, [tracks, videoId, showCandidates, minSim, order, discover, personFilter, showRejected, reviewFilter]);
   const visiblePersons = useMemo(() => {
-    const shown = showRejected ? persons : persons.filter((p) => p.review_status !== "rejected");
+    const shown = persons.filter((p) => (showRejected || p.review_status !== "rejected") && inReview(p.review_status));
     if (order === "time") {
       return [...shown].sort((a, b) => a.first.video_id - b.first.video_id || a.first.start_s - b.first.start_s);
     }
     if (order === "quality") return [...shown].sort((a, b) => b.best_quality - a.best_quality);
     return shown; // por omissão: a pessoa 1 é a que mais aparece
-  }, [persons, order, showRejected]);
+  }, [persons, order, showRejected, reviewFilter]);
   const hasTracks = tracks.length > 0;
   const showPersons = discover && view === "persons" && trackFilter == null;
   const showTracks = hasTracks && view === "tracks" && trackFilter == null;
@@ -298,9 +315,9 @@ export default function Results() {
   const videoSegments = segments.filter((s) => s.video_id === videoId
     && (personFilter == null || s.person_id === personFilter)
     && (evidenceFilter === "all" || (s.evidence ?? "face").includes(evidenceFilter)));
-  const sortedBodyTracks = useMemo(() => bodyTracks.filter((t) => showRejected || t.review_status !== "rejected").sort((a, b) =>
+  const sortedBodyTracks = useMemo(() => bodyTracks.filter((t) => (showRejected || t.review_status !== "rejected") && inReview(t.review_status)).sort((a, b) =>
     Number(a.evidence !== "vestuário") - Number(b.evidence !== "vestuário") || a.video_id - b.video_id
-    || a.start_s - b.start_s), [bodyTracks, showRejected]);
+    || a.start_s - b.start_s), [bodyTracks, showRejected, reviewFilter]);
   const seekBody = (t: Track) => {
     if (t.video_id !== videoId) setVideoId(t.video_id);
     setTimeout(() => seek(t.start_s), 0);
@@ -386,7 +403,7 @@ export default function Results() {
   const moveTrack = async (t: Track, personId: number | null) => {
     try {
       const updated = await api.moveTrack(t.id, personId);
-      notifyOk(`Track #${t.id} passou para a pessoa #${updated.person_id}.`);
+      notifyOk(`Aparição #${t.id} passou para a pessoa #${updated.person_id}.`);
       loadResults();
       api.job(jobId).then(setJob);
     } catch (e) {
@@ -446,7 +463,7 @@ export default function Results() {
       setTracks((ts) => ts.map((t) => (t.id === updated.id ? updated : t)));
       loadResults();
       if (status === "rejected" && !showRejected) {
-        notifyUndo(`Track #${track.id} rejeitado.`, () => void reviewTrack(updated, track.review_status));
+        notifyUndo(`Aparição #${track.id} rejeitada.`, () => void reviewTrack(updated, track.review_status));
       }
     } catch (e) {
       notifyError(e);
@@ -462,6 +479,31 @@ export default function Results() {
     tracks: tracks.filter((t) => t.is_match).length,
   };
   const personIds = persons.map((p) => p.person_id);
+  // Aparições para a faixa de estado: tracks (com correspondência no modo procurar) e deteções soltas.
+  const units = discover ? tracks.map((t) => t.review_status)
+    : [...tracks.filter((t) => t.is_match).map((t) => t.review_status),
+      ...detections.filter((d) => d.track_id == null && d.is_match).map((d) => d.review_status)];
+  const reviewCounts = {
+    total: units.length,
+    pending: units.filter((x) => x !== "confirmed" && x !== "rejected").length,
+    confirmed: units.filter((x) => x === "confirmed").length,
+    rejected: units.filter((x) => x === "rejected").length,
+  };
+  const details = `${job.params.model} + ${job.params.detector} · limiar ${job.params.threshold} · ${job.params.sample_fps} fps`
+    + `${job.params.preset ? ` · rigor ${({ fast: "rápida", balanced: "equilibrada", thorough: "minuciosa", custom: "personalizada" })[job.params.preset]}` : ""}`
+    + ` · ${String(job.environment.engine ?? "")} ${String(job.environment.device ?? "?")} · ${job.frames_sampled} frames amostrados`
+    + ` (${job.frames_skipped_motion} sem movimento, ${job.frames_skipped_noface} sem faces) · ${job.frames_processed} com deteção completa`
+    + ` · ${job.faces_detected} faces · ${discover ? `${persons.length} pessoas · ${tracks.length} tracks · ${detections.length} faces guardadas`
+      : `${counts.matches} deteções com correspondência (${counts.confirmed} confirmadas, ${counts.rejected} rejeitadas)`
+        + `${job.params.tracking ? ` · ${counts.tracks} tracks com correspondência` : ""}`}`
+    + `${clothing && !running ? ` · vestuário: ${job.clothing_samples} amostra(s), ${bodyTracks.filter((t) => t.evidence === "vestuário").length} só pela roupa` : ""}`
+    + `${job.status === "completed" && job.message ? `. ${job.message}` : ""}`;
+  const reviewPending = () => {
+    setReviewFilter("pending");
+    setTrackFilter(null);
+    if (view === "clothing" || view === "detections") setView(discover ? "persons" : "tracks");
+    setTimeout(() => gridRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
 
   return (
     <Stack maw={1400} mx="auto">
@@ -474,20 +516,6 @@ export default function Results() {
       <Group justify="space-between" align="flex-start">
         <div>
           <Group gap="sm"><Title order={2}>Análise #{job.id}</Title><JobStatusBadge status={job.status} /></Group>
-          <Text size="sm" c="dimmed">
-            {job.params.model} + {job.params.detector} · limiar {job.params.threshold} · {job.params.sample_fps} fps ·
-            {" "}{String(job.environment.engine ?? "")} {String(job.environment.device ?? "?")} ·{" "}
-            {job.frames_sampled} frames amostrados ({job.frames_skipped_motion} sem movimento, {job.frames_skipped_noface} sem faces)
-            · {job.frames_processed} com deteção completa · {job.faces_detected} faces ·{" "}
-            {discover
-              ? `${persons.length} pessoas distintas · ${tracks.length} tracks · ${detections.length} faces guardadas (descoberta, sem amostra)`
-              : <>{counts.matches} correspondências ({counts.confirmed} confirmadas, {counts.rejected} rejeitadas)
-                {job.params.tracking ? ` · ${counts.tracks} tracks com correspondência` : ""}
-                {clothing && !running ? ` · vestuário: ${job.clothing_samples} amostra(s), ${bodyTracks.filter((t) => t.evidence === "vestuário").length} aparição(ões) só pela roupa` : ""}</>}
-            {running && (
-              <Text span size="sm" fw={600} c="blue"> · {Math.round(job.progress * 100)}% · {formatEta(job.eta_s)}</Text>
-            )}
-          </Text>
         </div>
         <Group>
           {running && (
@@ -520,7 +548,8 @@ export default function Results() {
         </Group>
       </Group>
 
-      {running && <Progress value={job.progress * 100} animated striped size="lg" />}
+      <ResultsSummary job={job} discover={discover} running={running} counts={reviewCounts} persons={persons.length}
+        details={details} onReviewPending={reviewPending} />
       {clothing && !running && job.clothing_summary?.note && (
         <Alert color="orange" icon={<IconAlertTriangle size={18} />}>{job.clothing_summary.note}</Alert>
       )}
@@ -537,7 +566,7 @@ export default function Results() {
             if (p && personFilter !== pid) selectPerson(p);
           } : undefined} />
       )}
-      {job.message && (
+      {job.message && job.status !== "completed" && (
         <Alert color={job.status === "failed" ? "red" : "blue"}
           icon={job.status === "failed" ? <IconAlertTriangle size={18} /> : <IconInfoCircle size={18} />}>{job.message}</Alert>
       )}
@@ -611,11 +640,16 @@ export default function Results() {
                 {!converting && (playError?.videoId === video.id || video.playback_status === "failed"
                   || video.playback_status === "unavailable") ? (
                   <Alert color="orange" icon={<IconAlertTriangle size={18} />}>
-                    {video.playback_status === "failed" ? `A conversão para o browser falhou: ${video.playback_error}. `
+                    {video.playback_status === "failed" ? "Não foi possível preparar este vídeo para o browser. "
                       : video.playback_status === "unavailable" ? `${video.playback_error} `
-                        : "O browser não consegue reproduzir este vídeo. "}
-                    Pode criar uma cópia só para visualização; entretanto use os frames (botão 🔍 nas deteções).
-                    {video.playback_status !== "unavailable" && (
+                        : "O browser não reproduz este vídeo diretamente; a preparar uma cópia só para visualização… "}
+                    Entretanto pode ver os frames de cada aparição (botão 🔍).
+                    <Anchor component="button" size="xs" ml={6} onClick={() => setPlayDetails((x) => !x)}>
+                      {playDetails ? "Ocultar detalhes" : "Detalhes"}</Anchor>
+                    {playDetails && video.playback_status === "failed" && (
+                      <Text size="xs" c="dimmed" mt="xs">{video.playback_error}</Text>
+                    )}
+                    {playDetails && video.playback_status !== "unavailable" && (
                       <Group gap="xs" mt="xs">
                         <Button size="compact-xs" variant="light" onClick={() => createPlaybackCopy("mp4")}>
                           Criar cópias H.264 (MP4) de todos os vídeos
@@ -625,7 +659,7 @@ export default function Results() {
                         </Button>
                       </Group>
                     )}
-                    {playError?.videoId === video.id && (
+                    {playDetails && playError?.videoId === video.id && (
                       <Text size="xs" c="dimmed" mt="xs" ff="monospace">{playError.detail}</Text>
                     )}
                   </Alert>
@@ -707,18 +741,18 @@ export default function Results() {
         </Card>
       </SimpleGrid>
 
-      <Card withBorder>
+      <Card withBorder ref={gridRef} style={{ scrollMarginTop: 16 }}>
         <Group justify="space-between" mb="sm" wrap="wrap">
           <Group gap="sm">
             {(hasTracks || clothing) && (
               <SegmentedControl size="xs" value={view}
                 onChange={(v) => { setView(v as "persons" | "tracks" | "detections" | "clothing"); setTrackFilter(null); }}
                 data={[...(discover ? [{ value: "persons", label: `Pessoas (${visiblePersons.length})` }] : []),
-                  { value: "tracks", label: `Tracks (${visibleTracks.length})` },
-                  { value: "detections", label: discover ? "Faces" : "Deteções" },
+                  { value: "tracks", label: `Aparições (${visibleTracks.length})` },
+                  { value: "detections", label: "Faces individuais" },
                   ...(clothing ? [{ value: "clothing", label: `Vestuário (${sortedBodyTracks.filter((t) => t.evidence === "vestuário").length})` }] : [])]} />
             )}
-            {!showTracks && !showPersons && view !== "clothing" && <Text fw={600}>{discover ? "Faces" : "Deteções"} ({visible.length})</Text>}
+            {!showTracks && !showPersons && view !== "clothing" && <Text fw={600}>Faces individuais ({visible.length})</Text>}
             {searched.length > 0 && view !== "clothing" && (
               <Chip.Group multiple={false} value={personFilter == null ? "all" : String(personFilter)}
                 onChange={(v) => setPersonFilter(v === "all" ? null : Number(v))}>
@@ -737,29 +771,14 @@ export default function Results() {
             )}
             {trackFilter != null && (
               <Button size="compact-xs" variant="light" onClick={() => setTrackFilter(null)}>
-                Track #{trackFilter} · mostrar tudo
+                Aparição #{trackFilter} · mostrar tudo
               </Button>
             )}
           </Group>
-          <Group gap="lg" wrap="wrap">
-            {!discover && view !== "clothing" && (
-              <>
-                <Stack gap={2} w={220}>
-                  <Text size="xs">Similaridade mínima: {(minSim * 100).toFixed(0)}%</Text>
-                  <Slider min={0} max={1} step={0.01} value={minSim} onChange={setMinSim} label={null} />
-                </Stack>
-                <Switch label="Mostrar candidatos abaixo do limiar" checked={showCandidates}
-                  onChange={(e) => setShowCandidates(e.currentTarget.checked)} />
-              </>
-            )}
-            {(rejectedHere > 0 || showRejected) && (
-              <Switch label={`Mostrar rejeitadas (${rejectedHere})`} checked={showRejected}
-                onChange={(e) => toggleRejected(e.currentTarget.checked)} />
-            )}
-            <SegmentedControl size="xs" value={order} onChange={(v) => setOrder(v as "time" | "score" | "quality")}
-              data={[{ value: "time", label: "Tempo" }, { value: "score", label: discover ? "Presença" : "Semelhança" },
-                { value: "quality", label: "Qualidade" }]} />
-          </Group>
+          <ResultsFilters discover={discover} clothingView={view === "clothing"} review={reviewFilter}
+            onReview={setReviewFilter} minSim={minSim} onMinSim={setMinSim} showCandidates={showCandidates}
+            onShowCandidates={setShowCandidates} showRejected={showRejected} onShowRejected={toggleRejected}
+            rejectedCount={rejectedHere} order={order} onOrder={setOrder} />
         </Group>
         {view === "clothing" && clothing ? (
           <Stack gap="xs">

@@ -50,7 +50,7 @@ export default function TrackCard({ track, onSeek, onReview, onShowDetections, r
       </Card.Section>
       <Stack gap={4} mt={6}>
         <Group justify="space-between" wrap="nowrap">
-          <Text size="sm" fw={600}>Track #{track.id}</Text>
+          <Text size="sm" fw={600}>Aparição #{track.id}</Text>
           {track.person_id != null && !personLabel ? (
             <Tooltip label={`Distância ao centro do grupo da pessoa: ${track.track_distance.toFixed(3)}`}>
               <Badge color="blue" variant="filled" size="sm">Pessoa #{track.person_id}</Badge>
