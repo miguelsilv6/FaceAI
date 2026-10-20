@@ -49,27 +49,29 @@ class SampledFrame:
 
 
 def sample_frames(path: str | Path, sample_fps: float, fps: float | None = None, *,
-                  prefetch: int = 0) -> Iterator[SampledFrame]:
+                  prefetch: int = 0, display: tuple[int, int] | None = None) -> Iterator[SampledFrame]:
     """Devolve frames a ~`sample_fps` por segundo. Os frames intermédios são só descodificados com grab().
 
     Com `prefetch` > 0, a descodificação corre numa thread própria, com até `prefetch` frames à espera: a
-    descodificação (o OpenCV liberta o GIL) sobrepõe-se à deteção. A sequência de frames é exatamente a mesma."""
+    descodificação (o OpenCV liberta o GIL) sobrepõe-se à deteção. A sequência de frames é exatamente a mesma.
+    Com `display` (largura, altura), cada frame é redimensionado para o tamanho de apresentação (píxeis não
+    quadrados, services/aspect.py)."""
     if prefetch > 0:
-        yield from _prefetched(path, sample_fps, fps, prefetch)
+        yield from _prefetched(path, sample_fps, fps, prefetch, display)
         return
-    yield from _sample_frames(path, sample_fps, fps)
+    yield from _sample_frames(path, sample_fps, fps, display)
 
 
 _END = object()
 
 
-def _prefetched(path, sample_fps, fps, size: int) -> Iterator[SampledFrame]:
+def _prefetched(path, sample_fps, fps, size: int, display=None) -> Iterator[SampledFrame]:
     q: queue.Queue = queue.Queue(maxsize=size)
     stop = threading.Event()
 
     def produce() -> None:
         try:
-            for frame in _sample_frames(path, sample_fps, fps):
+            for frame in _sample_frames(path, sample_fps, fps, display):
                 while not stop.is_set():
                     try:
                         q.put(frame, timeout=0.2)
@@ -103,7 +105,8 @@ def _prefetched(path, sample_fps, fps, size: int) -> Iterator[SampledFrame]:
         t.join(timeout=5)
 
 
-def _sample_frames(path: str | Path, sample_fps: float, fps: float | None = None) -> Iterator[SampledFrame]:
+def _sample_frames(path: str | Path, sample_fps: float, fps: float | None = None,
+                   display: tuple[int, int] | None = None) -> Iterator[SampledFrame]:
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise ValueError(f"Não foi possível abrir o vídeo: {path}")
@@ -117,6 +120,8 @@ def _sample_frames(path: str | Path, sample_fps: float, fps: float | None = None
             if index % step == 0:
                 ok, frame = cap.retrieve()
                 if ok and frame is not None:
+                    if display is not None and (frame.shape[1], frame.shape[0]) != display:
+                        frame = cv2.resize(frame, display, interpolation=cv2.INTER_CUBIC)
                     yield SampledFrame(index=index, timestamp_s=index / native_fps, image=frame)
             index += 1
     finally:

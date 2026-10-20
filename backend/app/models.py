@@ -106,6 +106,8 @@ class Video(SQLModel, table=True):
     # Original apagado do servidor depois de convertido (services/originals.py); stored_path fica como registo.
     original_removed_at: datetime | None = None
     analysis_streamhash: str = ""  # SHA-256 dos pacotes de vídeo da cópia (ffmpeg streamhash)
+    # Proporção de apresentação (píxeis não quadrados; services/aspect.py): display [w, h], origem, sugestão
+    aspect: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     playback_path: str | None = None  # cópia H.264 só para visualização no navegador
     # "" (por avaliar) | not_needed | pending | running | ready | failed | unavailable (sem ffmpeg)
     playback_status: str = ""

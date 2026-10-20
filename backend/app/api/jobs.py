@@ -44,6 +44,7 @@ from ..schemas import (
     TrackPerson,
 )
 from ..services import annotated, disk, enhance, evidence, linking, reports, sec_extract, thumbs, validated_frames
+from ..services.aspect import job_display
 from ..services.audit import log_event
 from ..services.body_engine import DEFAULT_PERSON_DETECTOR, DEFAULT_REID_THRESHOLD, PERSON_DETECTORS
 from ..services.clock import real_time
@@ -1157,7 +1158,8 @@ def save_frame(job_id: int, body: SavedFrameCreate, session: SessionDep, actor: 
     last = max(0, (video.frame_count or 1) - 1)
     frame_index = min(last, max(0, int(round(body.t * (video.fps or 0)))))
     try:
-        image = extract_frame(video.source_path, frame_index, None, (0, 0, 0, 0)).image
+        image = extract_frame(video.source_path, frame_index, None, (0, 0, 0, 0),
+                              display=job_display(job, video.id)).image
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     ok, buf = cv2.imencode(".png", image)

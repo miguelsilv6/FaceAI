@@ -25,6 +25,7 @@ from .api.uploads import cleanup_stale_uploads, start_periodic_cleanup
 from .config import settings
 from .db import get_engine, init_db
 from .services import auth, disk
+from .services.aspect import start_backfill as start_aspect_backfill
 from .services.audit import request_ip
 from .services.clock_auto import resume_pending_auto_clock
 from .services.face_engine import preload_models
@@ -68,6 +69,7 @@ async def lifespan(_: FastAPI):
         start_pending_removal()
         resume_pending_auto_clock()
         start_backfill()
+        start_aspect_backfill()
     preload_models()
     if settings.cpu_threads > 0:
         cv2.setNumThreads(settings.cpu_threads)

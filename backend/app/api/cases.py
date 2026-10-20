@@ -30,6 +30,7 @@ from ..models import (
     Video,
 )
 from ..schemas import (
+    AspectCorrection,
     CaseCreate,
     CaseDelete,
     CaseOut,
@@ -45,7 +46,7 @@ from ..schemas import (
     VideoDelete,
     VideoUpdate,
 )
-from ..services import disk, evidence, fps_fix, originals, sec_extract, sec_format, storage, transcode
+from ..services import aspect, disk, evidence, fps_fix, originals, sec_extract, sec_format, storage, transcode
 from ..services.audit import log_event, verify_chain
 from ..services.clock_auto import request_auto_clock
 from ..services.face_engine import get_engine
@@ -229,6 +230,7 @@ def register_video(session, case_id: int, path: Path, filename: str, size: int, 
         sec_extract.request_extraction(session, video)
         session.refresh(video)
         return video
+    aspect.detect(session, video)
     request_playback_copy(session, video)
     request_auto_clock(session, video)
     return video
@@ -879,6 +881,19 @@ def correct_video_fps(video_id: int, body: FpsCorrection, session: SessionDep, u
     _require_manager(session, user, video.case_id)
     return fps_fix.correct_fps(session, video, body.fps, reason=body.reason.strip(), actor=user.username,
                                source=body.source)
+
+
+@router.post("/videos/{video_id}/aspect", response_model=Video)
+def correct_video_aspect(video_id: int, body: AspectCorrection, session: SessionDep, user: CurrentUser) -> Video:
+    """Proporção de apresentação (píxeis não quadrados): o ficheiro não muda; as novas análises usam-na."""
+    video = session.get(Video, video_id)
+    if video is None:
+        raise HTTPException(404, "Vídeo não encontrado.")
+    _require_manager(session, user, video.case_id)
+    if (body.width is None) != (body.height is None):
+        raise HTTPException(422, "Indique a largura e a altura (ou nenhuma, para repor a gravada).")
+    display = (body.width, body.height) if body.width and body.height else None
+    return aspect.set_display(session, video, display, reason=body.reason.strip(), actor=user.username)
 
 
 @router.post("/videos/{video_id}/extract", response_model=Video)

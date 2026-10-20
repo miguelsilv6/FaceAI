@@ -56,6 +56,17 @@ export interface VideoExtraction {
   fps_history?: { from: number; to: number; source: string; reason: string; by: string; at: string }[];
 }
 
+/** Proporção de apresentação (píxeis não quadrados dos modos "Lite"/meia resolução dos DVR). */
+export interface VideoAspect {
+  display?: [number, number]; // tamanho de apresentação; ausente = o gravado
+  source?: string; // "manual" | "indicada no ficheiro (SAR x:y)"
+  reason?: string;
+  set_by?: string;
+  set_at?: string;
+  suggested?: { display: [number, number]; mode: string }; // modo de DVR conhecido, por confirmar
+  history?: { from: [number, number] | null; to: [number, number] | null; reason: string; by: string; at: string }[];
+}
+
 export interface Video {
   id: number;
   case_id: number;
@@ -66,6 +77,7 @@ export interface Video {
   // Formatos proprietários (.sec): a análise usa o H.264 extraído dos blocos; o original fica intacto
   analysis_sha256?: string;
   extraction?: Partial<VideoExtraction>;
+  aspect?: VideoAspect | null;
   extraction_status?: "" | "pending" | "running" | "ready" | "failed";
   extraction_progress?: number;
   extraction_error?: string;
