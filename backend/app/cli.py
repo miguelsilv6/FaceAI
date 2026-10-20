@@ -157,6 +157,8 @@ def run_backup(dest: str, include_files: bool) -> None:
     if include_files:
         print(f"Ficheiros: {m['files']['copied']} copiado(s), {m['files']['unchanged']} sem alterações.")
     print(f"Manifesto: manifest_{m['created_at']}.json ({len(m['videos'])} vídeo(s)).")
+    if m.get("secret_key", {}).get("file"):
+        print("Inclui secret.key (chave dos segredos MFA): guarde a cópia em local seguro.")
 
 
 def remove_originals(s: Session, case_id: int | None, dry_run: bool, yes: bool) -> None:

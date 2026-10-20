@@ -2,9 +2,8 @@ name: Docker Image CI
 
 on:
   push:
-    branches: [ "claude/determined-cannon-c2q29b" ]
+    branches: [ "main", "claude/**" ]
   pull_request:
-    branches: [ "claude/determined-cannon-c2q29b" ]
 
 jobs:
 
@@ -15,4 +14,4 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag my-image-name:$(date +%s)
+      run: docker build . --file Dockerfile --tag faceai:ci-${{ github.sha }}

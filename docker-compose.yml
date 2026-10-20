@@ -1,42 +1,39 @@
+# CPU:  docker compose up -d --build
+# GPU:  docker compose --profile gpu up -d --build faceai-gpu
+# Configuração: copie .env.example para .env e altere o que precisar (o ficheiro é opcional).
+x-faceai: &faceai
+  ports:
+    - "127.0.0.1:8000:8000"   # só acessível localmente
+  volumes:
+    - ./data:/data            # casos, evidências, resultados e auditoria
+    - faceai-models:/models   # pesos ONNX (descarregados na 1.ª utilização e verificados por SHA-256)
+  env_file:
+    - path: .env
+      required: false
+  restart: unless-stopped     # volta a arrancar depois de uma falha ou de um reinício do anfitrião
+  stop_grace_period: 60s      # tempo para a análise em curso voltar à fila antes de o contentor parar
+  logging:                    # registos do Docker com tamanho limitado
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+  # o healthcheck vem do Dockerfile
+
 services:
   faceai:
+    <<: *faceai
     build:
       context: .
       args:
         EXTRA: cpu
-    ports:
-      - "127.0.0.1:8000:8000"   # só acessível localmente
-    volumes:
-      - ./data:/data            # casos, evidências, resultados e auditoria
-      - faceai-models:/models   # pesos ONNX (descarregados na 1.ª utilização e verificados por SHA-256)
-    restart: unless-stopped     # volta a arrancar depois de uma falha ou de um reinício do anfitrião
-    stop_grace_period: 60s      # tempo para a análise em curso voltar à fila antes de o contentor parar
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5).status == 200 else 1)"]
-      interval: 30s
-      timeout: 10s
-      start_period: 60s
-      retries: 3
 
   faceai-gpu:
+    <<: *faceai
     profiles: ["gpu"]
     build:
       context: .
       args:
         EXTRA: gpu
-    ports:
-      - "127.0.0.1:8000:8000"
-    volumes:
-      - ./data:/data
-      - faceai-models:/models
-    restart: unless-stopped     # volta a arrancar depois de uma falha ou de um reinício do anfitrião
-    stop_grace_period: 60s      # tempo para a análise em curso voltar à fila antes de o contentor parar
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=5).status == 200 else 1)"]
-      interval: 30s
-      timeout: 10s
-      start_period: 60s
-      retries: 3
     deploy:
       resources:
         reservations:
