@@ -111,6 +111,8 @@ class JobParams(BaseModel):
     # "match": procurar a pessoa das imagens de referência; "discover": sem referência, agrupar todas as faces
     # em pessoas distintas (o limiar passa a ser o de agrupamento e o tracking é obrigatório).
     mode: str = Field("match", pattern="^(match|discover)$")
+    # Perfil de rigor escolhido na interface (só registo: os valores efetivos são os parâmetros abaixo).
+    preset: str | None = Field(None, pattern="^(fast|balanced|thorough|custom)$")
     # Modelo/detetor do motor ativo; vazios = valores por omissão do motor.
     model: str | None = None
     detector: str | None = None

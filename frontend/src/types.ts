@@ -143,6 +143,7 @@ export interface SearchedPerson {
 
 export interface JobParams {
   mode: JobMode;
+  preset?: "fast" | "balanced" | "thorough" | "custom" | null; // rigor escolhido (só registo)
   persons?: SearchedPerson[]; // modo procurar: pessoas (grupos de referências)
   locations?: { id: number | null; name: string; video_ids: number[] }[]; // locais abrangidos (nome na altura)
   model: string | null;

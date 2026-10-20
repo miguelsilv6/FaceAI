@@ -15,6 +15,25 @@ import DeleteJobModal from "./DeleteJobModal";
 import JobStatusBadge from "./JobStatusBadge";
 import ReferencePicker, { allChoices, choicesToRefIds, type RefChoice } from "./ReferencePicker";
 
+type Preset = NonNullable<JobParams["preset"]>;
+// Perfis de rigor: só mudam estes parâmetros (o resto fica nas opções avançadas).
+const PRESET_KEYS = ["sample_fps", "motion_filter", "cascade", "min_face_size"] as const;
+type PresetValues = Pick<JobParams, (typeof PRESET_KEYS)[number]>;
+function presetValues(preset: Exclude<Preset, "custom">, d: JobParams): PresetValues {
+  if (preset === "fast") return { sample_fps: 1, motion_filter: true, cascade: true, min_face_size: d.min_face_size };
+  if (preset === "thorough") {
+    return { sample_fps: Math.max(5, d.sample_fps), motion_filter: false, cascade: false,
+      min_face_size: Math.min(12, d.min_face_size) };
+  }
+  return { sample_fps: d.sample_fps, motion_filter: d.motion_filter, cascade: d.cascade, min_face_size: d.min_face_size };
+}
+const PRESET_HINT: Record<Preset, string> = {
+  fast: "1 frame por segundo e só onde há movimento. Boa para uma primeira passagem por muitas horas de vídeo.",
+  balanced: "Recomendada para a maioria dos casos: equilíbrio entre rapidez e frames analisados.",
+  thorough: "Analisa 5 frames por segundo em todo o vídeo, incluindo faces mais pequenas. Mais lenta.",
+  custom: "Parâmetros ajustados nas opções avançadas.",
+};
+
 interface Props {
   caseId: number;
   jobs: Job[];
@@ -55,7 +74,7 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
     api.system().then((s) => {
       setSystem(s);
       const threshold = s.models.find((m) => m.name === s.defaults.model)?.default_threshold ?? null;
-      setParams({ ...s.defaults, threshold });
+      setParams({ ...s.defaults, threshold, preset: "balanced" });
     }).catch(notifyError);
   }, []);
   const withVideos = useMemo(() => locations.filter((l) => videos.some((v) => v.location_id === l.id)), [locations, videos]);
@@ -87,7 +106,19 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
   const active = jobs.some((j) => j.status === "running" || j.status === "queued");
   usePolling(onChange, 3000, active);
 
-  const set = <K extends keyof JobParams>(key: K, value: JobParams[K]) => setParams((p) => (p ? { ...p, [key]: value } : p));
+  const set = <K extends keyof JobParams>(key: K, value: JobParams[K]) => setParams((p) => (p ? {
+    ...p, [key]: value,
+    ...((PRESET_KEYS as readonly string[]).includes(key) ? { preset: "custom" as const } : {}),
+  } : p));
+  const applyPreset = (preset: Preset) => {
+    if (preset === "custom" || !system) return;
+    setParams((p) => (p ? { ...p, ...presetValues(preset, system.defaults), preset } : p));
+  };
+  // Porque é que ainda não se pode iniciar (mostrado junto ao botão).
+  const blocked = !videoIds.length ? (withVideos.length ? "Escolha pelo menos um local." : "Importe vídeos primeiro.")
+    : !discover && !refIds.length ? (validRefs.length ? "Escolha a pessoa a procurar."
+      : "Adicione uma foto da pessoa, ou use \"Descobrir pessoas\".")
+    : notReady.length ? "Há vídeos ainda a preparar." : "";
 
   const start = async () => {
     if (!params) return;
@@ -96,6 +127,8 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
       // Sem câmaras retiradas, a análise é pedida por locais (fica registada assim); senão, câmara a câmara.
       const job = await api.createJob(caseId, params, videoIds, discover ? [] : refIds,
         excluded.length ? undefined : locIds.map(Number));
+      notifyOk("Pode sair desta página: a análise continua no servidor e fica no separador Análises.",
+        `Análise #${job.id} iniciada`);
       navigate(`/jobs/${job.id}`);
     } catch (e) {
       notifyError(e, "Não foi possível iniciar a análise");
@@ -127,8 +160,8 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
           <Stack>
             <SegmentedControl value={params.mode} fullWidth
               onChange={(m) => { setModeTouched(true); set("mode", m as JobMode); }}
-              data={[{ value: "match", label: "Procurar por pessoa(s) - com amostra" },
-                { value: "discover", label: "Descobrir todas as faces (sem amostra)" }]} />
+              data={[{ value: "match", label: "Procurar pessoa (com fotos)" },
+                { value: "discover", label: "Descobrir pessoas (sem fotos)" }]} />
             {discover && (
               <Alert color="blue" icon={<IconInfoCircle size={18} />}>
                 Todas as faces detetadas são seguidas e agrupadas automaticamente em <b>pessoas distintas</b>. No fim
@@ -201,121 +234,131 @@ export default function JobsPanel({ caseId, jobs, videos, locations, references,
                   placeholder={validRefs.length ? "Selecione as referências" : "Sem amostras válidas — use o modo de descoberta"} />
               )}
             </SimpleGrid>
-            <Card withBorder padding="sm" bg="var(--mantine-color-default-hover)">
-              <Group gap="md" align="flex-end" wrap="wrap">
-                <Switch label={discover ? "Alertar se aparecerem pessoas do processo"
-                  : "Alertar se uma pessoa aparecer em vários locais"} miw={260} style={{ flex: 1 }}
-                  thumbIcon={<IconBellRinging size={10} />}
-                  description={!watchable.length ? "Sem pessoas do processo com fotos válidas"
-                    : discover ? "No fim, compara as pessoas descobertas com as fotos das pessoas do processo"
-                      : "No fim, cria um alerta destacado para cada pessoa com correspondências em vários locais"}
-                  disabled={!watchable.length} checked={!!watchable.length && params.watch_persons !== false}
-                  onChange={(e) => set("watch_persons", e.currentTarget.checked)} />
-                {!!watchable.length && params.watch_persons !== false && (
-                  <>
-                    <NumberInput label="Destacar a partir de N locais" w={200} min={1} max={50}
-                      value={params.alert_min_locations ?? 2} onChange={(v) => set("alert_min_locations", num(v, 2))} />
-                    {discover && (
-                      <MultiSelect label="Pessoas a vigiar" placeholder={params.watch_person_ids?.length ? undefined : "Todas"}
-                        w={320} clearable searchable data={watchable.map((p) => ({ value: String(p.id), label: p.name }))}
-                        value={(params.watch_person_ids ?? []).map(String)}
-                        onChange={(v) => set("watch_person_ids", v.length ? v.map(Number) : null)} />
-                    )}
-                  </>
-                )}
-              </Group>
-            </Card>
-            <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }}>
-              <Select label="Modelo de reconhecimento" value={params.model} allowDeselect={false}
-                data={system.models.map((m) => ({ value: m.name, label: m.description ? `${m.name} — ${m.description}` : m.name }))}
-                onChange={(m) => m && setParams({ ...params, model: m,
-                  threshold: system.models.find((x) => x.name === m)?.default_threshold ?? params.threshold })} />
-              <Select label="Detetor facial" data={system.detectors} value={params.detector} allowDeselect={false}
-                onChange={(d) => d && set("detector", d)} />
-              <NumberInput label="Frames analisados por segundo" min={0.1} max={60} step={0.5} decimalScale={2}
-                value={params.sample_fps} onChange={(v) => set("sample_fps", num(v, 2))} />
-              <NumberInput label={discover ? "Limiar de agrupamento" : "Limiar (distância de cosseno)"}
-                min={0.01} max={1.99} step={0.01} decimalScale={3}
-                description={discover ? "Menor = separa mais pessoas" : "Menor = mais restritivo"} value={params.threshold ?? ""}
-                onChange={(v) => set("threshold", num(v, 0.68))} />
-            </SimpleGrid>
-            <SimpleGrid cols={{ base: 1, sm: 3 }}>
-              <Switch label="Pré-filtro de movimento" description="Só analisa frames onde a imagem mudou"
-                checked={params.motion_filter} onChange={(e) => set("motion_filter", e.currentTarget.checked)} />
-              <Switch label="Cascata de deteção" description="Detetor rápido primeiro; o principal só se houver faces"
-                checked={params.cascade} onChange={(e) => set("cascade", e.currentTarget.checked)} />
-              <Switch label="Tracking de faces"
-                description={discover ? "Obrigatório na descoberta" : "Agrupa a mesma face entre frames"}
-                checked={params.tracking || discover} disabled={discover}
-                onChange={(e) => set("tracking", e.currentTarget.checked)} />
-            </SimpleGrid>
+            <Stack gap={4}>
+              <Text size="sm" fw={500}>Rigor</Text>
+              <SegmentedControl value={params.preset ?? "balanced"} onChange={(v) => applyPreset(v as Preset)}
+                data={[{ value: "fast", label: "Rápida" }, { value: "balanced", label: "Equilibrada" },
+                  { value: "thorough", label: "Minuciosa" },
+                  ...(params.preset === "custom" ? [{ value: "custom", label: "Personalizada" }] : [])]} />
+              <Text size="xs" c="dimmed">{PRESET_HINT[params.preset ?? "balanced"]}</Text>
+            </Stack>
             {!discover && (
-              <Card withBorder padding="sm" bg="var(--mantine-color-default-hover)">
-                <Switch label="Complementar com vestuário (re-identificação pelo corpo)"
-                  description="Usa a roupa da pessoa nos frames em que a face teve correspondência para a procurar noutros vídeos, mesmo de costas ou longe. Evidência complementar: fica sempre por rever."
-                  checked={params.clothing} onChange={(e) => set("clothing", e.currentTarget.checked)} />
-                {params.clothing && (
-                  <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }} mt="sm">
-                    <NumberInput label="Janela temporal (± h)" description="Em torno das amostras (hora real); 0 = sem"
-                      min={0} step={1} decimalScale={1} value={params.clothing_window_h}
-                      onChange={(v) => set("clothing_window_h", num(v, 12))} />
-                    <NumberInput label="Limiar ReID (corpo)" description="Menor = mais restritivo; ajustado no processo"
-                      min={0.05} max={0.9} step={0.01} decimalScale={3} value={params.reid_threshold ?? ""}
-                      onChange={(v) => set("reid_threshold", num(v, 0.27))} />
-                    <NumberInput label="Limiar de cor" description="Tronco/pernas: veto de roupa diferente"
-                      min={0.05} max={1} step={0.05} decimalScale={2} value={params.color_threshold}
-                      onChange={(v) => set("color_threshold", num(v, 0.6))} />
-                    <Select label="Detetor de pessoas" data={system.person_detectors ?? ["yolox_s"]}
-                      description="yolox_s: preciso · nano: rápido" value={params.person_detector} allowDeselect={false}
-                      onChange={(d) => d && set("person_detector", d)} />
-                    <NumberInput label="Altura mínima do corpo (px)" min={16} step={10} value={params.min_body_height}
-                      onChange={(v) => set("min_body_height", num(v, 80))} />
-                  </SimpleGrid>
-                )}
-              </Card>
+              <Switch label="Procurar também pela roupa"
+                description="Encontra a pessoa noutros vídeos pelo vestuário, mesmo de costas ou longe. Fica sempre por rever."
+                checked={params.clothing} onChange={(e) => set("clothing", e.currentTarget.checked)} />
             )}
             <Accordion variant="contained">
               <Accordion.Item value="adv">
-                <Accordion.Control>Parâmetros avançados</Accordion.Control>
+                <Accordion.Control>Opções avançadas</Accordion.Control>
                 <Accordion.Panel>
                   <Stack>
-                    <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }}>
-                      <NumberInput label="Margem de candidatos" description="Guardar para revisão até limiar + margem"
-                        disabled={discover} min={0} max={0.5} step={0.01} decimalScale={3} value={params.candidate_margin}
-                        onChange={(v) => set("candidate_margin", num(v, 0.08))} />
-                      <NumberInput label="Tamanho mínimo da face (px)" min={0} value={params.min_face_size}
-                        onChange={(v) => set("min_face_size", num(v, 20))} />
-                      <NumberInput label="Confiança mínima do detetor" min={0} max={1} step={0.05} decimalScale={2}
-                        value={params.min_confidence} onChange={(v) => set("min_confidence", num(v, 0.5))} />
-                      <NumberInput label="Qualidade mínima da face" description="0 = sem filtro"
-                        min={0} max={1} step={0.05} decimalScale={2} value={params.min_quality}
-                        onChange={(v) => set("min_quality", num(v, 0))} />
-                      <NumberInput label="Ampliação da deteção" description="Ajuda com faces pequenas (mais lento)"
-                        min={1} max={4} step={0.5} decimalScale={1} value={params.upscale}
-                        onChange={(v) => set("upscale", num(v, 1))} />
+                    <Card withBorder padding="sm" bg="var(--mantine-color-default-hover)">
+                      <Group gap="md" align="flex-end" wrap="wrap">
+                        <Switch label={discover ? "Alertar se aparecerem pessoas do processo"
+                          : "Alertar se uma pessoa aparecer em vários locais"} miw={260} style={{ flex: 1 }}
+                          thumbIcon={<IconBellRinging size={10} />}
+                          description={!watchable.length ? "Sem pessoas do processo com fotos válidas"
+                            : discover ? "No fim, compara as pessoas descobertas com as fotos das pessoas do processo"
+                              : "No fim, cria um alerta destacado para cada pessoa com correspondências em vários locais"}
+                          disabled={!watchable.length} checked={!!watchable.length && params.watch_persons !== false}
+                          onChange={(e) => set("watch_persons", e.currentTarget.checked)} />
+                        {!!watchable.length && params.watch_persons !== false && (
+                          <>
+                            <NumberInput label="Destacar a partir de N locais" w={200} min={1} max={50}
+                              value={params.alert_min_locations ?? 2} onChange={(v) => set("alert_min_locations", num(v, 2))} />
+                            {discover && (
+                              <MultiSelect label="Pessoas a vigiar" placeholder={params.watch_person_ids?.length ? undefined : "Todas"}
+                                w={320} clearable searchable data={watchable.map((p) => ({ value: String(p.id), label: p.name }))}
+                                value={(params.watch_person_ids ?? []).map(String)}
+                                onChange={(v) => set("watch_person_ids", v.length ? v.map(Number) : null)} />
+                            )}
+                          </>
+                        )}
+                      </Group>
+                    </Card>
+                    <SimpleGrid cols={{ base: 1, sm: 2, md: 4 }}>
+                      <Select label="Modelo de reconhecimento" value={params.model} allowDeselect={false}
+                        data={system.models.map((m) => ({ value: m.name, label: m.description ? `${m.name} — ${m.description}` : m.name }))}
+                        onChange={(m) => m && setParams({ ...params, model: m,
+                          threshold: system.models.find((x) => x.name === m)?.default_threshold ?? params.threshold })} />
+                      <Select label="Detetor facial" data={system.detectors} value={params.detector} allowDeselect={false}
+                        onChange={(d) => d && set("detector", d)} />
+                      <NumberInput label="Frames analisados por segundo" min={0.1} max={60} step={0.5} decimalScale={2}
+                        value={params.sample_fps} onChange={(v) => set("sample_fps", num(v, 2))} />
+                      <NumberInput label={discover ? "Limiar de agrupamento" : "Limiar (distância de cosseno)"}
+                        min={0.01} max={1.99} step={0.01} decimalScale={3}
+                        description={discover ? "Menor = separa mais pessoas" : "Menor = mais restritivo"} value={params.threshold ?? ""}
+                        onChange={(v) => set("threshold", num(v, 0.68))} />
                     </SimpleGrid>
-                    <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }}>
-                      <NumberInput label="Limiar de movimento" description="Fração de píxeis alterados"
-                        disabled={!params.motion_filter} min={0} max={1} step={0.001} decimalScale={4}
-                        value={params.motion_threshold} onChange={(v) => set("motion_threshold", num(v, 0.002))} />
-                      <NumberInput label="Frame-chave a cada (s)" description="Analisa mesmo sem movimento"
-                        disabled={!params.motion_filter} min={0} step={1} decimalScale={1}
-                        value={params.keyframe_interval_s} onChange={(v) => set("keyframe_interval_s", num(v, 5))} />
-                      <Select label="Detetor rápido (cascata)" disabled={!params.cascade} data={system.detectors}
-                        value={params.fast_detector} allowDeselect={false}
-                        onChange={(d) => d && set("fast_detector", d)} />
-                      <NumberInput label="Intervalo máx. no track (s)" disabled={!params.tracking && !discover} min={0} step={0.5}
-                        decimalScale={1} value={params.track_gap_s} onChange={(v) => set("track_gap_s", num(v, 2))} />
-                      <NumberInput label="Intervalo máx. no segmento (s)" min={0} step={0.5} decimalScale={1}
-                        value={params.segment_gap_s} onChange={(v) => set("segment_gap_s", num(v, 2))} />
+                    <SimpleGrid cols={{ base: 1, sm: 3 }}>
+                      <Switch label="Pré-filtro de movimento" description="Só analisa frames onde a imagem mudou"
+                        checked={params.motion_filter} onChange={(e) => set("motion_filter", e.currentTarget.checked)} />
+                      <Switch label="Cascata de deteção" description="Detetor rápido primeiro; o principal só se houver faces"
+                        checked={params.cascade} onChange={(e) => set("cascade", e.currentTarget.checked)} />
+                      <Switch label="Tracking de faces"
+                        description={discover ? "Obrigatório na descoberta" : "Agrupa a mesma face entre frames"}
+                        checked={params.tracking || discover} disabled={discover}
+                        onChange={(e) => set("tracking", e.currentTarget.checked)} />
                     </SimpleGrid>
+                    {!discover && params.clothing && (
+                      <Card withBorder padding="sm">
+                        <Text size="sm" fw={500}>Vestuário</Text>
+                          <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }} mt="sm">
+                            <NumberInput label="Janela temporal (± h)" description="Em torno das amostras (hora real); 0 = sem"
+                              min={0} step={1} decimalScale={1} value={params.clothing_window_h}
+                              onChange={(v) => set("clothing_window_h", num(v, 12))} />
+                            <NumberInput label="Limiar ReID (corpo)" description="Menor = mais restritivo; ajustado no processo"
+                              min={0.05} max={0.9} step={0.01} decimalScale={3} value={params.reid_threshold ?? ""}
+                              onChange={(v) => set("reid_threshold", num(v, 0.27))} />
+                            <NumberInput label="Limiar de cor" description="Tronco/pernas: veto de roupa diferente"
+                              min={0.05} max={1} step={0.05} decimalScale={2} value={params.color_threshold}
+                              onChange={(v) => set("color_threshold", num(v, 0.6))} />
+                            <Select label="Detetor de pessoas" data={system.person_detectors ?? ["yolox_s"]}
+                              description="yolox_s: preciso · nano: rápido" value={params.person_detector} allowDeselect={false}
+                              onChange={(d) => d && set("person_detector", d)} />
+                            <NumberInput label="Altura mínima do corpo (px)" min={16} step={10} value={params.min_body_height}
+                              onChange={(v) => set("min_body_height", num(v, 80))} />
+                          </SimpleGrid>
+                      </Card>
+                    )}
+                        <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }}>
+                          <NumberInput label="Margem de candidatos" description="Guardar para revisão até limiar + margem"
+                            disabled={discover} min={0} max={0.5} step={0.01} decimalScale={3} value={params.candidate_margin}
+                            onChange={(v) => set("candidate_margin", num(v, 0.08))} />
+                          <NumberInput label="Tamanho mínimo da face (px)" min={0} value={params.min_face_size}
+                            onChange={(v) => set("min_face_size", num(v, 20))} />
+                          <NumberInput label="Confiança mínima do detetor" min={0} max={1} step={0.05} decimalScale={2}
+                            value={params.min_confidence} onChange={(v) => set("min_confidence", num(v, 0.5))} />
+                          <NumberInput label="Qualidade mínima da face" description="0 = sem filtro"
+                            min={0} max={1} step={0.05} decimalScale={2} value={params.min_quality}
+                            onChange={(v) => set("min_quality", num(v, 0))} />
+                          <NumberInput label="Ampliação da deteção" description="Ajuda com faces pequenas (mais lento)"
+                            min={1} max={4} step={0.5} decimalScale={1} value={params.upscale}
+                            onChange={(v) => set("upscale", num(v, 1))} />
+                        </SimpleGrid>
+                        <SimpleGrid cols={{ base: 1, sm: 2, md: 5 }}>
+                          <NumberInput label="Limiar de movimento" description="Fração de píxeis alterados"
+                            disabled={!params.motion_filter} min={0} max={1} step={0.001} decimalScale={4}
+                            value={params.motion_threshold} onChange={(v) => set("motion_threshold", num(v, 0.002))} />
+                          <NumberInput label="Frame-chave a cada (s)" description="Analisa mesmo sem movimento"
+                            disabled={!params.motion_filter} min={0} step={1} decimalScale={1}
+                            value={params.keyframe_interval_s} onChange={(v) => set("keyframe_interval_s", num(v, 5))} />
+                          <Select label="Detetor rápido (cascata)" disabled={!params.cascade} data={system.detectors}
+                            value={params.fast_detector} allowDeselect={false}
+                            onChange={(d) => d && set("fast_detector", d)} />
+                          <NumberInput label="Intervalo máx. no track (s)" disabled={!params.tracking && !discover} min={0} step={0.5}
+                            decimalScale={1} value={params.track_gap_s} onChange={(v) => set("track_gap_s", num(v, 2))} />
+                          <NumberInput label="Intervalo máx. no segmento (s)" min={0} step={0.5} decimalScale={1}
+                            value={params.segment_gap_s} onChange={(v) => set("segment_gap_s", num(v, 2))} />
+                        </SimpleGrid>
                   </Stack>
                 </Accordion.Panel>
               </Accordion.Item>
             </Accordion>
-            <Group justify="flex-end">
+            <Group justify="flex-end" gap="sm">
+              {blocked && <Text size="sm" c="dimmed">{blocked}</Text>}
               <Button leftSection={<IconPlayerPlay size={18} />} onClick={start} loading={submitting}
-                disabled={!videoIds.length || (!discover && !refIds.length)}>
+                disabled={!!blocked}>
                 Iniciar análise
               </Button>
             </Group>

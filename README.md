@@ -278,7 +278,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 
      O aviso mostra o diagnóstico: erro do browser, contentor e codec reais do original, e codecs suportados pelo browser.
    - O `ffprobe` também deteta as exportações de DVR com extensão `.mp4` que são, na verdade, H.264 "cru".
-4. **Análises:** escolhe o modo (**procurar pessoa(s)** com amostra, ou **descobrir todas as faces** sem amostra), as **pessoas** e os **locais** a analisar. Uma só análise procura, por exemplo, as Pessoas A e B nos Locais X, Y e Z (resumo "2 pessoas × 3 locais (7 vídeos)"). Por omissão entram todos os locais; em "Ajustar vídeos" podem retirar-se vídeos individuais. Os locais abrangidos ficam registados na análise (`params.locations`, com o nome na altura) e no relatório. Nos resultados, o vídeo escolhe-se numa lista agrupada por local e há um filtro por local ao lado do filtro de pessoa. Escolhe também o modelo, os fps e o limiar. Os interruptores ativam ou desativam o **pré-filtro de movimento**, a **cascata** e o **tracking**. O progresso é atualizado ao vivo, com o **tempo restante estimado** e a hora prevista de fim. A estimativa usa o ritmo do último minuto, porque frames sem movimento ou sem faces são muito mais rápidos do que frames com várias faces.
+4. **Análises:** escolhe o modo (**procurar pessoa** com fotos, ou **descobrir pessoas** sem fotos), as **pessoas** e os **locais** a analisar. Uma só análise procura, por exemplo, as Pessoas A e B nos Locais X, Y e Z (resumo "2 pessoas × 3 locais (7 vídeos)"). Por omissão entram todos os locais; em "Ajustar vídeos" podem retirar-se vídeos individuais. Os locais abrangidos ficam registados na análise (`params.locations`, com o nome na altura) e no relatório. Nos resultados, o vídeo escolhe-se numa lista agrupada por local e há um filtro por local ao lado do filtro de pessoa. O **rigor** escolhe-se num só controlo: **Rápida** (1 frame/s, só com movimento), **Equilibrada** (recomendada, os valores por omissão) ou **Minuciosa** (5 frames/s em todo o vídeo, sem cascata, faces a partir de 12 px). **Procurar também pela roupa** liga o complemento por vestuário. Tudo o resto (modelo, detetor, fps, limiar, pré-filtro de movimento, cascata, tracking, parâmetros do vestuário e alertas) fica em **Opções avançadas**; alterar aí um valor do perfil passa o rigor a "Personalizada". O perfil fica registado na análise (`params.preset`) e no relatório. Se ainda não for possível iniciar, o motivo aparece junto ao botão. O progresso é atualizado ao vivo, com o **tempo restante estimado** e a hora prevista de fim. A estimativa usa o ritmo do último minuto, porque frames sem movimento ou sem faces são muito mais rápidos do que frames com várias faces.
 5. **Resultados:**
    - player com linha temporal e tabela de segmentos, e botões ◀ ▶ para passar ao vídeo anterior ou seguinte;
    - teclado em todos os leitores (resultados, "▶ ver" da página do local e Multi View): **← / →** recuam/avançam 10 s e **Espaço** põe em pausa/reproduz (não atua enquanto se escreve num campo);
@@ -372,7 +372,7 @@ No frame de uma deteção, **Melhorar (revisão)** aplica operações clássicas
 
 ### Modo descoberta (sem amostra)
 
-Quando não há nenhuma fotografia da pessoa (por exemplo, para saber *quem* passou por uma câmara), escolhe-se **Descobrir todas as faces** em *Nova análise*. Se o processo não tiver amostras válidas, este é o modo por omissão.
+Quando não há nenhuma fotografia da pessoa (por exemplo, para saber *quem* passou por uma câmara), escolhe-se **Descobrir pessoas** em *Nova análise*. Se o processo não tiver amostras válidas, este é o modo por omissão.
 
 1. Todas as faces que passam os filtros (tamanho, confiança, qualidade) são seguidas entre frames (o **tracking é obrigatório** neste modo). De cada track guarda-se a primeira face, as que melhoram a qualidade e uma a cada 10 s.
 2. Cada track é representado pela média, ponderada pela qualidade, das suas 5 melhores faces.
@@ -390,7 +390,7 @@ Os embeddings dos tracks ficam em `jobs/job_NNNNN/track_embeddings.npz`. O relat
 
 ### Alertas: pessoas do processo em vários locais
 
-Em *Nova análise*, a opção **Alertar se aparecerem pessoas do processo** está ligada por omissão quando há pessoas com fotos válidas. Pode escolher **Destacar a partir de N locais** (por omissão 2) e, na descoberta, as **pessoas a vigiar** (por omissão, todas).
+Em *Nova análise → Opções avançadas*, a opção **Alertar se aparecerem pessoas do processo** está ligada por omissão quando há pessoas com fotos válidas. Pode escolher **Destacar a partir de N locais** (por omissão 2) e, na descoberta, as **pessoas a vigiar** (por omissão, todas).
 
 - **Modo descoberta:** no fim, cada pessoa descoberta é comparada com as fotos de cada pessoa do processo. Usa o mesmo modelo e detetor da análise e conta a menor de duas distâncias: ao centro da pessoa e à média dos 3 tracks mais próximos. O limiar é o de **correspondência do modelo**, não o de agrupamento. Abaixo dele, cria-se um alerta "Pessoa A pode ser a Pessoa #3".
 - **Modo procurar:** cria-se um alerta quando uma pessoa do processo tem correspondências em ≥ N locais.

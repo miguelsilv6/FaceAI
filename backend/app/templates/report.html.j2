@@ -107,6 +107,7 @@ foram{% if audit | selectattr("action", "in", ["person.merged", "track.person_ch
   {% else %}
   <tr><th>Métrica / limiar</th><td>distância de cosseno ≤ {{ job.params.threshold }} (candidatos até {{ "%.3f"|format(job.params.threshold + job.params.candidate_margin) }})</td></tr>
   {% endif %}
+  {% if job.params.get("preset") %}<tr><th>Rigor</th><td>{{ {"fast": "rápida", "balanced": "equilibrada", "thorough": "minuciosa", "custom": "personalizada"}[job.params.preset] }}</td></tr>{% endif %}
   <tr><th>Amostragem</th><td>{{ job.params.sample_fps }} frames/s · ampliação ×{{ job.params.upscale }}</td></tr>
   <tr><th>Filtros</th><td>face ≥ {{ job.params.min_face_size }} px · confiança do detetor ≥ {{ job.params.min_confidence }} · qualidade ≥ {{ job.params.get("min_quality", 0) }}</td></tr>
   <tr><th>Pré-filtro de movimento</th><td>{% if job.params.get("motion_filter") %}ativo · limiar {{ job.params.motion_threshold }} (fração de píxeis alterados) · frame-chave a cada {{ job.params.keyframe_interval_s }} s{% else %}desativado{% endif %}</td></tr>
