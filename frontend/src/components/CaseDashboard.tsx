@@ -9,6 +9,7 @@ import { useNavigate } from "react-router-dom";
 import { api, formatBytes, formatDate, formatDuration, formatTime } from "../api";
 import { notifyError } from "../notify";
 import { personColor } from "../personColors";
+import CaseSteps from "./CaseSteps";
 import StoragePanel from "./StoragePanel";
 import type { CaseDashboard as Dashboard, Job, PersonAlert } from "../types";
 
@@ -130,8 +131,8 @@ const ACTIONS: Record<string, string> = {
 };
 
 /** Painel do caso: material, análises, progresso da revisão, correspondências por câmara, hora e pessoa. */
-export default function CaseDashboard({ caseId, jobs, onOpenTab, canManage = false }: {
-  caseId: number; jobs: Job[]; onOpenTab: (tab: string) => void; canManage?: boolean;
+export default function CaseDashboard({ caseId, jobs, onOpenTab, canManage = false, photos = 0, videos = 0 }: {
+  caseId: number; jobs: Job[]; onOpenTab: (tab: string) => void; canManage?: boolean; photos?: number; videos?: number;
 }) {
   const navigate = useNavigate();
   const completed = jobs.filter((j) => j.status === "completed");
@@ -157,8 +158,19 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab, canManage = fal
   const personOrder = [...data.per_person].map((p) => p.label).sort();
   const m = data.material;
 
+  const anyCompleted = completed.length > 0;
+  const steps = [
+    { label: "Adicione fotos da pessoa", hint: "Ou use \"Descobrir pessoas\" se não tiver fotos", tab: "references",
+      done: photos > 0 || jobs.length > 0 },
+    { label: "Importe os vídeos", hint: "Organizados por local", tab: "videos", done: videos > 0 },
+    { label: "Inicie a análise", hint: "Pode sair da página enquanto corre", tab: "jobs", done: jobs.length > 0 },
+    { label: "Reveja e exporte", hint: "Confirme ou rejeite as aparições", tab: "results",
+      done: anyCompleted && r.pending === 0 },
+  ];
+
   return (
     <Stack>
+      <CaseSteps steps={steps} onOpenTab={onOpenTab} />
       <Group justify="space-between" align="flex-end" wrap="wrap">
         <MultiSelect label="Análises consideradas" w={380} value={jobIds} onChange={setJobIds} clearable
           placeholder="Todas as concluídas"
@@ -178,7 +190,7 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab, canManage = fal
         <Kpi label="Análises concluídas" value={String(data.jobs.by_status.completed ?? 0)}
           sub={`${running} em curso · ${data.jobs.by_status.failed ?? 0} falhada(s)`} />
         <Kpi label="Correspondências" value={String(r.matches)}
-          sub={`${r.tracks} track(s)${r.clothing ? ` · ${r.clothing} só pelo vestuário` : ""}`} />
+          sub={`${r.tracks} aparição(ões)${r.clothing ? ` · ${r.clothing} só pelo vestuário` : ""}`} />
         <Kpi label="Revisão" value={`${pct}%`} sub={`${reviewed} de ${r.matches} deteções revistas`} />
       </SimpleGrid>
 
@@ -227,7 +239,7 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab, canManage = fal
                 </Progress.Root>
                 <Text size="xs" c="dimmed" mt={6}>
                   {r.confirmed} confirmadas · {r.rejected} rejeitadas · {r.pending} por rever
-                  {" "}(tracks: {r.tracks_confirmed} confirmados, {r.tracks_rejected} rejeitados, {r.tracks_pending} por rever)
+                  {" "}(aparições: {r.tracks_confirmed} confirmadas, {r.tracks_rejected} rejeitadas, {r.tracks_pending} por rever)
                 </Text>
               </>
             )}
@@ -237,7 +249,7 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab, canManage = fal
             <Card withBorder>
               <Group justify="space-between" mb="xs">
                 <Title order={5}>Por local</Title>
-                <Anchor size="xs" component="button" onClick={() => onOpenTab("videos")}>Locais e vídeos</Anchor>
+                <Anchor size="xs" component="button" onClick={() => onOpenTab("videos")}>Vídeos</Anchor>
               </Group>
               <Table verticalSpacing={6}>
                 <Table.Tbody>
@@ -303,7 +315,7 @@ export default function CaseDashboard({ caseId, jobs, onOpenTab, canManage = fal
               {data.unsynced_matches > 0 && (
                 <Text size="xs" c="dimmed" mt="xs">
                   {data.unsynced_matches} correspondência(s) em vídeos sem hora real não aparecem aqui
-                  {" "}(acerte o relógio no separador Locais e vídeos).
+                  {" "}(acerte o relógio no separador Vídeos).
                 </Text>
               )}
             </Card>

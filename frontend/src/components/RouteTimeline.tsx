@@ -153,7 +153,7 @@ export default function RouteTimeline({ caseId, jobs, videos, locations }: {
       {unsyncedVideos.length > 0 && !hideUnsynced && (
         <Alert color="yellow" withCloseButton closeButtonLabel="Esconder" onClose={() => setHideUnsynced(true)}>
           {unsyncedVideos.length} vídeo(s) com aparições mas sem hora real acertada ({unsyncedVideos.map((v) => v.camera_label).join(", ")}):
-          ficam fora da linha temporal. Acerte o relógio no separador <b>Locais e vídeos</b> (botão "Acertar hora").
+          ficam fora da linha temporal. Acerte o relógio no separador <b>Vídeos</b> (botão "Acertar hora").
         </Alert>
       )}
       {route && segs.length > 0 && camerasWithSegs < 2 && (

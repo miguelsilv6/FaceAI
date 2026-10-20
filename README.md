@@ -210,7 +210,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 - **Papéis:**
   - **Administrador:** gere utilizadores (menu do utilizador → *Utilizadores*), vê todos os processos e a auditoria do sistema (logins, falhas, bloqueios, contas);
   - **Analista:** só vê os processos que criou ou que lhe foram atribuídos.
-- **Equipa do processo (need-to-know)** (o separador *Equipa* está desativado nesta fase; o controlo de acesso por processo mantém-se e a gestão faz-se pela API `/api/cases/{id}/members`):
+- **Equipa do processo (need-to-know)** (menu **⋯** junto ao nome do processo → **Equipa**; também pela API `/api/cases/{id}/members`):
   - quem cria o processo fica **responsável**;
   - o responsável, ou um administrador, dá acesso a outros utilizadores como **membro** ou responsável;
   - só o responsável e o administrador editam ou eliminam o processo; uma análise pode ser eliminada também por quem a criou;
@@ -223,13 +223,14 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 ## Utilização
 
 1. **Novo processo:** indica o nome ou referência do processo. Ficas como responsável do processo. O nome e a descrição podem ser editados depois (✏️ ao lado do nome do processo). Os valores anteriores ficam na auditoria.
-2. **Referências/Pessoas:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
-3. **Locais e vídeos:** o processo organiza-se em **locais**: os estabelecimentos ou zonas de interesse para o processo (ex.: "Café Central", "Estação de Campanhã"), cada um com os seus **vídeos** (um por ângulo de CCTV desse local).
+2. **1 · Pessoas:** arrasta as imagens da pessoa. Cada uma é validada e é mostrada a face recortada.
+3. **2 · Vídeos:** o processo organiza-se em **locais**: os estabelecimentos ou zonas de interesse para o processo (ex.: "Café Central", "Estação de Campanhã"), cada um com os seus **vídeos** (um por ângulo de CCTV desse local).
+   - Na página de cada local, a tabela mostra o essencial (nome, duração, estado, hora real, análises); **Detalhes técnicos** acrescenta n.º, tamanho, fps, resolução, codec e o início do SHA-256.
    - O separador mostra um cartão por local (n.º de vídeos, duração, **espaço em disco** — originais + cópias de reprodução —, quantos têm hora real acertada). **Novo local** cria um local e abre a sua página.
    - Os vídeos importam-se na **página do local** (clicar no cartão ou em "Abrir local"): os vídeos largados aí ficam nesse local. O nome do local pode ser mudado aí (✏️); um local só pode ser eliminado quando estiver vazio.
    - Cada vídeo tem um **nome** editável na tabela (por omissão, o nome do ficheiro). Em toda a aplicação (resultados, percurso, painel, relatórios, CSV/JSON e ZIP de frames) o vídeo é identificado como **"Local · Vídeo"**, e o nome do ficheiro original continua visível.
    - O menu ⋯ de cada vídeo permite **movê-lo para outro local** ou eliminá-lo. As mudanças ficam na auditoria (`location.*`, `video.updated`).
-   - **Importação em bloco (cada pasta é um local):** em *Locais e vídeos* → **Importar pastas**. Os vídeos de cada subpasta (incluindo as subpastas dela) vão para um local com o nome da subpasta; os vídeos soltos na pasta escolhida vão para um local com o nome dessa pasta. Antes de importar, vê-se a lista de pastas: o nome de cada local pode ser alterado e cada pasta pode ser excluída. Um nome igual a um local que já existe junta os vídeos a esse local. Os duplicados são ignorados e listados no fim.
+   - **Importação em bloco (cada pasta é um local):** em *Vídeos* → **Importar pastas**. Os vídeos de cada subpasta (incluindo as subpastas dela) vão para um local com o nome da subpasta; os vídeos soltos na pasta escolhida vão para um local com o nome dessa pasta. Antes de importar, vê-se a lista de pastas: o nome de cada local pode ser alterado e cada pasta pode ser excluída. Um nome igual a um local que já existe junta os vídeos a esse local. Os duplicados são ignorados e listados no fim.
      - **Do computador:** escolhe-se uma pasta no browser. Os vídeos sobem pelo upload em blocos, com retoma.
      - **Da pasta do servidor:** o administrador define `FACEAI_IMPORT_DIR` (por exemplo, um disco USB ou uma partilha montada). Só o responsável do processo ou um administrador pode navegar nessa pasta e importar dela, porque pode conter material de outros processos. Fora dela não se lê nada (`..` e symlinks para fora são recusados).
        - O servidor **copia** os ficheiros (os originais ficam intactos) e calcula o SHA-256 durante a cópia.
@@ -292,9 +293,9 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 6. **Eliminar um processo** (🗑 na lista de processos ou ao lado do nome do processo): pede o motivo e a confirmação, escrevendo o número do processo. Recusa se houver análises a decorrer. Cancela as conversões em curso e apaga do servidor os **vídeos originais e as cópias de reprodução**, as referências, as análises (deteções, recortes, frames) e os uploads por concluir. A auditoria mantém o histórico e regista um `case.deleted` com o motivo e a lista dos ficheiros apagados. Exporta antes os relatórios de que precises.
 7. **Eliminar uma análise** (🗑 na lista de análises ou "Eliminar" nos resultados): pede o motivo e a confirmação, escrevendo o número da análise. Apaga as deteções, os tracks, as revisões e os ficheiros gerados. Os vídeos e as referências do processo mantêm-se. A auditoria é *append-only*: guarda o histórico da análise e regista a eliminação (quem, quando, motivo, parâmetros e totais). Não é possível eliminar uma análise a decorrer; é preciso cancelá-la primeiro.
 8. **Exportar:** relatório PDF ou HTML, com estatísticas, parâmetros, tracks e qualidade; CSV; JSON; ou ZIP.
-   - **Guardar frame:** no leitor dos resultados de uma análise, **Guardar frame** guarda o frame original (PNG, sem marcações, com SHA-256) no instante atual. Fica como imagem validada no separador *Resultados* do processo (e na auditoria: `frame.saved`).
+   - **Guardar frame:** no leitor dos resultados de uma análise, **Guardar frame** guarda o frame original (PNG, sem marcações, com SHA-256) no instante atual. Fica como imagem validada no separador *4 · Resultados* do processo (e na auditoria: `frame.saved`).
    - **Separador *Resultados* do processo:** no topo, as **análises concluídas** (o que se procurou, locais, n.º de vídeos, correspondências ou pessoas distintas, quantas estão por rever, data e analista), com **Abrir resultados** e **Ver imagens** (filtra as imagens dessa análise); uma análise aparece aqui logo que termina. Abaixo, as imagens validadas de todas as análises: deteções confirmadas e frames guardados no leitor, com o local, o vídeo, a hora real, a pessoa e quem confirmou/guardou. Clicar numa imagem abre-a em tamanho grande (com marcação ou original; ← → para navegar). Filtra-se por local, tipo, pessoa e análise, escolhem-se as imagens e **Descarregar selecionados** gera o ZIP só com essas. Cada cartão tem também o PNG original e "Abrir na análise"; um frame guardado pode ser retirado (fica na auditoria).
-   - **Frames originais validados (ZIP):** no menu *Exportar* dos resultados, no separador *Resultados* (seleção) ou para o processo inteiro no separador *Análises*. Inclui o frame completo do vídeo original, sem anotações, de cada deteção **confirmada** (a revisão de um track aplica-se às suas deteções):
+   - **Frames originais validados (ZIP):** no menu *Exportar* dos resultados, ou no separador *4 · Resultados* (seleção ou processo inteiro). Inclui o frame completo do vídeo original, sem anotações, de cada deteção **confirmada** (a revisão de um track aplica-se às suas deteções):
      - os frames com várias deteções aparecem uma só vez;
      - `manifesto.csv` com uma linha por deteção (análise, vídeo, frame, tempo e hora real, semelhança, revisor, método de extração e **SHA-256** do PNG);
      - `LEIAME.txt` com o critério, quem gerou e quando.
@@ -305,7 +306,7 @@ Para alterações locais (portas, redes), usa um `docker-compose.override.yml`, 
 11. **Fila de análises:** as análises correm uma de cada vez. Nas que estão em fila, quem as criou, o responsável do processo ou um admin pode mudar a prioridade (alta, normal ou baixa) e retê-las ou libertá-las. Uma análise a decorrer só pode ser cancelada. A fila sobrevive a um reinício do servidor: as análises em fila retomam e as que estavam a decorrer ficam marcadas como interrompidas.
 
 ### Pessoas e várias fotos (vários ângulos)
-No separador *Referências* podes trabalhar com **fotos soltas** ou com **pessoas**.
+No separador *1 · Pessoas* podes trabalhar com **fotos soltas** ou com **pessoas**.
 - **Fotos soltas:** é a forma mais simples, para uma só pessoa. Todas as fotos soltas contam como a mesma pessoa.
 - **Pessoas:** o botão **Nova pessoa** cria, por exemplo, "Suspeito A", com notas opcionais (roupa, tatuagens…). Juntas-lhe fotos de vários ângulos de três maneiras: largando-as no cartão da pessoa, arrastando fotos soltas para o cartão, ou pelo menu da foto (*Mover para…*). Mudar o nome faz-se num só sítio. Eliminar uma pessoa não apaga as fotos: passam a soltas.
 - **Como as fotos são usadas:** cada face do vídeo é comparada com todas as fotos da pessoa e conta a mais parecida.
@@ -322,7 +323,7 @@ O botão **Procurar noutras análises** (👥), num track ou numa pessoa, compar
 - As análises no modo "procurar" feitas antes desta versão não têm índice e aparecem contadas à parte.
 
 ### Painel do processo
-O separador **Painel**, o primeiro de cada processo, resume o processo num relance. Por omissão considera todas as análises concluídas; também se pode escolher só algumas.
+O separador **Resumo** (antigo Painel), o primeiro de cada processo, resume o processo num relance. Num processo novo começa por **Primeiros passos**: 1 adicione fotos da pessoa (ou use "Descobrir pessoas"), 2 importe os vídeos, 3 inicie a análise, 4 reveja e exporte. Cada passo abre o separador respetivo e fica marcado quando está feito; o cartão desaparece quando os quatro estão concluídos. Os separadores seguem esta ordem: **Resumo · 1 Pessoas · 2 Vídeos · 3 Análises · 4 Resultados** (imagens validadas e percurso). A **auditoria**, a **equipa**, editar e eliminar o processo ficam no menu **⋯** junto ao nome. Por omissão considera todas as análises concluídas; também se pode escolher só algumas.
 - **Indicadores:**
   - locais e vídeos (duração, quantos vídeos não têm hora real, espaço ocupado);
   - análises concluídas e em curso;
@@ -340,13 +341,13 @@ A contagem segue o mesmo critério do relatório: uma deteção conta como corre
 
 ### Armazenamento
 - **Frames anotados a pedido.** As análises já não gravam um JPEG do frame inteiro por cada face, que era a maior fonte de crescimento das análises (num frame com 3 faces ficavam 3 cópias do mesmo frame). Ao pedir o frame (resultados, download, relatório, ZIP), o frame é lido do vídeo analisado pelo nº de frame, **verificado contra o recorte da face** (como o PNG original), e a caixa e o rótulo vêm da base de dados. Fica em cache um JPEG limpo por nº de frame, partilhado pelas faces desse frame. O ZIP só inclui os frames das correspondências, das deteções confirmadas e da melhor face de cada track. As análises anteriores continuam a servir os ficheiros que gravaram.
-- **Painel (separador Painel → Armazenamento):** espaço do processo por categoria, com o nº de ficheiros e se é **evidência/dados** (vídeos analisados, fotos de referência, recortes) ou **regenerável** (cópias de reprodução, frames anotados de análises anteriores, caches de frames, PNG originais e miniaturas).
+- **Painel (separador Resumo → Armazenamento):** espaço do processo por categoria, com o nº de ficheiros e se é **evidência/dados** (vídeos analisados, fotos de referência, recortes) ou **regenerável** (cópias de reprodução, frames anotados de análises anteriores, caches de frames, PNG originais e miniaturas).
 - **Libertar espaço:** o responsável do processo ou um administrador pode libertar cada categoria regenerável. As cópias de reprodução voltam a ser criadas ao abrir o leitor; os frames e as caches são refeitos a pedido. A evidência nunca é tocada e cada operação fica na auditoria (`storage.freed`, com o nº de ficheiros e de bytes).
 - **Administração (Utilizadores → Armazenamento):** disco do servidor, totais por categoria, base de dados, auditoria, uploads em curso e os processos que mais ocupam.
 - **CLI:** `python -m app.cli prune-frames [processo] [--dry-run]` apaga os frames anotados gravados por versões anteriores (todos os processos, ou só um).
 
 ### Pesquisa por foto noutros processos
-Para identificar a mesma pessoa em vários processos, em **Referências/Pessoas** abre o menu da pessoa (ou de uma foto solta) e escolhe **Procurar noutros processos**.
+Para identificar a mesma pessoa em vários processos, em **1 · Pessoas** abre o menu da pessoa (ou de uma foto solta) e escolhe **Procurar noutros processos**.
 - As fotos da pessoa são comparadas com os *tracks* de **todas as análises já feitas** nos processos a que o utilizador tem acesso. Os vídeos não são reprocessados.
 - Os embeddings das fotos são calculados com o modelo de cada análise, e conta a foto mais parecida. Por omissão usa o limiar de cada análise.
 - Os resultados mostram o processo, a análise, o vídeo, a hora real, a semelhança e o estado de revisão, com ligação para o instante exato.
@@ -354,7 +355,7 @@ Para identificar a mesma pessoa em vários processos, em **Referências/Pessoas*
 - Os resultados são candidatos: confirma sempre visualmente. Cada pesquisa fica na auditoria (`person.photo_search`), com as fotos usadas e os processos onde houve resultados.
 
 ### Percurso multi-vídeo
-O separador **Percurso/Multi View** do processo junta as aparições das análises escolhidas e ordena-as pela **hora real do DVR**.
+Em **4 · Resultados → Percurso** do processo junta as aparições das análises escolhidas e ordena-as pela **hora real do DVR**.
 - Por omissão escolhe todas as análises "procurar" concluídas, para juntar vídeos analisados à parte.
 - Mostra uma linha por vídeo (mesmo os que não têm aparições), **agrupados por local**, com blocos coloridos por pessoa (tracejados se a aparição vier só do vestuário), e a lista cronológica, exportável em CSV (colunas `local`, `camara` e `ficheiro`).
 - O campo **Local** limita o percurso e o leitor a um só local.
@@ -457,7 +458,7 @@ O nome do ficheiro identifica o processo, a análise, o vídeo, o frame, o tempo
 
 ### Hora real do CCTV
 
-Por omissão, os tempos são relativos ao início do ficheiro (`00:01:23.400`). Em **Locais e vídeos → Acertar hora** há três formas de os converter em hora real:
+Por omissão, os tempos são relativos ao início do ficheiro (`00:01:23.400`). Em **Vídeos → Acertar hora** há três formas de os converter em hora real:
 
 1. **OCR da data/hora gravada na imagem.** É feito **automaticamente na importação** de cada vídeo, em segundo plano e com prioridade baixa. A hora só é aplicada se as leituras forem coerentes, e fica marcada como "OCR automático" para confirmar. Se não houver leitura válida, o vídeo fica "OCR sem resultado" e acerta-se à mão. Nunca é substituída uma hora já acertada. Também se pode repetir pelo botão do relógio: a zona da data/hora é detetada automaticamente, ou marcada arrastando o rato sobre o frame. O OCR usa o RapidOCR (PP-OCR em ONNX Runtime, com os modelos incluídos no pacote, sem downloads) e lê ~12 frames distribuídos pelo vídeo. A seguir faz-se um **ajuste robusto**:
    - as leituras erradas são descartadas;
@@ -486,10 +487,10 @@ A hora real aparece nos resultados, nos tracks e nos segmentos, e é exportada n
 - **Auditoria:** todas as ações ficam registadas com o utilizador autenticado, o IP e a hora UTC, na base de dados e em `data/audit.jsonl` (append-only). Inclui criação do processo, uploads (incluindo blocos iniciados ou cancelados), parâmetros, início e fim de análise, revisões de deteções e de tracks, e exportações. O registo é incluído no relatório e no ZIP.
 - **Cadeia de hashes da auditoria:** cada evento guarda `prev_hash` e `hash = SHA-256(prev_hash ‖ evento)`.
   - Alterar, apagar ou inserir um evento fora da aplicação quebra a cadeia. O `audit.jsonl` também guarda os hashes, por isso apagar os últimos eventos da base de dados também é detetado.
-  - Para verificar: separador *Auditoria* → **Verificar integridade da auditoria**, ou `python -m app.cli verify-audit`.
+  - Para verificar: menu **⋯ → Auditoria** → **Verificar integridade da auditoria**, ou `python -m app.cli verify-audit`.
   - O relatório indica o estado da cadeia.
   - Os eventos anteriores a esta versão são incluídos na cadeia no primeiro arranque.
-- **Integridade dos originais:** em *Locais e vídeos*, **Verificar integridade** recalcula em segundo plano o SHA-256 de cada vídeo e compara-o com o da importação.
+- **Integridade dos originais:** em *Vídeos*, **Verificar integridade** recalcula em segundo plano o SHA-256 de cada vídeo e compara-o com o da importação.
   - Também pela consola: `python -m app.cli verify-evidence [processo]`.
   - O relatório mostra a data e o resultado da última verificação de cada vídeo e avisa se algum foi alterado ou está em falta.
   - Ao exportar, os vídeos sem verificação nas últimas 24 h são verificados na hora, até 4 GiB no total.

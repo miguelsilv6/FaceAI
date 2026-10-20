@@ -40,7 +40,7 @@ export default function Layout() {
             </Group>
           </Link>
           <Group gap="sm" wrap="nowrap">
-            {env && (
+            {env && isAdmin && (
               <Tooltip label={`DeepFace ${env.deepface} · TensorFlow ${env.tensorflow} · OpenCV ${env.opencv}`}>
                 <Badge color={env.device === "GPU" ? "green" : "gray"} visibleFrom="xs">{String(env.device)}</Badge>
               </Tooltip>

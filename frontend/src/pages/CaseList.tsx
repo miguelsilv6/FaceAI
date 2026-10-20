@@ -39,7 +39,10 @@ export default function CaseList() {
       </Group>
       <Card withBorder p={0}>
         {cases.length === 0 ? (
-          <Text c="dimmed" p="lg">Ainda não existem processos. Crie um para importar imagens de referência e vídeos.</Text>
+          <Stack align="center" p="xl" gap="sm">
+            <Text c="dimmed">Ainda não existem processos. Crie um para importar as fotos da pessoa e os vídeos.</Text>
+            <Button leftSection={<IconFolderPlus size={18} />} onClick={open}>Criar processo</Button>
+          </Stack>
         ) : (
           <Table.ScrollContainer minWidth={600}>
             <Table highlightOnHover>

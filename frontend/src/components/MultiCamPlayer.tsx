@@ -114,7 +114,7 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
     seek: (d) => setWall((w) => Math.min(t1, Math.max(t0, w + d))), toggle: () => setPlaying((p) => !p) });
 
   if (!cams.length) {
-    return <Text c="dimmed" size="sm">Nenhum vídeo com hora real acertada: acerte o relógio no separador Locais e vídeos.</Text>;
+    return <Text c="dimmed" size="sm">Nenhum vídeo com hora real acertada: acerte o relógio no separador Vídeos.</Text>;
   }
 
   const visible = cams.filter((v) => shown.includes(String(v.id)) && (focus == null || focus === v.id));

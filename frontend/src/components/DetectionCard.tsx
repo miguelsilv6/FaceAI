@@ -44,7 +44,7 @@ export default function DetectionCard({ det, onSeek, onReview, onOpenFrame, real
             {realTime ? realTime.slice(11) : formatTime(det.timestamp_s)}
           </Text>
           {det.reference_id == null ? (
-            <Badge color="blue" variant="filled" size="sm" style={{ flexShrink: 0 }}>{personId != null ? `P#${personId}` : "—"}</Badge>
+            <Badge color="blue" variant="filled" size="sm" style={{ flexShrink: 0 }}>{personId != null ? `Pessoa ${personId}` : "—"}</Badge>
           ) : (
             <Badge color={det.is_match ? "red" : "orange"} variant="filled" size="sm">
               {(det.similarity * 100).toFixed(1)}%

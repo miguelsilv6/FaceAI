@@ -27,7 +27,7 @@ const swatch = (name?: string) => {
 };
 
 const REVIEW: Record<ReviewStatus, [string, string]> = {
-  pending: ["Por rever", "gray"], confirmed: ["Confirmado", "green"], rejected: ["Rejeitado", "red"],
+  pending: ["Por rever", "gray"], confirmed: ["Confirmada", "green"], rejected: ["Rejeitada", "red"],
 };
 
 /** Track de corpo: amostra (corpo de uma face com correspondência) ou aparição só pelo vestuário. */
