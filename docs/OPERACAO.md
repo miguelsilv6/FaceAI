@@ -76,3 +76,4 @@ A base de dados migra automaticamente: as colunas novas são acrescentadas e nen
   - a interface avisa aos 80% e aos 90%; em nível crítico, recusa uploads que não cabem e novas análises;
   - em *Utilizadores → Armazenamento* vê-se o que ocupa espaço;
   - no **Resumo** de cada processo, o responsável liberta o que é regenerável (cópias de reprodução, caches, frames antigos). A evidência nunca é tocada.
+  - as **cópias de reprodução** (só para ver no browser) são criadas quando um vídeo é aberto, em 720p, e apagadas sozinhas ao fim de 14 dias sem uso. Para afinar, usa `FACEAI_PLAYBACK_MAX_HEIGHT`, `FACEAI_PLAYBACK_CRF` e `FACEAI_PLAYBACK_TTL_DAYS` no `.env`. As cópias feitas por versões anteriores (resolução completa) expiram da mesma forma; para libertar já o espaço, usa "Libertar cópias de reprodução" no Resumo do processo.

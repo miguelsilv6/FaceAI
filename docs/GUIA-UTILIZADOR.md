@@ -28,7 +28,7 @@ Este guia segue o trabalho num processo, do início ao relatório. Detalhes de c
 - Em **2 · Vídeos**, crie um **local** por estabelecimento ou zona (por exemplo, "Café Central") e importe os vídeos de cada câmara.
 - **Importar pastas** importa uma pasta inteira: cada subpasta passa a ser um local.
 - Na importação é calculado o **SHA-256** de cada ficheiro, e os duplicados são recusados.
-- Os ficheiros `.sec` e os formatos que o browser não abre são preparados automaticamente. O estado aparece na lista de vídeos.
+- Os ficheiros `.sec` são preparados automaticamente. Os formatos que o browser não abre (por exemplo, H.265) ficam "Ao abrir": quando abre o vídeo, é criada uma cópia leve só para visualização, que é apagada sozinha se não for usada durante algum tempo. A análise usa sempre o original.
 - **Acertar hora** (só o responsável): lê a data/hora gravada na imagem (OCR), ou acerta-a à mão, para os resultados virem em **hora real**.
 - **Proporção da imagem:** alguns DVR gravam com píxeis que não são quadrados (modos "Lite"). Fora do leitor do fabricante, a imagem fica quase quadrada e deformada. O FaceAI ajusta a proporção e os frames automaticamente, e o tamanho mostrado aparece junto ao vídeo (por exemplo, 1920×1080). Se a imagem continuar deformada, o responsável altera-a no menu **⋯** do vídeo → **Proporção da imagem…**. O ficheiro não muda, e as análises novas veem as caras com a forma real.
 - **Detalhes técnicos** mostra o tamanho, fps, resolução, codec e o início do SHA-256 de cada vídeo.

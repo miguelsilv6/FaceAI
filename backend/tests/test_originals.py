@@ -158,12 +158,12 @@ def test_h264_in_other_container_becomes_single_mp4(client, tmp_path, removing, 
 
 def test_codec_the_browser_cannot_play_is_not_copied(client, tmp_path, removing):
     """MPEG-4/HEVC: uma cópia sem perdas ocuparia o mesmo que o original; fica o original (analisado) e só se faz
-    a cópia de reprodução."""
+    a cópia de reprodução (quando o vídeo for aberto)."""
     avi = make_video(tmp_path / "cam.avi", [(0.5, 1.5, RED)], duration_s=2, fps=10)  # MPEG-4 Part 2
     cid = client.post("/api/cases", json={"name": "MPEG-4"}).json()["id"]
     v = _upload(client, cid, avi, "video/x-msvideo")
     assert v["extraction_status"] == "" and v["original_removed_at"] is None and not v["analysis_path"]
-    assert v["playback_status"] in ("pending", "running", "ready")
+    assert v["playback_status"] == "on_demand"  # a cópia de reprodução é criada quando o vídeo for aberto
     assert Path(_video(v["id"]).stored_path).exists()
 
 

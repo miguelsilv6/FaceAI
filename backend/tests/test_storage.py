@@ -130,7 +130,7 @@ def test_storage_panel_and_free(client, tmp_path):
     assert after["crops"]["files"] == cats["crops"]["files"]  # a evidência fica
     assert file_sha256(original[0]) == original[1]
     v = client.get(f"/api/cases/{cid}/videos").json()[0]
-    assert v["playback_path"] is None and v["playback_status"] == ""
+    assert v["playback_path"] is None and v["playback_status"] == "on_demand"
     with Session(app.db.get_engine()) as s:
         assert s.exec(select(AuditEvent).where(AuditEvent.action == "storage.freed")).first()
     assert client.post(f"/api/cases/{cid}/storage/free", json={"targets": ["originals"]}).status_code == 422

@@ -789,6 +789,7 @@ def stream_video(video_id: int, session: SessionDep) -> FileResponse:
     if video is None:
         raise HTTPException(404, "Vídeo não encontrado.")
     if video.playback_status == READY and video.playback_path and Path(video.playback_path).exists():
+        transcode.mark_used(session, video)  # adia a expiração da cópia (FACEAI_PLAYBACK_TTL_DAYS)
         media_type = FORMATS.get(video.playback_format, "video/mp4")
         return FileResponse(video.playback_path, media_type=media_type, content_disposition_type="inline",
                             headers=_NO_CACHE)

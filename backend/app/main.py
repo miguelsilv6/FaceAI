@@ -36,7 +36,7 @@ from .services.originals import start_pending_removal
 from .services.references import migrate_person_labels
 from .services.relocate import relocate_data_dir
 from .services.sec_extract import start_resume_pending_extractions
-from .services.transcode import start_resume_pending_copies
+from .services.transcode import start_periodic_expiry, start_resume_pending_copies
 
 logging_setup.configure()
 # O WeasyPrint/fontTools registam centenas de linhas INFO por cada PDF gerado.
@@ -65,6 +65,7 @@ async def lifespan(_: FastAPI):
         cleanup_stale_uploads()
         start_periodic_cleanup()
         start_resume_pending_copies()
+        start_periodic_expiry()
         start_resume_pending_extractions()
         start_pending_removal()
         resume_pending_auto_clock()

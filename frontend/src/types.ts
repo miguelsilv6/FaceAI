@@ -93,7 +93,7 @@ export interface Video {
   uploaded_at: string;
   verified_at?: string | null; // última verificação de integridade (SHA-256 recalculado)
   verified_ok?: boolean | null;
-  playback_status: "" | "not_needed" | "pending" | "running" | "ready" | "failed" | "unavailable";
+  playback_status: "" | "not_needed" | "on_demand" | "pending" | "running" | "ready" | "failed" | "unavailable";
   playback_progress: number;
   playback_error: string;
   playback_format: "" | "mp4" | "webm";

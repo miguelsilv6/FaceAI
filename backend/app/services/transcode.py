@@ -5,6 +5,10 @@ DVR (H.265/HEVC, .dav, .avi com MPEG-4, H.264 10 bits ou 4:2:2, ...) dão "nenhu
 suportado". Para esses é criada uma cópia só para visualização (H.264/MP4; ou VP9/WebM para browsers sem
 H.264, como alguns Firefox/Chromium em Linux), numa fila (uma conversão de cada vez) com
 estado e progresso guardados no vídeo. As conversões pendentes são retomadas no arranque do servidor.
+
+Para poupar espaço, a cópia é leve e descartável: só é criada quando alguém abre o vídeo (estado "on_demand" até
+lá), tem no máximo 720 p (FACEAI_PLAYBACK_MAX_HEIGHT) e qualidade de visualização (FACEAI_PLAYBACK_CRF), e é apagada
+ao fim de FACEAI_PLAYBACK_TTL_DAYS dias sem uso (volta a "on_demand"). A evidência nunca é tocada.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ import subprocess
 import tempfile
 import threading
 import time
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from sqlmodel import Session, select
@@ -37,6 +42,8 @@ BROWSER_CONTAINERS = {".mp4", ".webm", ".m4v", ".mov"}
 # Estados de Video.playback_status
 NOT_NEEDED, PENDING, RUNNING, READY, FAILED, UNAVAILABLE = (
     "not_needed", "pending", "running", "ready", "failed", "unavailable")
+ON_DEMAND = "on_demand"  # precisa de cópia, criada quando o vídeo for aberto no leitor
+USED_EVERY_S = 3600  # Video.playback_used_at é atualizado no máximo uma vez por hora
 
 _queue: queue.Queue[int] = queue.Queue()
 _queued: set[int] = set()
@@ -94,8 +101,10 @@ def needs_playback_copy(video: Video) -> tuple[bool, str]:
 
 def request_playback_copy(s: Session, video: Video, *, force: bool = False, actor: str = "sistema",
                           fmt: str = "mp4") -> str:
-    """Decide se o vídeo precisa de cópia de reprodução e, se sim, põe-na na fila. Devolve o novo estado.
+    """Decide se o vídeo precisa de cópia de reprodução. Devolve o novo estado.
 
+    Sem `force` (importação, arranque): fica "on_demand" e a cópia só é criada quando o vídeo for aberto. Com
+    `force` (o leitor pediu-a, ou pedido manual) entra na fila.
     fmt: "mp4" (H.264, o mais compatível) ou "webm" (VP9, para browsers sem H.264, ex.: alguns em Linux).
     """
     if fmt not in FORMATS:
@@ -107,10 +116,12 @@ def request_playback_copy(s: Session, video: Video, *, force: bool = False, acto
     if not ffmpeg_available():
         video.playback_status, video.playback_error = UNAVAILABLE, "ffmpeg não está instalado no servidor."
     else:
-        need, reason = (True, "pedido manual") if force else needs_playback_copy(video)
-        if need:
+        need, reason = (True, "pedido ao abrir o vídeo") if force else needs_playback_copy(video)
+        if need and force:
             video.playback_status, video.playback_error, video.playback_progress = PENDING, "", 0.0
             video.playback_format = fmt
+        elif need:
+            video.playback_status, video.playback_error, video.playback_progress = ON_DEMAND, "", 0.0
         else:
             video.playback_status, video.playback_error = NOT_NEEDED, ""
     s.add(video)
@@ -201,11 +212,15 @@ def resume_pending_copies() -> None:
                     s.add(video)
                     s.commit()
                 continue
-            if video.playback_status in (PENDING, RUNNING):
+            if video.playback_status == RUNNING:  # interrompida a meio: volta à fila
                 video.playback_status = PENDING
                 s.add(video)
                 s.commit()
                 _enqueue(video.id)
+            elif video.playback_status == PENDING:  # nunca começou: só é criada quando o vídeo for aberto
+                video.playback_status, video.playback_progress = ON_DEMAND, 0.0
+                s.add(video)
+                s.commit()
             else:
                 request_playback_copy(s, video)
 
@@ -283,6 +298,99 @@ def _set(video_id: int, **fields) -> Video | None:
         return video
 
 
+def playback_size(video: Video) -> tuple[int, int] | None:
+    """Tamanho da cópia: o de apresentação (píxeis não quadrados corrigidos), reduzido à altura máxima."""
+    from .aspect import display_size
+
+    if not video.width or not video.height:
+        return None
+    w, h = display_size(video) or (video.width, video.height)
+    limit = settings.playback_max_height
+    if limit > 0 and h > limit:
+        w, h = w * limit / h, limit
+    return max(2, int(round(w / 2)) * 2), max(2, int(round(h / 2)) * 2)
+
+
+def playback_scale(video: Video) -> str:
+    size = playback_size(video)
+    if size is None:
+        limit = settings.playback_max_height
+        return (f"scale=-2:'min({limit},trunc(ih/2)*2)',setsar=1" if limit > 0
+                else "scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1")
+    return f"scale={size[0]}:{size[1]},setsar=1"
+
+
+def _aware(dt: datetime | None) -> datetime | None:
+    """O SQLite devolve datas sem fuso (gravadas em UTC)."""
+    return dt.replace(tzinfo=UTC) if dt is not None and dt.tzinfo is None else dt
+
+
+def mark_used(s: Session, video: Video) -> None:
+    """A cópia foi servida ao leitor: adia a expiração (no máximo uma escrita por hora)."""
+    now = datetime.now(UTC)
+    last = _aware(video.playback_used_at)
+    if last is None or (now - last).total_seconds() >= USED_EVERY_S:
+        video.playback_used_at = now
+        s.add(video)
+        s.commit()
+
+
+def expire_unused_copies(now: datetime | None = None, ttl_days: float | None = None) -> dict[int, dict]:
+    """Apaga as cópias não usadas há mais de FACEAI_PLAYBACK_TTL_DAYS dias; os vídeos voltam a "on_demand".
+
+    Devolve {case_id: {"copies": n, "bytes": b}}. A evidência nunca é tocada (só ficheiros *_playback.*)."""
+    ttl = settings.playback_ttl_days if ttl_days is None else ttl_days
+    if ttl <= 0:
+        return {}
+    now = _aware(now) or datetime.now(UTC)
+    cutoff = now - timedelta(days=ttl)
+    out: dict[int, dict] = {}
+    with Session(get_engine()) as s:
+        videos = list(s.exec(select(Video).where(Video.playback_status == READY, Video.playback_path.is_not(None))))
+        for video in videos:
+            with _lock:
+                if video.id in _queued or video.id in _running:
+                    continue
+            path = Path(video.playback_path or "")
+            if path == Path(video.source_path) or "_playback" not in path.name:
+                continue  # nunca o vídeo analisado
+            try:
+                used = _aware(video.playback_used_at) or datetime.fromtimestamp(path.stat().st_mtime, UTC)
+                size = path.stat().st_size
+            except OSError:
+                used, size = None, 0
+            if used is not None and used > cutoff:
+                continue
+            path.unlink(missing_ok=True)
+            video.playback_path, video.playback_status, video.playback_progress = None, ON_DEMAND, 0.0
+            video.playback_used_at = None
+            s.add(video)
+            agg = out.setdefault(video.case_id, {"copies": 0, "bytes": 0, "video_ids": []})
+            agg["copies"] += 1
+            agg["bytes"] += size
+            agg["video_ids"].append(video.id)
+        s.commit()
+        for case_id, agg in out.items():
+            log_event(s, "storage.playback_expired", case_id=case_id, actor="sistema",
+                      details={**agg, "ttl_days": ttl,
+                               "note": "cópias só para visualização, não usadas no prazo; são criadas de novo quando"
+                                       " o vídeo for aberto. A evidência não foi tocada."})
+    return out
+
+
+def start_periodic_expiry(interval_s: float = 6 * 3600) -> None:
+    """Expiração das cópias sem uso: no arranque e depois a cada 6 h."""
+    def loop() -> None:
+        while True:
+            try:
+                expire_unused_copies()
+            except Exception:  # pragma: no cover
+                log.exception("Expiração das cópias de reprodução falhou")
+            time.sleep(interval_s)
+
+    threading.Thread(target=loop, name="faceai-playback-expiry", daemon=True).start()
+
+
 def _transcode(video_id: int) -> None:
     video = _set(video_id, playback_status=RUNNING, playback_progress=0.0)
     if video is None:
@@ -291,16 +399,18 @@ def _transcode(video_id: int) -> None:
     src = Path(video.source_path)
     dst = src.with_name(f"{src.stem}_playback.{fmt}")
     tmp = src.with_name(f"{src.stem}_playback.part.{fmt}")
+    crf = settings.playback_crf
     if fmt == "webm":  # VP9 em tempo real: mais lento que H.264 mas reproduz em qualquer browser moderno
         codec = ["-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-row-mt", "1",
-                 "-crf", "33", "-b:v", "0"]
+                 "-crf", str(crf + 10), "-b:v", "0"]
     else:
-        codec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-movflags", "+faststart"]
+        codec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf), "-movflags", "+faststart"]
+    codec += ["-g", str(max(1, round((video.fps or 25) * 2)))]  # frame-chave a cada 2 s: saltos rápidos
     threads = str(settings.cpu_threads or max(1, (os.cpu_count() or 2) // 2))
     cmd = [
         "ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
         "-threads", threads, "-i", str(src), "-map", "0:v:0", "-an", *codec, "-threads", threads,
-        "-pix_fmt", "yuv420p", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2", str(tmp),
+        "-pix_fmt", "yuv420p", "-vf", playback_scale(video), str(tmp),
     ]
     duration = video.duration_s or 0.0
     started, last_update = time.monotonic(), 0.0

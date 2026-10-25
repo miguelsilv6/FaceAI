@@ -62,6 +62,11 @@ class Settings:
     # poupar espaço; fica o SHA-256 para o relacionar com o original guardado no suporte de origem.
     remove_originals: bool = field(
         default_factory=lambda: _env("REMOVE_ORIGINALS", "1").lower() in ("1", "true", "yes"))
+    # Cópias de reprodução (só para ver no browser; a análise usa sempre o original): criadas quando o vídeo é
+    # aberto, com no máximo esta altura e esta qualidade, e apagadas ao fim de N dias sem uso (0 = nunca).
+    playback_max_height: int = field(default_factory=lambda: int(_env("PLAYBACK_MAX_HEIGHT", "720")))
+    playback_crf: int = field(default_factory=lambda: int(_env("PLAYBACK_CRF", "28")))
+    playback_ttl_days: float = field(default_factory=lambda: float(_env("PLAYBACK_TTL_DAYS", "14")))
     clock_date_order: str = field(default_factory=lambda: _env("CLOCK_DATE_ORDER", "DMY").upper())
     # Alertas de disco (pasta de dados): % de ocupação e espaço livre mínimo.
     disk_warn_percent: float = field(default_factory=lambda: float(_env("DISK_WARN_PERCENT", "80")))
