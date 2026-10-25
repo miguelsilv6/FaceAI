@@ -144,7 +144,7 @@ def free(s: Session, case_id: int, targets: list[str], *, actor: str) -> dict[st
         cancel_copies([v.id for v in videos])
         result["playback"] = remove(Path(v.playback_path) for v in videos if v.playback_path)
         for v in videos:  # pedida de novo quando o vídeo for aberto no leitor
-            v.playback_path, v.playback_status, v.playback_progress = None, "", 0.0
+            v.playback_path, v.playback_status, v.playback_progress = None, "on_demand", 0.0
             s.add(v)
         s.commit()
     if "frames" in targets:

@@ -109,11 +109,12 @@ class Video(SQLModel, table=True):
     # Proporção de apresentação (píxeis não quadrados; services/aspect.py): display [w, h], origem, sugestão
     aspect: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
     playback_path: str | None = None  # cópia H.264 só para visualização no navegador
-    # "" (por avaliar) | not_needed | pending | running | ready | failed | unavailable (sem ffmpeg)
+    # "" (por avaliar) | not_needed | on_demand (criada ao abrir) | pending | running | ready | failed | unavailable
     playback_status: str = ""
     playback_progress: float = 0.0
     playback_error: str = ""
     playback_format: str = ""  # formato da cópia: "mp4" (H.264) | "webm" (VP9)
+    playback_used_at: datetime | None = None  # último uso da cópia (expira sem uso: services/transcode.py)
     # Hora real (relógio do DVR): hora_real(t) = dvr_start + t × dvr_rate + clock_offset_s
     dvr_start: str | None = None  # ISO 8601 sem fuso: hora "de parede" do DVR (não é convertida para UTC)
     dvr_rate: float = 1.0

@@ -11,6 +11,7 @@ import { api } from "../api";
 import { cameraLabel, cameraName, groupByLocation } from "../places";
 import { VIDEO_KEYS_HINT, useVideoKeys } from "../useVideoKeys";
 import type { Location, RouteSegment, Video } from "../types";
+import { preparingCopy, useOnDemandCopies } from "../playbackOnDemand";
 import { aspectCorrected, displaySize } from "../videoAspect";
 
 /** Hora "de parede" do DVR em segundos (sem fuso, tratada como UTC só para fazer contas). */
@@ -114,11 +115,14 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
   useVideoKeys({ anchor: holder, enabled: cams.length > 0,
     seek: (d) => setWall((w) => Math.min(t1, Math.max(t0, w + d))), toggle: () => setPlaying((p) => !p) });
 
+  // os vídeos que o browser não abre: a cópia leve é pedida quando aparecem no ecrã
+  const visible = useOnDemandCopies(
+    cams.filter((v) => shown.includes(String(v.id)) && (focus == null || focus === v.id)));
+
   if (!cams.length) {
     return <Text c="dimmed" size="sm">Nenhum vídeo com hora real acertada: acerte o relógio no separador Vídeos.</Text>;
   }
 
-  const visible = cams.filter((v) => shown.includes(String(v.id)) && (focus == null || focus === v.id));
   const activeAt = (v: Video) => segments.filter((s) => s.video_id === v.id && s.real_start
     && wall >= wallSeconds(s.real_start) - 0.5 && wall <= wallSeconds(s.real_end ?? s.real_start) + 0.5);
   const nextSeg = segments.find((s) => s.real_start && wallSeconds(s.real_start) - 2 > wall + 0.5
@@ -199,7 +203,7 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
             const t = videoTimeAt(v, wall);
             const inside = t >= 0 && t <= v.duration_s;
             const active = activeAt(v);
-            const preparing = v.playback_status === "pending" || v.playback_status === "running";
+            const preparing = preparingCopy(v);
             return (
               <Box key={v.id} p={4} style={{
                 border: `2px solid ${active.length ? "var(--mantine-color-red-6)" : "var(--mantine-color-default-border)"}`,

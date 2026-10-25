@@ -33,6 +33,7 @@ import type {
 } from "../types";
 import { cameraLabel, cameraName, groupByLocation } from "../places";
 import { confirmAction } from "../confirm";
+import { preparingCopy } from "../playbackOnDemand";
 import { displaySize, videoStyle } from "../videoAspect";
 
 const PAGE = 240;
@@ -169,7 +170,7 @@ export default function Results() {
   }, 2000, running);
 
   const video = videos.find((v) => v.id === videoId) ?? null;
-  const converting = video?.playback_status === "pending" || video?.playback_status === "running";
+  const converting = !!video && preparingCopy(video); // inclui "on_demand": a cópia é pedida logo abaixo
   // Atualiza o estado da cópia de reprodução. Depende só do caso e dos vídeos (valores estáveis): o objeto `job`
   // é substituído a cada 2 s enquanto a análise decorre, o que reiniciava o intervalo antes de ele disparar.
   const caseId = job?.case_id;
@@ -181,18 +182,23 @@ export default function Results() {
     const byId = new Map(vs.filter((v) => ids.has(v.id)).map((v) => [v.id, v]));
     setVideos((cur) => cur.map((v) => byId.get(v.id) ?? v)); // mantém a ordem por local
   }, 3000, converting && caseId != null);
-  // Cópia de reprodução de todos os vídeos do caso: se o browser não reproduz um, os outros do mesmo DVR também não.
+  // Cópia leve só para visualização deste vídeo (as dos outros vídeos são pedidas quando forem abertos).
   const createPlaybackCopy = async (format?: "mp4" | "webm") => {
-    if (!video || !job) return;
+    if (!video) return;
     try {
-      const updated = await api.createCaseCopies(job.case_id, format);
-      const byId = new Map(updated.map((v) => [v.id, v]));
-      setVideos((vs) => vs.map((v) => byId.get(v.id) ?? v));
+      const updated = await api.createPlaybackCopy(video.id, format);
+      setVideos((vs) => vs.map((v) => (v.id === updated.id ? updated : v)));
       setPlayError(null);
     } catch (e) {
       notifyError(e);
     }
   };
+  const onDemandAsked = useRef(new Set<number>());
+  useEffect(() => { // o browser não abre este formato: a cópia é criada agora, ao abrir o vídeo
+    if (video?.playback_status !== "on_demand" || onDemandAsked.current.has(video.id)) return;
+    onDemandAsked.current.add(video.id);
+    createPlaybackCopy();
+  }, [video?.id, video?.playback_status]); // eslint-disable-line react-hooks/exhaustive-deps
   const MEDIA_ERRORS: Record<number, string> = {
     1: "carregamento interrompido", 2: "erro de rede", 3: "erro ao descodificar", 4: "formato não suportado",
   };
@@ -679,10 +685,10 @@ export default function Results() {
                     {playDetails && video.playback_status !== "unavailable" && (
                       <Group gap="xs" mt="xs">
                         <Button size="compact-xs" variant="light" onClick={() => createPlaybackCopy("mp4")}>
-                          Criar cópias H.264 (MP4) de todos os vídeos
+                          Criar cópia H.264 (MP4)
                         </Button>
                         <Button size="compact-xs" variant="light" onClick={() => createPlaybackCopy("webm")}>
-                          Criar cópias VP9 (WebM) de todos os vídeos
+                          Criar cópia VP9 (WebM)
                         </Button>
                       </Group>
                     )}

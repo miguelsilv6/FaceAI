@@ -37,6 +37,13 @@ def _upload(client, path, name):
     return r.json()[0]
 
 
+def _open(client, video_id, fmt="mp4"):
+    """O que o leitor faz ao abrir um vídeo "on_demand": pede a cópia."""
+    r = client.post(f"/api/videos/{video_id}/playback", params={"format": fmt})
+    assert r.status_code == 200 and r.json()["playback_status"] in ("pending", "running", "ready"), r.text
+    return r.json()
+
+
 def _h264(path, pix_fmt="yuv420p", duration_s=2.0):
     import subprocess
     src = make_video(path.with_suffix(".src.mp4"), [(0.0, 2.0, RED)], duration_s=duration_s, fps=10)
@@ -49,7 +56,10 @@ def test_mpeg4_gets_playback_copy(client, tmp_path, with_ffmpeg):
     client.post("/api/cases", json={"name": "c"})
     video = make_video(tmp_path / "dvr.mp4", [(0.0, 3.0, RED)], duration_s=3, fps=10)  # MPEG-4 Part 2 (mp4v)
     v = _upload(client, video, "dvr.mp4")
-    assert v["playback_status"] in ("pending", "running", "ready")
+    assert v["playback_status"] == "on_demand"  # só é criada quando o vídeo for aberto
+    time.sleep(0.5)
+    assert not transcode._queued
+    _open(client, v["id"])
     v = _wait_status(client, v["id"], {"ready", "failed"})
     assert v["playback_status"] == "ready" and v["playback_progress"] == 1.0, v
     r = client.get(f"/api/videos/{v['id']}/stream")
@@ -65,7 +75,8 @@ def test_browser_compatible_video_is_not_copied(client, tmp_path, with_ffmpeg):
     assert v["playback_status"] == "not_needed"
     # H.264 4:4:4 tem FourCC avc1, mas os browsers não o reproduzem → precisa de cópia.
     v444 = _upload(client, _h264(tmp_path / "hi444.mp4", "yuv444p"), "hi444.mp4")
-    assert v444["playback_status"] in ("pending", "running", "ready")
+    assert v444["playback_status"] == "on_demand"
+    _open(client, v444["id"])
     _wait_status(client, v444["id"], {"ready"})
     # Pedido manual (o browser não reproduz um vídeo dado como compatível).
     r = client.post(f"/api/videos/{v['id']}/playback")
@@ -90,6 +101,7 @@ def test_failed_copy_is_reported(client, tmp_path, with_ffmpeg, monkeypatch):
 
     monkeypatch.setattr(transcode, "_transcode", broken)
     v = _upload(client, video, "dvr.avi")
+    _open(client, v["id"])
     v = _wait_status(client, v["id"], {"failed", "ready"})
     assert v["playback_status"] == "failed" and v["playback_error"]
     assert any(e["action"] == "video.playback_copy_failed" for e in client.get("/api/cases/1/audit").json())
@@ -102,7 +114,8 @@ def test_without_ffmpeg_status_is_unavailable(client, tmp_path):
 
 
 def test_resume_pending_copies(client, tmp_path, with_ffmpeg):
-    """Vídeos de versões anteriores (sem estado) e conversões interrompidas são retomados no arranque."""
+    """No arranque: conversões interrompidas a meio são retomadas; vídeos de versões anteriores (sem estado) e
+    pedidos que nunca começaram ficam "on_demand" (a cópia é criada quando forem abertos)."""
     from sqlmodel import Session
 
     from app.db import get_engine
@@ -117,10 +130,12 @@ def test_resume_pending_copies(client, tmp_path, with_ffmpeg):
                     codec="mp4v"))
         s.add(Video(case_id=1, filename="cut.mp4", stored_path=str(dest), size_bytes=1, duration_s=2, fps=10,
                     codec="mp4v", playback_status="running"))
+        s.add(Video(case_id=1, filename="queued.mp4", stored_path=str(dest), size_bytes=1, duration_s=2, fps=10,
+                    codec="mp4v", playback_status="pending"))
         s.commit()
     transcode.resume_pending_copies()
-    for vid in (1, 2):
-        assert _wait_status(client, vid, {"ready", "failed"})["playback_status"] == "ready"
+    assert _wait_status(client, 2, {"ready", "failed"})["playback_status"] == "ready"
+    assert _wait_status(client, 1, {"on_demand"}) and _wait_status(client, 3, {"on_demand"})
     assert np.asarray(cv2.VideoCapture(str(tmp_path / "stored_old_playback.mp4")).read()[1]).size > 0
 
 
@@ -136,7 +151,8 @@ def test_raw_h264_with_mp4_extension_needs_copy(client, tmp_path, with_ffmpeg):
     fake_mp4 = tmp_path / "dvr_export.mp4"
     raw.rename(fake_mp4)
     v = _upload(client, fake_mp4, "dvr_export.mp4")
-    assert v["playback_status"] in ("pending", "running", "ready"), v
+    assert v["playback_status"] == "on_demand", v
+    _open(client, v["id"])
     probe = client.get(f"/api/videos/{v['id']}/probe").json()
     assert probe["codec_name"] == "h264" and probe["format_name"] == "h264"
     assert _wait_status(client, v["id"], {"ready", "failed"})["playback_status"] == "ready"
@@ -185,7 +201,8 @@ def test_case_wide_copies_and_delete_while_converting(client, tmp_path, with_ffm
     # Conversão longa em curso + caso eliminado: o ffmpeg é cancelado e nada é recriado na pasta do caso.
     long_src = make_video(tmp_path / "long.mp4", [(0.0, 60.0, RED)], duration_s=60, fps=25)
     c = _upload(client, long_src, "long.mp4")
-    assert c["playback_status"] in ("pending", "running")
+    assert c["playback_status"] == "on_demand"
+    _open(client, c["id"])
     _wait_status(client, c["id"], {"running", "ready"})
     from app.config import settings
     folder = settings.case_dir(1)
@@ -193,3 +210,43 @@ def test_case_wide_copies_and_delete_while_converting(client, tmp_path, with_ffm
     time.sleep(1.5)
     assert not folder.exists()
     assert not transcode._running and c["id"] not in transcode._queued
+
+
+def test_light_copy_and_expiry(client, tmp_path, with_ffmpeg):
+    """A cópia é leve (≤ 720 p, tamanho de apresentação, SAR 1:1) e expira sem uso; a evidência fica."""
+    import json
+    import subprocess
+    from datetime import UTC, datetime, timedelta
+
+    from sqlmodel import Session
+
+    from app.db import get_engine
+    from app.models import Video
+
+    client.post("/api/cases", json={"name": "c"})
+    src = make_video(tmp_path / "s.mp4", [(0.0, 2.0, RED)], duration_s=2, fps=10)
+    big = tmp_path / "big.avi"  # 1080p MPEG-4 com píxeis não quadrados (960×1080 → 1920×1080)
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-vf", "scale=960:1080,setsar=1",
+                    "-c:v", "mpeg4", str(big)], check=True)
+    v = _upload(client, big, "big.avi")
+    assert v["aspect"]["display"] == [1920, 1080] and v["playback_status"] == "on_demand"
+    _open(client, v["id"])
+    v = _wait_status(client, v["id"], {"ready", "failed"})
+    assert v["playback_status"] == "ready", v
+    out = json.loads(subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                                     "stream=width,height,sample_aspect_ratio", "-of", "json", v["playback_path"]],
+                                    capture_output=True, check=True).stdout)["streams"][0]
+    assert (out["width"], out["height"]) == (1280, 720) and out.get("sample_aspect_ratio", "1:1") == "1:1"
+
+    assert client.get(f"/api/videos/{v['id']}/stream").status_code == 200
+    with Session(get_engine()) as s:
+        assert s.get(Video, v["id"]).playback_used_at is not None
+    assert transcode.expire_unused_copies() == {}  # usada agora: fica
+    assert transcode.expire_unused_copies(datetime.now(UTC) + timedelta(days=99), ttl_days=0) == {}  # 0 = nunca
+    done = transcode.expire_unused_copies(datetime.now(UTC) + timedelta(days=15), ttl_days=14)
+    assert done[1]["copies"] == 1 and done[1]["bytes"] > 0
+    v2 = next(x for x in client.get("/api/cases/1/videos").json() if x["id"] == v["id"])
+    assert v2["playback_status"] == "on_demand" and v2["playback_path"] is None
+    from pathlib import Path
+    assert not Path(v["playback_path"]).exists() and Path(v["stored_path"]).exists()
+    assert any(e["action"] == "storage.playback_expired" for e in client.get("/api/cases/1/audit").json())

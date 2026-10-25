@@ -178,6 +178,9 @@ Com Docker, defina-as no ficheiro `.env` (modelo comentado em [`.env.example`](.
 | `FACEAI_API_DOCS` | `false` | Expor `/api/docs` e `/api/openapi.json` (só para desenvolvimento) |
 | `FACEAI_AUTO_CLOCK_OCR` | `1` | Lê a data/hora (OCR) dos vídeos logo na importação. `0` desativa. |
 | `FACEAI_REMOVE_ORIGINALS` | `1` | Apaga do servidor o original de um vídeo convertido (`.sec`, ou formato que o browser não abre) depois de verificada a cópia de análise sem perdas; fica o SHA-256. `0` mantém todos os originais. |
+| `FACEAI_PLAYBACK_MAX_HEIGHT` | `720` | Altura máxima das cópias de reprodução (só para ver no browser). `0` = resolução do vídeo. |
+| `FACEAI_PLAYBACK_CRF` | `28` | Qualidade das cópias de reprodução (H.264; o VP9 usa +10). Maior = ficheiro mais pequeno. |
+| `FACEAI_PLAYBACK_TTL_DAYS` | `14` | As cópias de reprodução não usadas durante este nº de dias são apagadas e voltam a ser criadas ao abrir o vídeo. `0` = nunca. |
 | `FACEAI_CLOCK_DATE_ORDER` | `DMY` | Ordem da data no relógio impresso, para a leitura automática (`DMY`, `MDY` ou `YMD`). |
 | `FACEAI_CPU_THREADS` | `0` (todos) | Threads de CPU para o ONNX Runtime, OpenCV e ffmpeg. Limita o CPU usado pelas análises. |
 | `FACEAI_JOB_NICE` | `10` | Prioridade ("nice") da thread das análises; valores maiores deixam a interface e os uploads mais fluidos |
@@ -332,6 +335,11 @@ A contagem segue o mesmo critério do relatório: uma deteção conta como corre
 
 ### Armazenamento
 - **Frames anotados a pedido.** As análises já não gravam um JPEG do frame inteiro por cada face, que era a maior fonte de crescimento das análises (num frame com 3 faces ficavam 3 cópias do mesmo frame). Ao pedir o frame (resultados, download, relatório, ZIP), o frame é lido do vídeo analisado pelo nº de frame, **verificado contra o recorte da face** (como o PNG original), e a caixa e o rótulo vêm da base de dados. Fica em cache um JPEG limpo por nº de frame, partilhado pelas faces desse frame. O ZIP só inclui os frames das correspondências, das deteções confirmadas e da melhor face de cada track. As análises anteriores continuam a servir os ficheiros que gravaram.
+- **Cópias de reprodução leves, a pedido** (`services/transcode.py`). Os vídeos que o browser não abre (H.265, `.dav`, MPEG-4, 10 bits…) ficam "Ao abrir" (`on_demand`) e não são convertidos na importação.
+  - **Criação:** a cópia é pedida quando o vídeo é aberto num leitor.
+  - **Formato:** é leve, com no máximo 720 p (`FACEAI_PLAYBACK_MAX_HEIGHT`), CRF 28 (`FACEAI_PLAYBACK_CRF`), o tamanho de apresentação (píxeis não quadrados corrigidos) e um frame-chave a cada 2 s.
+  - **Expiração:** é apagada ao fim de `FACEAI_PLAYBACK_TTL_DAYS` dias sem uso (14 por omissão). A verificação corre no arranque e a cada 6 h e fica na auditoria (`storage.playback_expired`).
+  - **Evidência:** a análise, os frames e o relatório usam sempre o vídeo analisado, nunca esta cópia.
 - **Painel (separador Resumo → Armazenamento):** espaço do processo por categoria, com o nº de ficheiros e se é **evidência/dados** (vídeos analisados, fotos de referência, recortes) ou **regenerável** (cópias de reprodução, frames anotados de análises anteriores, caches de frames, PNG originais e miniaturas).
 - **Libertar espaço:** o responsável do processo ou um administrador pode libertar cada categoria regenerável. As cópias de reprodução voltam a ser criadas ao abrir o leitor; os frames e as caches são refeitos a pedido. A evidência nunca é tocada e cada operação fica na auditoria (`storage.freed`, com o nº de ficheiros e de bytes).
 - **Administração (Utilizadores → Armazenamento):** disco do servidor, totais por categoria, base de dados, auditoria, uploads em curso e os processos que mais ocupam.
