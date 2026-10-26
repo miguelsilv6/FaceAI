@@ -93,7 +93,9 @@ def totp_code(totp: pyotp.TOTP, username: str) -> str:
         last = s.exec(select(User).where(User.username == username)).one().totp_last_step
     while True:
         now = int(time.time() // 30)
-        step = max(now - 1, last + 1)
+        # o passo atual (não o anterior): o servidor aceita ±1, por isso continua válido se o pedido atravessar
+        # a mudança de passo de 30 s; com o anterior, nesse caso ficaria fora da janela e o teste falhava às vezes
+        step = max(now, last + 1)
         if step <= now + 1:
             return totp.at(step * 30)
         time.sleep(1)
