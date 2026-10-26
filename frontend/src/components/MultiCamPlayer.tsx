@@ -115,9 +115,11 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
   useVideoKeys({ anchor: holder, enabled: cams.length > 0,
     seek: (d) => setWall((w) => Math.min(t1, Math.max(t0, w + d))), toggle: () => setPlaying((p) => !p) });
 
-  // os vídeos que o browser não abre: a cópia leve é pedida quando aparecem no ecrã
-  const visible = useOnDemandCopies(
-    cams.filter((v) => shown.includes(String(v.id)) && (focus == null || focus === v.id)));
+  // os vídeos que o browser não abre: a cópia leve é pedida automaticamente para no máximo 2 câmaras (cada uma
+  // pode demorar minutos); as outras têm um botão para a preparar
+  const live = useOnDemandCopies(
+    cams.filter((v) => shown.includes(String(v.id)) && (focus == null || focus === v.id)), { limit: 2 });
+  const visible = live.videos;
 
   if (!cams.length) {
     return <Text c="dimmed" size="sm">Nenhum vídeo com hora real acertada: acerte o relógio no separador Vídeos.</Text>;
@@ -222,8 +224,17 @@ export default function MultiCamPlayer({ videos, segments, seek, locations = [] 
                   </Group>
                 </Group>
                 <Box style={{ position: "relative", background: "#000", borderRadius: 4, aspectRatio: displaySize(v).join(" / ") }}>
-                  {preparing ? (
-                    <Text c="gray.4" size="xs" p="sm">A preparar a cópia de reprodução deste vídeo…</Text>
+                  {v.playback_status === "on_demand" ? (
+                    <Stack gap={4} p="sm" align="flex-start">
+                      <Text c="gray.4" size="xs">O browser não abre este formato: é preciso preparar uma cópia só
+                        para visualização (pode demorar alguns minutos).</Text>
+                      <Button size="compact-xs" variant="light" onClick={() => live.request(v)}>Preparar</Button>
+                    </Stack>
+                  ) : preparing ? (
+                    <Text c="gray.4" size="xs" p="sm">
+                      A preparar a cópia de visualização{v.playback_status === "running"
+                        ? ` (${Math.round(v.playback_progress * 100)}%)` : " (em fila)"}…
+                    </Text>
                   ) : (
                     <video ref={(el) => { if (el) els.current.set(v.id, el); else els.current.delete(v.id); }}
                       src={api.videoUrl(v)} muted playsInline preload="auto"

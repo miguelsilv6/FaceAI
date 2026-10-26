@@ -63,7 +63,7 @@ export interface VideoAspect {
   reason?: string;
   set_by?: string;
   set_at?: string;
-  suggested?: { display: [number, number]; mode: string }; // modo de DVR conhecido, por confirmar
+  suggested?: { display: [number, number]; mode: string }; // proposta automática (SAR do ficheiro ou modo de DVR)
   history?: { from: [number, number] | null; to: [number, number] | null; reason: string; by: string; at: string }[];
 }
 

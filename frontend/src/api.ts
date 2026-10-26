@@ -386,8 +386,9 @@ export const api = {
   retryExtraction: (id: number) => request<Video>("POST", `/api/videos/${id}/extract`),
   correctFps: (id: number, fps: number, reason: string, source: "manual" | "ocr" = "manual") =>
     request<Video>("POST", `/api/videos/${id}/fps`, { fps, reason, source }),
-  setAspect: (id: number, size: [number, number] | null, reason: string) =>
-    request<Video>("POST", `/api/videos/${id}/aspect`, { width: size?.[0] ?? null, height: size?.[1] ?? null, reason }),
+  setAspect: (id: number, size: [number, number] | null, reason: string, auto = false) =>
+    request<Video>("POST", `/api/videos/${id}/aspect`,
+      { width: size?.[0] ?? null, height: size?.[1] ?? null, reason, auto }),
   deleteVideo: (id: number, reason: string) =>
     request<void>("DELETE", `/api/videos/${id}`, { confirm_video_id: id, reason }),
   deleteJob: (id: number, reason: string) =>

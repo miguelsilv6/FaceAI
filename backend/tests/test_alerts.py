@@ -137,3 +137,39 @@ def test_linked_across_analyses_of_the_same_case(client, tmp_path):
     third = wait_for_job(client, client.post(f"/api/cases/{other}/jobs", json={
         "params": {"mode": "discover", "sample_fps": 2, "motion_filter": False}, "video_ids": [vo]}).json()["id"])
     assert [a for a in client.get(f"/api/jobs/{third['id']}/alerts").json() if a["kind"] == "linked"] == []
+
+
+def test_linked_alerts_follow_merges_and_reruns(client, tmp_path):
+    from sqlmodel import Session
+
+    import app.db
+    from app.models import Job
+    from app.services.jobs import reset_results
+
+    cid = client.post("/api/cases", json={"name": "Ligações 2"}).json()["id"]
+    la, lb = (client.post(f"/api/cases/{cid}/locations", json={"name": n}).json()["id"] for n in ("A", "B"))
+    va = _video(client, cid, tmp_path, "a.mp4", [(0.5, 3.5, RED), (0.5, 3.5, BLUE)], la)
+    vb = _video(client, cid, tmp_path, "b.mp4", [(0.5, 3.5, RED)], lb)
+    params = {"mode": "discover", "sample_fps": 2, "motion_filter": False}
+    first = wait_for_job(client, client.post(f"/api/cases/{cid}/jobs", json={
+        "params": params, "video_ids": [va]}).json()["id"])
+    second = wait_for_job(client, client.post(f"/api/cases/{cid}/jobs", json={
+        "params": params, "video_ids": [vb]}).json()["id"])
+    linked = [a for a in client.get(f"/api/jobs/{second['id']}/alerts").json() if a["kind"] == "linked"]
+    assert len(linked) == 1
+    old_person = linked[0]["linked_person_id"]
+    other = 2 if old_person == 1 else 1
+    # na análise A, a pessoa ligada é junta a outra: o alerta de B mostra a pessoa atual
+    r = client.post(f"/api/jobs/{first['id']}/persons/merge", json={"person_ids": [other, old_person]})
+    assert r.status_code == 200, r.text
+    linked = [a for a in client.get(f"/api/jobs/{second['id']}/alerts").json() if a["kind"] == "linked"]
+    assert linked[0]["linked_person_id"] == min(other, old_person)
+    # o relatório de B usa a mesma pessoa
+    assert f"Pessoa #{min(other, old_person)} da análise #{first['id']}" in \
+        client.get(f"/api/jobs/{second['id']}/export/html").text
+    # repetir a análise A apaga as ligações de B para os resultados antigos de A
+    with Session(app.db.get_engine()) as s:
+        removed = reset_results(s, s.get(Job, first["id"]))
+        s.commit()
+    assert removed["alerts"] >= 1
+    assert [a for a in client.get(f"/api/jobs/{second['id']}/alerts").json() if a["kind"] == "linked"] == []

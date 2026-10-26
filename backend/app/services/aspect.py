@@ -39,24 +39,27 @@ INTERPOLATION = cv2.INTER_CUBIC
 MAX_SIDE = 8192
 log = logging.getLogger(__name__)
 
-# Resoluções gravadas pelos modos de meia resolução dos DVR → (tamanho de apresentação, nome do modo)
-KNOWN_MODES: dict[tuple[int, int], tuple[tuple[int, int], str]] = {
-    (960, 1080): ((1920, 1080), "1080P Lite / 1080N (meia largura)"),
-    (1280, 1440): ((2560, 1440), "4MP Lite (meia largura)"),
-    (640, 720): ((1280, 720), "720P Lite / 720N (meia largura)"),
-    (960, 576): ((1024, 576), "960H / WD1 PAL (16:9)"),
-    (960, 480): ((854, 480), "960H / WD1 NTSC (16:9)"),
-    (704, 576): ((768, 576), "D1 PAL (4:3)"),
-    (720, 576): ((768, 576), "D1 PAL (4:3)"),
-    (704, 480): ((704, 528), "D1 NTSC (4:3)"),
-    (720, 480): ((720, 540), "D1 NTSC (4:3)"),
-    (704, 288): ((768, 576), "2CIF / Half D1 PAL (meia altura)"),
-    (720, 288): ((768, 576), "2CIF / Half D1 PAL (meia altura)"),
-    (704, 240): ((704, 528), "2CIF / Half D1 NTSC (meia altura)"),
-    (720, 240): ((720, 540), "2CIF / Half D1 NTSC (meia altura)"),
-    (352, 288): ((384, 288), "CIF PAL (4:3)"),
-    (352, 240): ((352, 264), "CIF NTSC (4:3)"),
+# Resoluções gravadas pelos modos de DVR → (tamanho de apresentação, nome do modo, aplicar automaticamente).
+# Os modos de meia largura/altura não têm ambiguidade; D1, CIF e 960H também são tamanhos de sub-streams de câmaras
+# IP 16:9 com píxeis quadrados (ou outra proporção), por isso ficam só como sugestão no menu do vídeo.
+KNOWN_MODES: dict[tuple[int, int], tuple[tuple[int, int], str, bool]] = {
+    (960, 1080): ((1920, 1080), "1080P Lite / 1080N (meia largura)", True),
+    (1280, 1440): ((2560, 1440), "4MP Lite (meia largura)", True),
+    (640, 720): ((1280, 720), "720P Lite / 720N (meia largura)", True),
+    (704, 288): ((768, 576), "2CIF / Half D1 PAL (meia altura)", True),
+    (720, 288): ((768, 576), "2CIF / Half D1 PAL (meia altura)", True),
+    (704, 240): ((704, 528), "2CIF / Half D1 NTSC (meia altura)", True),
+    (720, 240): ((720, 540), "2CIF / Half D1 NTSC (meia altura)", True),
+    (960, 576): ((1024, 576), "960H / WD1 PAL (16:9)", False),
+    (960, 480): ((854, 480), "960H / WD1 NTSC (16:9)", False),
+    (704, 576): ((768, 576), "D1 PAL (4:3)", False),
+    (720, 576): ((768, 576), "D1 PAL (4:3)", False),
+    (704, 480): ((704, 528), "D1 NTSC (4:3)", False),
+    (720, 480): ((720, 540), "D1 NTSC (4:3)", False),
+    (352, 288): ((384, 288), "CIF PAL (4:3)", False),
+    (352, 240): ((352, 264), "CIF NTSC (4:3)", False),
 }
+RULE = 2  # versão da regra automática: os vídeos verificados com uma regra anterior são verificados de novo
 
 
 def _even(n: float) -> int:
@@ -84,18 +87,20 @@ def _ratio(text: str | None) -> tuple[int, int] | None:
     return (a, b) if a > 0 and b > 0 else None
 
 
-def probe_sar(path: str | Path) -> tuple[int, int] | None:
-    """SAR declarado no 1.º stream de vídeo (ffprobe), ou None (sem ffprobe, sem SAR ou SAR 1:1)."""
+def probe_sar(path: str | Path) -> tuple[bool, tuple[int, int] | None]:
+    """(o ffprobe correu?, SAR declarado diferente de 1:1). Sem ffprobe, falha ou tempo esgotado: (False, None).
+
+    Um SAR 1:1 explícito conta como "sem SAR": muitos DVR escrevem 1:1 mesmo nos modos de meia largura."""
     if shutil.which("ffprobe") is None:
-        return None
+        return False, None
     cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=sample_aspect_ratio",
            "-of", "json", str(path)]
     try:
         out = json.loads(subprocess.run(cmd, check=True, capture_output=True, timeout=60).stdout or b"{}")
-    except Exception:  # noqa: BLE001 - ffprobe falhou: fica sem SAR
-        return None
+    except Exception:  # noqa: BLE001 - ffprobe falhou: não se sabe
+        return False, None
     sar = _ratio(((out.get("streams") or [{}])[0]).get("sample_aspect_ratio"))
-    return None if sar is None or sar[0] == sar[1] else sar
+    return True, (None if sar is None or sar[0] == sar[1] else sar)
 
 
 def display_size(video: Video) -> tuple[int, int] | None:
@@ -106,15 +111,29 @@ def display_size(video: Video) -> tuple[int, int] | None:
     return int(d[0]), int(d[1])
 
 
+def _job_entry(job: Job, video_id: int) -> dict[str, Any] | None:
+    d = ((job.environment or {}).get("display") or {}).get(str(video_id))
+    if not d:
+        return None
+    return d if isinstance(d, dict) else {"size": d}  # análises anteriores: só [w, h]
+
+
 def job_display(job: Job, video_id: int) -> tuple[int, int] | None:
     """Tamanho com que a análise leu o vídeo (None: os píxeis gravados, como nas análises anteriores)."""
-    d = ((job.environment or {}).get("display") or {}).get(str(video_id))
-    return (int(d[0]), int(d[1])) if d else None
+    d = _job_entry(job, video_id)
+    return (int(d["size"][0]), int(d["size"][1])) if d else None
 
 
-def job_displays(videos: list[Video]) -> dict[str, list[int]]:
-    """Para job.environment["display"]: só os vídeos com proporção corrigida."""
-    return {str(v.id): list(size) for v in videos if (size := display_size(v))}
+def job_displays(videos: list[Video]) -> dict[str, dict[str, Any]]:
+    """Para job.environment["display"]: os vídeos com proporção corrigida, com a origem dessa proporção (o relatório
+    da análise mostra a origem com que foi feita, mesmo que a proporção do vídeo mude depois)."""
+    out = {}
+    for v in videos:
+        if size := display_size(v):
+            a = v.aspect or {}
+            out[str(v.id)] = {"size": list(size), "source": a.get("source", ""), "reason": a.get("reason", ""),
+                              "set_by": a.get("set_by", "")}
+    return out
 
 
 def fit(image: np.ndarray, size: tuple[int, int] | None) -> np.ndarray:
@@ -124,55 +143,67 @@ def fit(image: np.ndarray, size: tuple[int, int] | None) -> np.ndarray:
     return cv2.resize(image, size, interpolation=INTERPOLATION)
 
 
-def describe(video: Video) -> str:
-    size = display_size(video)
-    if size is None:
-        return ""
-    a = video.aspect or {}
-    return f"{video.width}×{video.height} gravado, apresentado como {size[0]}×{size[1]} ({a.get('source', '')})"
-
-
 def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def detect(s: Session, video: Video) -> None:
-    """Na importação (ou depois da extração): aplica automaticamente o SAR do ficheiro ou, sem SAR, o tamanho do
-    modo de DVR conhecido. Uma escolha manual do responsável nunca é substituída."""
-    a = dict(video.aspect or {})
-    if a.get("source") == "manual" or not video.width or not video.height:
+    """Na importação (ou depois da extração): aplica automaticamente o SAR do ficheiro ou, sem SAR, o tamanho de um
+    modo de DVR sem ambiguidade (os outros ficam como sugestão). Uma escolha manual nunca é substituída."""
+    if (video.aspect or {}).get("source") == "manual" or not video.width or not video.height:
         return
-    a["checked_at"] = _now()
-    sar = probe_sar(video.source_path)
+    ok, sar = probe_sar(video.source_path)
+    if not ok:
+        return  # sem ffprobe ou falhou: fica por verificar (tenta de novo no próximo arranque)
+    s.refresh(video)  # o ffprobe pode demorar: uma escolha manual feita entretanto prevalece
+    a = dict(video.aspect or {})
+    if a.get("source") == "manual":
+        return
+    known = KNOWN_MODES.get((video.width, video.height))
+    proposal = auto = None
     if sar is not None:
-        auto = {"display": list(size_for_sar(video.width, video.height, *sar)),
-                "mode": f"indicada no ficheiro (SAR {sar[0]}:{sar[1]})"}
-    elif known := KNOWN_MODES.get((video.width, video.height)):
-        auto = {"display": list(known[0]), "mode": f"modo de DVR {known[1]}"}
+        proposal = auto = {"display": list(size_for_sar(video.width, video.height, *sar)),
+                           "mode": f"indicada no ficheiro (SAR {sar[0]}:{sar[1]})"}
+    elif known:
+        proposal = {"display": list(known[0]), "mode": f"modo de DVR {known[1]}"}
+        auto = proposal if known[2] else None
+    before = display_size(video)
+    a.update({"checked_at": _now(), "rule": RULE})
+    if proposal:
+        a["suggested"] = proposal
     else:
-        auto = None
-    before = a.get("display")
-    if auto is None:
         a.pop("suggested", None)
-        a.pop("display", None)
+    if auto:
+        a.update({"display": auto["display"], "source": f"automática: {auto['mode']}", "set_by": "sistema",
+                  "set_at": _now()})
     else:
-        a.update({"suggested": auto, "display": auto["display"], "source": f"automática: {auto['mode']}",
-                  "set_by": "sistema", "set_at": _now()})
+        for k in ("display", "source", "set_by", "set_at", "reason"):
+            a.pop(k, None)
     video.aspect = a
     s.add(video)
     s.commit()
-    if auto is not None and auto["display"] != before:
+    after = display_size(video)
+    if after != before:
+        _invalidate_copy(s, video)
         log_event(s, "video.aspect_set", case_id=video.case_id, actor="sistema",
                   details={"video_id": video.id, "filename": video.filename, "recorded": [video.width, video.height],
-                           "display": auto["display"], "source": a["source"],
+                           "before": list(before) if before else None, "display": list(after) if after else None,
+                           "source": a.get("source", "gravada"),
                            "note": "o ficheiro não foi alterado; só a apresentação e a análise usam este tamanho;"
                                    " o responsável pode alterar no menu do vídeo"})
 
 
-def _unchecked(video: Video) -> bool:
-    """Nunca verificado, ou só com a sugestão por confirmar da versão anterior (agora aplica-se sozinha)."""
+def _invalidate_copy(s: Session, video: Video) -> None:
+    """A cópia de reprodução é feita no tamanho de apresentação: com outra proporção, é criada de novo ao abrir."""
+    from .transcode import invalidate_copy
+
+    invalidate_copy(s, video)
+
+
+def unchecked(video: Video) -> bool:
+    """Nunca verificado com a regra atual (ex.: importado por uma versão anterior), sem escolha manual."""
     a = video.aspect or {}
-    return not a or (a.get("source") != "manual" and a.get("suggested") and not a.get("display"))
+    return a.get("source") != "manual" and a.get("rule") != RULE
 
 
 def backfill() -> None:
@@ -182,7 +213,7 @@ def backfill() -> None:
     try:
         with Session(get_engine()) as s:
             ids = [v.id for v in s.exec(select(Video)).all()
-                   if v.width and v.extraction_status in ("", "ready") and _unchecked(v)]
+                   if v.width and v.extraction_status in ("", "ready") and unchecked(v)]
         for vid in ids:
             with Session(get_engine()) as s:
                 video = s.get(Video, vid)
@@ -196,11 +227,12 @@ def start_backfill() -> None:
     threading.Thread(target=backfill, name="faceai-aspect-backfill", daemon=True).start()
 
 
-def set_display(s: Session, video: Video, display: tuple[int, int] | None, *, reason: str, actor: str) -> Video:
-    """Correção manual (ou confirmação da sugestão). display=None repõe os píxeis gravados."""
+def set_display(s: Session, video: Video, display: tuple[int, int] | None, *, reason: str, actor: str,
+                auto: bool = False) -> Video:
+    """Escolha do responsável. display=None repõe os píxeis gravados; auto=True volta à proporção automática."""
     if not video.width or not video.height:
         raise HTTPException(409, "A resolução do vídeo ainda não é conhecida.")
-    if display is not None:
+    if display is not None and not auto:
         w, h = display
         if not (16 <= w <= MAX_SIDE and 16 <= h <= MAX_SIDE):
             raise HTTPException(422, f"Tamanho inválido: {w}×{h}.")
@@ -209,31 +241,34 @@ def set_display(s: Session, video: Video, display: tuple[int, int] | None, *, re
     before = display_size(video)
     a = dict(video.aspect or {})
     history = list(a.get("history") or [])
-    history.append({"from": list(before) if before else None, "to": list(display) if display else None,
-                    "reason": reason, "by": actor, "at": _now()})
-    a = {"history": history, "source": "manual", "set_by": actor, "set_at": _now(), "reason": reason,
-         **({"suggested": a["suggested"]} if a.get("suggested") else {})}
-    if display is not None:
-        a["display"] = list(display)
-    video.aspect = a
+    if auto:
+        video.aspect = {"history": history, **({"suggested": a["suggested"]} if a.get("suggested") else {})}
+        s.add(video)
+        s.commit()
+        detect(s, video)  # volta a aplicar a regra automática (SAR do ficheiro ou modo de DVR)
+        s.refresh(video)
+        display = display_size(video)
+        a = dict(video.aspect or {})
+        history.append({"from": list(before) if before else None, "to": list(display) if display else None,
+                        "reason": reason, "by": actor, "at": _now(), "auto": True})
+        video.aspect = {**a, "history": history}
+    else:
+        history.append({"from": list(before) if before else None, "to": list(display) if display else None,
+                        "reason": reason, "by": actor, "at": _now()})
+        a = {"history": history, "source": "manual", "set_by": actor, "set_at": _now(), "reason": reason,
+             "rule": RULE, **({"suggested": a["suggested"]} if a.get("suggested") else {})}
+        if display is not None:
+            a["display"] = list(display)
+        video.aspect = a
     s.add(video)
     s.commit()
     s.refresh(video)
+    if display_size(video) != before:
+        _invalidate_copy(s, video)
     log_event(s, "video.aspect_set", case_id=video.case_id, actor=actor,
               details={"video_id": video.id, "filename": video.filename, "recorded": [video.width, video.height],
                        "before": list(before) if before else None, "display": list(display) if display else None,
-                       "source": "manual", "reason": reason,
+                       "source": "automática (reposta)" if auto else "manual", "reason": reason,
                        "note": "o ficheiro não foi alterado; as análises já feitas mantêm o tamanho com que foram"
                                " feitas (repita a análise para aplicar a nova proporção)"})
     return video
-
-
-def summary(video: Video) -> dict[str, Any] | None:
-    """Para o relatório: gravado, apresentado, origem."""
-    size = display_size(video)
-    if size is None:
-        return None
-    a = video.aspect or {}
-    return {"recorded": f"{video.width}×{video.height}", "display": f"{size[0]}×{size[1]}",
-            "source": a.get("source", ""), "by": a.get("set_by", ""), "at": a.get("set_at", ""),
-            "reason": a.get("reason", "")}

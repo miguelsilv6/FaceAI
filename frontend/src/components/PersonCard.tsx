@@ -11,6 +11,7 @@ interface Props {
   others: Person[];
   firstRealTime?: string;
   locations?: string[]; // nomes dos locais onde aparece
+  minPlaces?: number; // a partir de quantos locais se destaca (o mesmo mínimo dos alertas da análise)
   onSelect: (p: Person) => void;
   onReview: (p: Person, status: ReviewStatus) => void;
   onMerge: (p: Person, into: Person) => void;
@@ -26,7 +27,7 @@ const REVIEW: Record<Person["review_status"], [string, string]> = {
 };
 
 /** Pessoa distinta encontrada no modo descoberta (grupo de tracks com faces semelhantes). */
-export default function PersonCard({ person, selected, others, firstRealTime, locations = [], onSelect, onReview, onMerge,
+export default function PersonCard({ person, selected, others, firstRealTime, locations = [], minPlaces = 2, onSelect, onReview, onMerge,
   onUseAsReference, onFindSimilar }: Props) {
   const [label, color] = REVIEW[person.review_status];
   const status = person.review_status;
@@ -43,7 +44,7 @@ export default function PersonCard({ person, selected, others, firstRealTime, lo
         <Group justify="space-between" wrap="nowrap">
           <Text size="sm" fw={600}>Pessoa #{person.person_id}</Text>
           <Group gap={4} wrap="nowrap">
-            {locations.length > 1 && (
+            {locations.length >= minPlaces && (
               <Tooltip label={locations.join(" · ")}>
                 <Badge size="xs" color="orange" leftSection={<IconMapPin size={9} />}>{locations.length} locais</Badge>
               </Tooltip>

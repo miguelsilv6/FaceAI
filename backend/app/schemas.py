@@ -90,6 +90,7 @@ class AspectCorrection(BaseModel):
     width: int | None = Field(None, ge=16, le=8192, description="Largura de apresentação (vazio: a gravada)")
     height: int | None = Field(None, ge=16, le=8192, description="Altura de apresentação (vazio: a gravada)")
     reason: str = Field(min_length=3, max_length=1000, description="Motivo da correção (fica na auditoria)")
+    auto: bool = Field(False, description="Voltar à proporção automática (SAR do ficheiro ou modo de DVR)")
 
 
 class CaseDelete(BaseModel):

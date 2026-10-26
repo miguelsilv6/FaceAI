@@ -4,6 +4,7 @@ import { IconActivity, IconAlertTriangle, IconCloudUpload, IconMovie } from "@ta
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 
+import { alertText } from "../alerts";
 import { api, formatBytes, formatDuration } from "../api";
 import { useAuth } from "../auth";
 import type { Activity, DiskStatus } from "../types";
@@ -108,7 +109,7 @@ export default function ActivityBar() {
                       title: `⚠ Análise #${id}: ${alerts.length} alerta(s)${many ? ` · ${many} em vários locais` : ""}`,
                       message: (
                         <Anchor component={Link} to={`/jobs/${id}`} size="sm">
-                          {top.case_person_name}{top.discovered_person_id != null ? ` pode ser a Pessoa #${top.discovered_person_id}` : ""}
+                          {alertText(top).title} {alertText(top).text}
                           {" "}— {top.location_ids.length} local(is){top.location_names.length ? ` (${top.location_names.join(", ")})` : ""}
                         </Anchor>
                       ),

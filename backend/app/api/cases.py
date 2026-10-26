@@ -856,6 +856,8 @@ def create_playback_copy(video_id: int, session: SessionDep, actor: ActorDep, fo
         raise HTTPException(404, "Vídeo não encontrado.")
     if format not in FORMATS:
         raise HTTPException(422, f"Formato desconhecido: {format} (use mp4 ou webm).")
+    if not sec_extract.is_ready(video):
+        raise HTTPException(409, sec_extract.not_ready_reason(video))
     request_playback_copy(session, video, force=True, actor=actor, fmt=format)
     session.refresh(video)
     return video
@@ -891,10 +893,13 @@ def correct_video_aspect(video_id: int, body: AspectCorrection, session: Session
     if video is None:
         raise HTTPException(404, "Vídeo não encontrado.")
     _require_manager(session, user, video.case_id)
+    if video.extraction_status in (sec_extract.PENDING, sec_extract.RUNNING):
+        raise HTTPException(409, "O vídeo ainda está a ser preparado: altere a proporção quando estiver pronto.")
     if (body.width is None) != (body.height is None):
         raise HTTPException(422, "Indique a largura e a altura (ou nenhuma, para repor a gravada).")
     display = (body.width, body.height) if body.width and body.height else None
-    return aspect.set_display(session, video, display, reason=body.reason.strip(), actor=user.username)
+    return aspect.set_display(session, video, display, reason=body.reason.strip(), actor=user.username,
+                              auto=body.auto)
 
 
 @router.post("/videos/{video_id}/extract", response_model=Video)

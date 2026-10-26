@@ -3,7 +3,6 @@ import { IconAlertTriangle } from "@tabler/icons-react";
 import { useRef, useState } from "react";
 
 import { api, formatTime, realTime } from "../api";
-import { notifyError } from "../notify";
 import { cameraLabel, cameraName } from "../places";
 import { VIDEO_KEYS_HINT, useHtmlVideoKeys } from "../useVideoKeys";
 import { preparingCopy, useOnDemandCopies } from "../playbackOnDemand";
@@ -17,18 +16,15 @@ export default function VideoPlayerModal({ video: initial, onClose, onChange, lo
   const [t, setT] = useState(0);
   const [error, setError] = useState(false);
   const ref = useRef<HTMLVideoElement>(null);
-  const [video = null] = useOnDemandCopies(initial ? [initial] : []); // cópia leve pedida ao abrir, se precisa
+  // cópia leve pedida ao abrir, se precisa; a lista de vídeos (pai) é atualizada quando muda
+  const live = useOnDemandCopies(initial ? [initial] : [], { onUpdate: onChange });
+  const video = live.videos[0] ?? null;
   useHtmlVideoKeys(ref, !!video);
   if (!video) return null;
   const preparing = preparingCopy(video);
   const createCopy = async () => {
-    try {
-      await api.createPlaybackCopy(video.id);
-      setError(false);
-      onChange();
-    } catch (e) {
-      notifyError(e);
-    }
+    setError(false);
+    await live.request(video);
   };
   return (
     <Modal opened onClose={onClose} size="xl" title={`#${video.id} ${cameraLabel(video, locations)}${cameraName(video) === video.filename ? "" : ` (${video.filename})`}`}>

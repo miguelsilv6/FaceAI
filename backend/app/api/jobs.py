@@ -261,7 +261,9 @@ def delete_job(job_id: int, body: JobDelete, session: SessionDep, user: CurrentU
     summary["saved_frames"] = [{"id": f.id, "sha256": f.sha256} for f in saved]
     # os alertas da análise e os de outras análises que apontam para ela (ligações)
     alerts = list(session.exec(select(Alert).where((Alert.job_id == job_id) | (Alert.linked_job_id == job_id))))
-    summary["alerts"] = [{"id": a.id, "case_person_id": a.case_person_id, "status": a.status} for a in alerts]
+    summary["alerts"] = [{"id": a.id, "job_id": a.job_id, "kind": a.kind, "case_person_id": a.case_person_id,
+                          "linked_job_id": a.linked_job_id, "status": a.status, "reviewed_by": a.reviewed_by}
+                         for a in alerts]
     folder = job_dir(job)
     for row in (*saved, *alerts):
         session.delete(row)
@@ -647,7 +649,10 @@ def _alert_out(session, a: Alert, locs: dict, persons: dict) -> dict:
                                                         ReferenceImage.valid == True)  # noqa: E712
                            .order_by(ReferenceImage.id)).first()
     linked = session.get(Job, a.linked_job_id) if a.linked_job_id else None
+    track = session.get(Track, a.linked_track_id) if a.linked_track_id else None
     return {**a.model_dump(mode="json"),
+            # a pessoa atual da aparição ligada (pode ter sido junta a outra ou movida depois do alerta)
+            "linked_person_id": track.person_id if track else a.linked_person_id,
             "case_person_name": (cp.name if cp else f"#{a.case_person_id}") if a.case_person_id else None,
             "reference_id": ref.id if ref else None, "reference_has_crop": bool(ref and ref.face_crop_path),
             "location_names": [locs[i].name for i in a.location_ids if i in locs],
@@ -724,6 +729,9 @@ def merge_persons(job_id: int, body: PersonMerge, session: SessionDep, actor: Ac
             t.person_id = target
             session.add(t)
             moved.append(t.id)
+    for a in session.exec(select(Alert).where(Alert.job_id == job_id, Alert.discovered_person_id.in_(ids[1:]))):
+        a.discovered_person_id = target  # os alertas da pessoa juntada passam para a pessoa de destino
+        session.add(a)
     job.persons = len(_person_ids(session, job_id))
     session.add(job)
     session.commit()

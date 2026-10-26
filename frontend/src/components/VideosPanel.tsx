@@ -6,6 +6,7 @@ import {
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import { confirmAction } from "../confirm";
 import { api, formatBytes, formatTime } from "../api";
 import { notifyError, notifyOk } from "../notify";
 import { cameraName, locationAnalysis } from "../places";
@@ -71,6 +72,12 @@ export default function VideosPanel({ caseId, videos, locations, onChange, jobs 
   };
 
   const convertAll = async () => {
+    const waiting = videos.filter((v) => v.playback_status === "on_demand").length;
+    if (waiting && !await confirmAction({
+      title: "Criar cópias de reprodução", confirmLabel: "Criar agora",
+      message: `${waiting} vídeo(s) só têm a cópia de visualização criada quando são abertos. Criar já todas as`
+        + " cópias pode demorar bastante tempo e ocupa espaço (são apagadas ao fim de alguns dias sem uso).",
+    })) return;
     try {
       const vs = await api.createCaseCopies(caseId);
       const queued = vs.filter((v) => v.playback_status === "pending" || v.playback_status === "running").length;
