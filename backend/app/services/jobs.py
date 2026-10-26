@@ -22,7 +22,9 @@ from sqlmodel import Session, select
 from ..config import settings
 from ..db import get_engine as get_db_engine
 from ..models import Alert, Detection, Job, JobStatus, ReferenceImage, Track, Video, utcnow
+from .aspect import detect as aspect_detect
 from .aspect import job_display, job_displays
+from .aspect import unchecked as aspect_unchecked
 from .audit import log_event
 from .body_analysis import BodyCollector, ClothingParams, FaceLink
 from .body_engine import get_body_engine
@@ -262,6 +264,11 @@ def reset_results(s: Session, job: Job) -> dict[str, int]:
         removed[key] = len(rows)
         for row in rows:
             s.delete(row)
+    # alertas de outras análises que apontam para os resultados antigos desta (as pessoas e aparições mudam)
+    linked = list(s.exec(select(Alert).where(Alert.linked_job_id == job.id)))
+    removed["alerts"] += len(linked)
+    for row in linked:
+        s.delete(row)
     s.flush()
     folder = job_dir(job)
     if folder.exists():
@@ -317,6 +324,17 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
         job.started_at = utcnow()
         job.environment = {**engine.environment(),
                            "resources": {"cpu_threads": settings.cpu_threads or "auto", "job_nice": settings.job_nice}}
+        # píxeis não quadrados: o tamanho com que cada vídeo é lido (fica na auditoria do início da análise). Os
+        # vídeos ainda não verificados (ex.: logo a seguir a uma atualização) são verificados antes.
+        job_videos = [v for v in (s.get(Video, vid) for vid in job.video_ids) if v is not None]
+        for v in job_videos:
+            if v.width and v.extraction_status in ("", "ready") and aspect_unchecked(v):
+                try:
+                    aspect_detect(s, v)
+                except Exception:  # noqa: BLE001 - nunca impede a análise
+                    log.exception("verificação da proporção do vídeo %s falhou", v.id)
+        if displays := job_displays(job_videos):
+            job.environment = {**job.environment, "display": displays}
         s.add(job)
         s.commit()
         log_event(s, "job.started", case_id=job.case_id, actor=job.created_by,
@@ -354,8 +372,6 @@ def run_job(job_id: int, cancel: threading.Event) -> None:
             videos = [v for v in (s.get(Video, vid) for vid in job.video_ids) if v is not None]
             if not videos:
                 raise ValueError("Nenhum vídeo selecionado.")
-            if displays := job_displays(videos):  # píxeis não quadrados: tamanho com que cada vídeo é lido
-                job.environment = {**job.environment, "display": displays}
             body = None
             if p.get("clothing") and not discover:
                 body_engine = get_body_engine()

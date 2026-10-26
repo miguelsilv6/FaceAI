@@ -133,10 +133,14 @@ MANIFEST_FIELDS = [
 ]
 
 
-def _resized(job: Job, video: Video) -> str:
-    """Coluna "proporcao": vazio, ou o redimensionamento aplicado (píxeis não quadrados, services/aspect.py)."""
-    size = job_display(job, video.id)
-    return f"{video.width}x{video.height} -> {size[0]}x{size[1]} (bicubica)" if size else ""
+def _resized(job: Job, video: Video, saved: SavedFrame | None = None) -> str:
+    """Coluna "proporcao": vazio, ou o redimensionamento aplicado (píxeis não quadrados, services/aspect.py).
+
+    Um frame guardado no leitor tem o tamanho com que foi gravado (pode ser anterior à análise atual)."""
+    size = (saved.width, saved.height) if saved is not None else job_display(job, video.id)
+    if not size or not size[0] or tuple(size) == (video.width, video.height):
+        return ""
+    return f"{video.width}x{video.height} -> {size[0]}x{size[1]} (bicubica)"
 
 
 def stream_zip(validated: ValidatedSet, *, scope: str, actor: str) -> Iterator[bytes]:
@@ -200,7 +204,7 @@ def stream_zip(validated: ValidatedSet, *, scope: str, actor: str) -> Iterator[b
                 "frame": sf.frame_index, "tempo_video": format_timestamp(sf.timestamp_s),
                 "hora_real": format_real(rt), "semelhanca": "", "distancia": "", "revisto_por": sf.created_by,
                 "revisto_em": sf.created_at.isoformat() if sf.created_at else "", "nota": sf.note,
-                "extracao": "guardado no leitor", "erro_recorte": "", "proporcao": _resized(job, video),
+                "extracao": "guardado no leitor", "erro_recorte": "", "proporcao": _resized(job, video, sf),
             })
         zf.writestr("manifesto.csv", "﻿" + manifest.getvalue())
         frames = sum(1 for v in done.values() if v[0])

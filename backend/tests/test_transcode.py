@@ -250,3 +250,49 @@ def test_light_copy_and_expiry(client, tmp_path, with_ffmpeg):
     from pathlib import Path
     assert not Path(v["playback_path"]).exists() and Path(v["stored_path"]).exists()
     assert any(e["action"] == "storage.playback_expired" for e in client.get("/api/cases/1/audit").json())
+
+
+def test_new_copy_does_not_expire_and_old_format_is_removed(client, tmp_path, with_ffmpeg):
+    """Uma cópia acabada de criar não expira (mesmo com um uso antigo registado); a de outro formato é apagada."""
+    from datetime import UTC, datetime, timedelta
+    from pathlib import Path
+
+    from sqlmodel import Session
+
+    from app.db import get_engine
+    from app.models import Video
+
+    client.post("/api/cases", json={"name": "c"})
+    v = _upload(client, make_video(tmp_path / "dvr.avi", [(0.0, 2.0, RED)], duration_s=2, fps=10), "dvr.avi")
+    with Session(get_engine()) as s:
+        row = s.get(Video, v["id"])
+        row.playback_used_at = datetime.now(UTC) - timedelta(days=30)  # visto há 30 dias, depois libertado
+        s.add(row)
+        s.commit()
+    _open(client, v["id"])
+    mp4 = _wait_status(client, v["id"], {"ready", "failed"})
+    assert mp4["playback_status"] == "ready"
+    assert transcode.expire_unused_copies(ttl_days=14) == {}  # criada agora: não expira
+    _open(client, v["id"], "webm")  # o browser precisou do outro formato
+    webm = _wait_status(client, v["id"], {"ready", "failed"})
+    for _ in range(50):
+        webm = next(x for x in client.get("/api/cases/1/videos").json() if x["id"] == v["id"])
+        if webm["playback_format"] == "webm" and webm["playback_status"] == "ready":
+            break
+        time.sleep(0.2)
+    assert webm["playback_path"].endswith(".webm") and not Path(mp4["playback_path"]).exists()
+
+
+def test_restart_copy_after_source_change_waits_for_open(client, tmp_path, with_ffmpeg):
+    from sqlmodel import Session
+
+    from app.db import get_engine
+    from app.models import Video
+
+    client.post("/api/cases", json={"name": "c"})
+    v = _upload(client, make_video(tmp_path / "dvr.avi", [(0.0, 2.0, RED)], duration_s=2, fps=10), "dvr.avi")
+    _open(client, v["id"])
+    _wait_status(client, v["id"], {"ready"})
+    with Session(get_engine()) as s:
+        status = transcode.restart_copy(s, s.get(Video, v["id"]))
+    assert status == "on_demand"  # não converte já: só quando o vídeo voltar a ser aberto

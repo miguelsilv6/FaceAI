@@ -99,7 +99,12 @@ def load_job_data(s: Session, job: Job) -> dict[str, Any]:
         if a.kind == "places":
             label = "Pessoa desconhecida em vários locais"
         elif a.kind == "linked":
-            other = (f"Pessoa #{a.linked_person_id}" if a.linked_person_id else f"aparição #{a.linked_track_id}")
+            other_job = s.get(Job, a.linked_job_id) if a.linked_job_id else None
+            track = s.get(Track, a.linked_track_id) if a.linked_track_id else None
+            person = track.person_id if track else a.linked_person_id
+            # como na interface: "Pessoa #" só numa análise de descoberta (nas outras é o grupo da pesquisa)
+            discover = other_job is not None and (other_job.params or {}).get("mode") == "discover"
+            other = f"Pessoa #{person}" if discover and person else f"aparição #{a.linked_track_id}"
             label = f"Pode ser {other} da análise #{a.linked_job_id}"
         else:
             cp = s.get(CasePerson, a.case_person_id) if a.case_person_id else None

@@ -145,6 +145,7 @@ def free(s: Session, case_id: int, targets: list[str], *, actor: str) -> dict[st
         result["playback"] = remove(Path(v.playback_path) for v in videos if v.playback_path)
         for v in videos:  # pedida de novo quando o vídeo for aberto no leitor
             v.playback_path, v.playback_status, v.playback_progress = None, "on_demand", 0.0
+            v.playback_used_at = None
             s.add(v)
         s.commit()
     if "frames" in targets:

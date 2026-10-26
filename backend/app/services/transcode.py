@@ -25,6 +25,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from sqlalchemy import update
 from sqlmodel import Session, select
 
 from ..config import settings
@@ -184,7 +185,22 @@ def restart_copy(s: Session, video: Video, *, actor: str = "sistema") -> str:
         s.commit()
         return PENDING
     video.playback_status = ""
-    return request_playback_copy(s, video, force=bool(old), actor=actor, fmt=video.playback_format or "mp4")
+    # sem forçar: fica "on_demand" (criada quando o vídeo voltar a ser aberto) ou "not_needed"
+    return request_playback_copy(s, video, actor=actor, fmt=video.playback_format or "mp4")
+
+
+def invalidate_copy(s: Session, video: Video) -> None:
+    """O tamanho de apresentação mudou: a cópia (feita nesse tamanho) é apagada e volta a ser criada ao abrir."""
+    if not (video.playback_path or video.playback_status in (PENDING, RUNNING, READY)):
+        return
+    cancel_copies([video.id])
+    old = video.playback_path
+    if old and "_playback" in Path(old).name:
+        Path(old).unlink(missing_ok=True)
+    video.playback_path, video.playback_progress, video.playback_error = None, 0.0, ""
+    video.playback_used_at = None
+    video.playback_status = ""
+    request_playback_copy(s, video)  # on_demand (ou not_needed)
 
 
 def resume_pending_copies() -> None:
@@ -348,28 +364,33 @@ def expire_unused_copies(now: datetime | None = None, ttl_days: float | None = N
     with Session(get_engine()) as s:
         videos = list(s.exec(select(Video).where(Video.playback_status == READY, Video.playback_path.is_not(None))))
         for video in videos:
-            with _lock:
-                if video.id in _queued or video.id in _running:
-                    continue
             path = Path(video.playback_path or "")
             if path == Path(video.source_path) or "_playback" not in path.name:
                 continue  # nunca o vídeo analisado
             try:
-                used = _aware(video.playback_used_at) or datetime.fromtimestamp(path.stat().st_mtime, UTC)
-                size = path.stat().st_size
+                st = path.stat()
             except OSError:
-                used, size = None, 0
+                st = None
+            # o mais recente entre o último uso e a criação do ficheiro (uma cópia acabada de fazer não expira)
+            created = datetime.fromtimestamp(st.st_mtime, UTC) if st else None
+            used = max((d for d in (_aware(video.playback_used_at), created) if d is not None), default=None)
             if used is not None and used > cutoff:
                 continue
-            path.unlink(missing_ok=True)
-            video.playback_path, video.playback_status, video.playback_progress = None, ON_DEMAND, 0.0
-            video.playback_used_at = None
-            s.add(video)
+            with _lock:  # sem corrida com um pedido de cópia: só se o estado ainda for o lido
+                if video.id in _queued or video.id in _running:
+                    continue
+                done = s.execute(update(Video).where(Video.id == video.id, Video.playback_status == READY,
+                                                     Video.playback_path == video.playback_path)
+                                 .values(playback_path=None, playback_status=ON_DEMAND, playback_progress=0.0,
+                                         playback_used_at=None).execution_options(synchronize_session=False))
+                s.commit()
+                if done.rowcount != 1:
+                    continue
+                path.unlink(missing_ok=True)
             agg = out.setdefault(video.case_id, {"copies": 0, "bytes": 0, "video_ids": []})
             agg["copies"] += 1
-            agg["bytes"] += size
+            agg["bytes"] += st.st_size if st else 0
             agg["video_ids"].append(video.id)
-        s.commit()
         for case_id, agg in out.items():
             log_event(s, "storage.playback_expired", case_id=case_id, actor="sistema",
                       details={**agg, "ttl_days": ttl,
@@ -402,10 +423,11 @@ def _transcode(video_id: int) -> None:
     crf = settings.playback_crf
     if fmt == "webm":  # VP9 em tempo real: mais lento que H.264 mas reproduz em qualquer browser moderno
         codec = ["-c:v", "libvpx-vp9", "-deadline", "realtime", "-cpu-used", "8", "-row-mt", "1",
-                 "-crf", str(crf + 10), "-b:v", "0"]
+                 "-crf", str(min(63, crf + 10)), "-b:v", "0"]
     else:
         codec = ["-c:v", "libx264", "-preset", "veryfast", "-crf", str(crf), "-movflags", "+faststart"]
-    codec += ["-g", str(max(1, round((video.fps or 25) * 2)))]  # frame-chave a cada 2 s: saltos rápidos
+    # frame-chave a cada 2 s (saltos rápidos); limitado, porque o fps de alguns ficheiros de DVR vem errado
+    codec += ["-g", str(max(1, min(120, round((video.fps or 25) * 2))))]
     threads = str(settings.cpu_threads or max(1, (os.cpu_count() or 2) // 2))
     cmd = [
         "ffmpeg", "-nostdin", "-y", "-loglevel", "error", "-nostats", "-progress", "pipe:1",
@@ -440,6 +462,9 @@ def _transcode(video_id: int) -> None:
             lines = errlog.read().strip().splitlines()
             raise RuntimeError(lines[-1] if lines else f"o ffmpeg terminou com o código {proc.returncode}")
         tmp.replace(dst)
+        previous = video.playback_path
+        if previous and Path(previous) != dst and "_playback" in Path(previous).name:
+            Path(previous).unlink(missing_ok=True)  # cópia noutro formato (ex.: MP4 → WebM): deixa de ser usada
     except Exception as exc:  # noqa: BLE001
         errlog.close()
         tmp.unlink(missing_ok=True)
@@ -454,7 +479,8 @@ def _transcode(video_id: int) -> None:
                           details={"video_id": video_id, "error": str(exc)[:500]})
         return
     errlog.close()
-    video = _set(video_id, playback_status=READY, playback_path=str(dst), playback_progress=1.0, playback_error="")
+    video = _set(video_id, playback_status=READY, playback_path=str(dst), playback_progress=1.0, playback_error="",
+                 playback_used_at=datetime.now(UTC))  # o prazo sem uso conta a partir de agora
     if video is not None:
         with Session(get_engine()) as s:
             log_event(s, "video.playback_copy_ready", case_id=video.case_id, actor="sistema",

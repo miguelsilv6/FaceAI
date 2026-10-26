@@ -463,13 +463,15 @@ Muitos DVR gravam em modos "Lite" ou de meia resolução, com píxeis que não s
 
 - **Ajuste automático** (`services/aspect.py`), na importação e, para os vídeos já importados, uma vez no arranque. Usa-se:
   - o SAR indicado no vídeo (`ffprobe`), quando existe;
-  - senão, o tamanho do modo de DVR que corresponde à resolução: 1080P Lite, 4MP Lite, 720P Lite, 960H, D1, 2CIF ou CIF.
+  - senão (ou com SAR 1:1, que muitos DVR escrevem mesmo nos modos "Lite"), o tamanho do modo de DVR de meia largura ou meia altura que corresponde à resolução: 1080P Lite, 4MP Lite, 720P Lite ou 2CIF;
+  - D1, CIF e 960H também são tamanhos de câmaras IP com outra proporção, por isso ficam só como **sugestão** no menu do vídeo;
+  - sem `ffprobe` (ou se falhar), nada é aplicado e o vídeo volta a ser verificado no arranque seguinte. Uma análise verifica os seus vídeos ainda não verificados antes de começar.
 
   Fica na auditoria (`video.aspect_set`, ator "sistema").
-- **Alteração manual:** no menu **⋯** de cada vídeo, **Proporção da imagem…** (só o responsável ou um administrador). As opções são a automática, 16:9, 4:3, um tamanho à medida, ou a gravada. A janela mostra uma pré-visualização, pede o motivo e regista a alteração na auditoria. Uma escolha manual nunca é substituída pela automática.
+- **Alteração manual:** no menu **⋯** de cada vídeo, **Proporção da imagem…** (só o responsável ou um administrador). As opções são: **Automática**, que volta à regra acima; a sugerida; 16:9; 4:3; um tamanho à medida; ou a gravada. Alterar a proporção apaga a cópia de reprodução, que volta a ser feita no novo tamanho quando o vídeo for aberto. A janela mostra uma pré-visualização, pede o motivo e regista a alteração na auditoria. Uma escolha manual nunca é substituída pela automática.
 - **O ficheiro e o SHA-256 não mudam:** a proporção é só um dado de apresentação (`Video.aspect`). O leitor mostra o vídeo com a proporção certa, sem criar cópias.
 - **Análise:** cada frame é redimensionado (bicúbica) para o tamanho de apresentação antes da deteção. Por isso as caixas, os recortes, os frames (anotado e original) e os frames guardados ficam nesse tamanho.
-  - A análise regista o tamanho usado (`job.environment["display"]`), e mantém-no mesmo que a proporção do vídeo mude depois. Os resultados avisam quando isso acontece; é preciso repetir a análise para aplicar a nova proporção.
+  - A análise regista o tamanho usado, com a origem e o motivo (`job.environment["display"]`, também no evento `job.started` da auditoria), e mantém-no mesmo que a proporção do vídeo mude depois. Os resultados avisam quando isso acontece; é preciso repetir a análise para aplicar a nova proporção.
   - O relatório indica a resolução gravada e o tamanho analisado. No ZIP de frames validados, a coluna `proporcao` do manifesto indica o redimensionamento. O frame exato, sem redimensionamento, pode sempre ser extraído do vídeo pelo n.º de frame.
 - A zona da hora (OCR) é guardada em frações do frame, por isso não muda com a proporção.
 

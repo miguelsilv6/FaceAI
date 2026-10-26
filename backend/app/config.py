@@ -65,7 +65,7 @@ class Settings:
     # Cópias de reprodução (só para ver no browser; a análise usa sempre o original): criadas quando o vídeo é
     # aberto, com no máximo esta altura e esta qualidade, e apagadas ao fim de N dias sem uso (0 = nunca).
     playback_max_height: int = field(default_factory=lambda: int(_env("PLAYBACK_MAX_HEIGHT", "720")))
-    playback_crf: int = field(default_factory=lambda: int(_env("PLAYBACK_CRF", "28")))
+    playback_crf: int = field(default_factory=lambda: min(51, max(0, int(_env("PLAYBACK_CRF", "28")))))
     playback_ttl_days: float = field(default_factory=lambda: float(_env("PLAYBACK_TTL_DAYS", "14")))
     clock_date_order: str = field(default_factory=lambda: _env("CLOCK_DATE_ORDER", "DMY").upper())
     # Alertas de disco (pasta de dados): % de ocupação e espaço livre mínimo.

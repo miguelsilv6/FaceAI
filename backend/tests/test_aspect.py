@@ -110,7 +110,10 @@ def test_analysis_uses_display_size_and_keeps_it(client, tmp_path):
     assert client.post(f"/api/videos/{v['id']}/aspect",
                        json={"width": 320, "height": 240, "reason": "meia largura"}).status_code == 200
     job = run()
-    assert job["environment"]["display"] == {str(v["id"]): [320, 240]}
+    assert job["environment"]["display"][str(v["id"])]["size"] == [320, 240]
+    assert job["environment"]["display"][str(v["id"])]["reason"] == "meia largura"
+    started = [e for e in client.get(f"/api/cases/{cid}/audit").json() if e["action"] == "job.started"]
+    assert any(e["details"]["environment"].get("display") for e in started)  # fica na auditoria
     dets = client.get(f"/api/jobs/{job['id']}/detections").json()
     assert dets and all(abs(d["w"] - d["h"]) <= 6 for d in dets)  # o quadrado volta a ser quadrado
     d = dets[0]
@@ -156,3 +159,80 @@ def test_backfill_checks_videos_imported_before(client, tmp_path):
         s.commit()
     aspect.backfill()
     assert client.get(f"/api/cases/{cid}/videos").json()[0]["aspect"]["display"] == [1920, 1080]
+
+
+def _set_aspect(vid, aspect_value):
+    from sqlmodel import Session
+
+    import app.db
+    from app.models import Video
+
+    with Session(app.db.get_engine()) as s:
+        video = s.get(Video, vid)
+        video.aspect = aspect_value
+        s.add(video)
+        s.commit()
+
+
+@needs_ffmpeg
+def test_ambiguous_mode_is_only_suggested_and_probe_failure_is_not_marked(client, tmp_path, monkeypatch):
+    from app.services import aspect
+
+    cid = client.post("/api/cases", json={"name": "D1"}).json()["id"]
+    v = _upload(client, cid, _squeezed(tmp_path, "d1.mp4", (704, 576), None))
+    assert not v["aspect"].get("display")  # D1 também é um tamanho de câmaras IP: só sugestão
+    assert v["aspect"]["suggested"]["display"] == [768, 576]
+    # "Automática" no menu: aplica a sugestão? Não: volta à regra automática (que aqui não aplica nada)
+    r = client.post(f"/api/videos/{v['id']}/aspect", json={"width": 768, "height": 576, "reason": "é 4:3"})
+    assert r.json()["aspect"]["display"] == [768, 576] and r.json()["aspect"]["source"] == "manual"
+    r = client.post(f"/api/videos/{v['id']}/aspect", json={"reason": "voltar ao automático", "auto": True})
+    a = r.json()["aspect"]
+    assert r.status_code == 200 and a.get("source") != "manual" and not a.get("display")
+    assert a["history"][-1].get("auto") is True
+
+    # sem ffprobe (ou falha): não é dado como verificado e nada é aplicado
+    monkeypatch.setattr(aspect, "probe_sar", lambda path: (False, None))
+    v2 = _upload(client, cid, _squeezed(tmp_path, "lite.mp4", (960, 1080), None))
+    assert not v2["aspect"].get("checked_at") and not v2["aspect"].get("display")
+
+
+@needs_ffmpeg
+def test_unchecked_video_is_checked_before_analysis_and_copy_invalidated(client, tmp_path):
+    cid = client.post("/api/cases", json={"name": "Corrida"}).json()["id"]
+    v = _upload(client, cid, _squeezed(tmp_path, "lite.mp4", (960, 1080), None))
+    _set_aspect(v["id"], {})  # como logo a seguir a uma atualização, antes de o arranque o verificar
+    params = {"mode": "discover", "sample_fps": 5, "motion_filter": False, "tracking": True}
+    job = wait_for_job(client, client.post(f"/api/cases/{cid}/jobs", json={"params": params}).json()["id"])
+    assert job["environment"]["display"][str(v["id"])]["size"] == [1920, 1080]
+
+    # mudar a proporção apaga a cópia de reprodução (feita no tamanho antigo)
+    from sqlmodel import Session
+
+    import app.db
+    from app.models import Video
+    fake = tmp_path / "x_playback.mp4"
+    fake.write_bytes(b"x")
+    with Session(app.db.get_engine()) as s:
+        video = s.get(Video, v["id"])
+        video.playback_path, video.playback_status = str(fake), "ready"
+        s.add(video)
+        s.commit()
+    r = client.post(f"/api/videos/{v['id']}/aspect", json={"width": 1440, "height": 1080, "reason": "4:3"})
+    assert r.status_code == 200 and not fake.exists() and r.json()["playback_path"] is None
+    assert r.json()["playback_status"] in ("not_needed", "on_demand", "unavailable")  # sem ffmpeg nos testes
+
+
+def test_aspect_change_refused_while_extracting(client, tmp_path):
+    cid = client.post("/api/cases", json={"name": "Extração"}).json()["id"]
+    v = _upload(client, cid, make_video(tmp_path / "v.mp4", [(0.5, 1.5, RED)], duration_s=2, fps=10))
+    from sqlmodel import Session
+
+    import app.db
+    from app.models import Video
+    with Session(app.db.get_engine()) as s:
+        video = s.get(Video, v["id"])
+        video.extraction_status = "running"
+        s.add(video)
+        s.commit()
+    r = client.post(f"/api/videos/{v['id']}/aspect", json={"width": 640, "height": 240, "reason": "teste"})
+    assert r.status_code == 409

@@ -171,6 +171,7 @@ export default function Results() {
 
   const video = videos.find((v) => v.id === videoId) ?? null;
   const converting = !!video && preparingCopy(video); // inclui "on_demand": a cópia é pedida logo abaixo
+  const copyRunning = video?.playback_status === "pending" || video?.playback_status === "running";
   // Atualiza o estado da cópia de reprodução. Depende só do caso e dos vídeos (valores estáveis): o objeto `job`
   // é substituído a cada 2 s enquanto a análise decorre, o que reiniciava o intervalo antes de ele disparar.
   const caseId = job?.case_id;
@@ -181,7 +182,7 @@ export default function Results() {
     const vs = await api.videos(caseId);
     const byId = new Map(vs.filter((v) => ids.has(v.id)).map((v) => [v.id, v]));
     setVideos((cur) => cur.map((v) => byId.get(v.id) ?? v)); // mantém a ordem por local
-  }, 3000, converting && caseId != null);
+  }, 3000, copyRunning && caseId != null);
   // Cópia leve só para visualização deste vídeo (as dos outros vídeos são pedidas quando forem abertos).
   const createPlaybackCopy = async (format?: "mp4" | "webm") => {
     if (!video) return;
@@ -189,7 +190,11 @@ export default function Results() {
       const updated = await api.createPlaybackCopy(video.id, format);
       setVideos((vs) => vs.map((v) => (v.id === updated.id ? updated : v)));
       setPlayError(null);
+      if (updated.playback_status === "on_demand") onDemandAsked.current.delete(updated.id); // tenta mais tarde
     } catch (e) {
+      onDemandAsked.current.delete(video.id);
+      setVideos((vs) => vs.map((v) => (v.id === video.id && v.playback_status === "on_demand"
+        ? { ...v, playback_status: "failed", playback_error: e instanceof Error ? e.message : String(e) } : v)));
       notifyError(e);
     }
   };
@@ -320,15 +325,17 @@ export default function Results() {
   const placesOf = (p: Person) => [...new Set(p.video_ids.map((v) => videos.find((x) => x.id === v)?.location_id)
     .filter((l): l is number => l != null))].map((l) => locations.find((x) => x.id === l)?.name ?? `#${l}`);
   const [multiPlace, setMultiPlace] = useState(false);
+  // o mesmo mínimo de locais que os alertas da análise (alert_min_locations), pelo menos 2
+  const minPlaces = Math.max(2, Number(job?.params.alert_min_locations ?? 2) || 2);
   const visiblePersons = useMemo(() => {
     const shown = persons.filter((p) => (showRejected || p.review_status !== "rejected") && inReview(p.review_status)
-      && (!multiPlace || placesOf(p).length > 1));
+      && (!multiPlace || placesOf(p).length >= minPlaces));
     if (order === "time") {
       return [...shown].sort((a, b) => a.first.video_id - b.first.video_id || a.first.start_s - b.first.start_s);
     }
     if (order === "quality") return [...shown].sort((a, b) => b.best_quality - a.best_quality);
     return shown; // por omissão: a pessoa 1 é a que mais aparece
-  }, [persons, order, showRejected, reviewFilter, multiPlace, videos, locations]);
+  }, [persons, order, showRejected, reviewFilter, multiPlace, minPlaces, videos, locations]);
   const hasTracks = tracks.length > 0;
   const showPersons = discover && view === "persons" && trackFilter == null;
   const showTracks = hasTracks && view === "tracks" && trackFilter == null;
@@ -839,12 +846,13 @@ export default function Results() {
           </Stack>
         ) : showPersons ? (
           visiblePersons.length === 0 ? (
-            <Text c="dimmed">{running ? "As pessoas são agrupadas no fim da análise…" : "Não foram encontradas faces."}</Text>
+            <Text c="dimmed">{running ? "As pessoas são agrupadas no fim da análise…"
+              : persons.length ? "Nenhuma pessoa corresponde aos filtros." : "Não foram encontradas faces."}</Text>
           ) : (
             <><SimpleGrid cols={{ base: 1, xs: 2, sm: 3, md: 4, xl: 5 }}>
               {visiblePersons.slice(0, limit).map((p) => (
                 <PersonCard key={p.person_id} person={p} selected={personFilter === p.person_id}
-                  locations={placesOf(p)}
+                  locations={placesOf(p)} minPlaces={minPlaces}
                   others={persons.filter((o) => o.person_id !== p.person_id)}
                   firstRealTime={realTime(videoById.get(p.first.video_id), p.first.start_s)}
                   onSelect={selectPerson} onReview={reviewPerson} onMerge={mergePerson}
